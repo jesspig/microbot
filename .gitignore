@@ -33,3 +33,15 @@ test-skills-temp/
 
 # 运行时数据
 .microbot/
+
+/.agent
+/.claude
+/.cursor
+/.gemini
+/.trae
+/.iflow
+/specs
+
+GEMINI.md
+CLAUDE.md
+IFLOW.md
