@@ -5,8 +5,10 @@ export {
   type LLMMessage,
   type LLMResponse,
   type LLMToolDefinition,
-  type ILLMProvider,
+  type LLMProvider,
+  type OpenAIMessage,
   parseOpenAIResponse,
+  toOpenAIMessages,
 } from './base';
 
 // Provider 实现

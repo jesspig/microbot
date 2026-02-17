@@ -1,5 +1,5 @@
-import type { ILLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse } from './base';
-import { parseOpenAIResponse } from './base';
+import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse } from './base';
+import { parseOpenAIResponse, toOpenAIMessages } from './base';
 
 /** LM Studio 配置 */
 export interface LMStudioConfig {
@@ -17,7 +17,7 @@ const DEFAULT_CONFIG: LMStudioConfig = {
  * 
  * 通过 OpenAI 兼容 API 连接本地 LM Studio。
  */
-export class LMStudioProvider implements ILLMProvider {
+export class LMStudioProvider implements LLMProvider {
   readonly name = 'lm-studio';
 
   constructor(private config: LMStudioConfig = DEFAULT_CONFIG) {}
@@ -32,7 +32,7 @@ export class LMStudioProvider implements ILLMProvider {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: model ?? this.config.defaultModel,
-        messages,
+        messages: toOpenAIMessages(messages),
         tools: tools?.length ? tools : undefined,
       }),
     });

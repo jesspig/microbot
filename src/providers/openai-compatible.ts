@@ -1,10 +1,10 @@
-import type { ILLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse } from './base';
-import { parseOpenAIResponse } from './base';
+import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse } from './base';
+import { parseOpenAIResponse, toOpenAIMessages } from './base';
 
 /** OpenAI Compatible 配置 */
 export interface OpenAICompatibleConfig {
   baseUrl: string;
-  apiKey: string;
+  apiKey?: string;
   defaultModel: string;
 }
 
@@ -12,16 +12,14 @@ export interface OpenAICompatibleConfig {
  * OpenAI Compatible Provider
  * 
  * 支持所有 OpenAI 兼容的 API 服务：
+ * - Ollama（本地，无需 apiKey）
  * - OpenAI
  * - DeepSeek
  * - Gemini
  * - OpenRouter
- * - Zhipu
- * - Moonshot
- * - MiniMax
  * 等
  */
-export class OpenAICompatibleProvider implements ILLMProvider {
+export class OpenAICompatibleProvider implements LLMProvider {
   readonly name = 'openai-compatible';
 
   constructor(private config: OpenAICompatibleConfig) {}
@@ -31,15 +29,21 @@ export class OpenAICompatibleProvider implements ILLMProvider {
     tools?: LLMToolDefinition[],
     model?: string
   ): Promise<LLMResponse> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    
+    // 本地服务（如 Ollama）无需 Authorization
+    if (this.config.apiKey) {
+      headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+    }
+
     const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.apiKey}`,
-      },
+      headers,
       body: JSON.stringify({
         model: model ?? this.config.defaultModel,
-        messages,
+        messages: toOpenAIMessages(messages),
         tools: tools?.length ? tools : undefined,
       }),
     });
@@ -58,7 +62,7 @@ export class OpenAICompatibleProvider implements ILLMProvider {
   }
 
   async isAvailable(): Promise<boolean> {
-    // 云服务只需检查 API Key 是否配置
-    return !!this.config.apiKey;
+    // 总是可用（本地服务无需 apiKey）
+    return true;
   }
 }

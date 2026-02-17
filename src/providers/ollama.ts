@@ -1,5 +1,5 @@
-import type { ILLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse } from './base';
-import { parseOpenAIResponse } from './base';
+import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse } from './base';
+import { parseOpenAIResponse, toOpenAIMessages } from './base';
 
 /** Ollama 配置 */
 export interface OllamaConfig {
@@ -17,7 +17,7 @@ const DEFAULT_CONFIG: OllamaConfig = {
  * 
  * 通过 OpenAI 兼容 API 连接本地 Ollama。
  */
-export class OllamaProvider implements ILLMProvider {
+export class OllamaProvider implements LLMProvider {
   readonly name = 'ollama';
 
   constructor(private config: OllamaConfig = DEFAULT_CONFIG) {}
@@ -27,22 +27,31 @@ export class OllamaProvider implements ILLMProvider {
     tools?: LLMToolDefinition[],
     model?: string
   ): Promise<LLMResponse> {
-    const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: model ?? this.config.defaultModel,
-        messages,
-        tools: tools?.length ? tools : undefined,
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000); // 2 分钟超时
 
-    if (!response.ok) {
-      throw new Error(`Ollama API 错误: ${response.status}`);
+    try {
+      const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: model ?? this.config.defaultModel,
+          messages: toOpenAIMessages(messages),
+          tools: tools?.length ? tools : undefined,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Ollama API 错误 (${response.status}): ${errorText}`);
+      }
+
+      const data = await response.json() as OpenAIResponse;
+      return parseOpenAIResponse(data);
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const data = await response.json() as OpenAIResponse;
-    return parseOpenAIResponse(data);
   }
 
   getDefaultModel(): string {

@@ -1,9 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from 'fs';
-import { join, basename } from 'path';
+import { join, basename, resolve } from 'path';
+import { homedir } from 'os';
 import matter from 'gray-matter';
 
 /** 技能名称验证正则：小写字母、数字、连字符 */
 const SKILL_NAME_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/** 用户技能目录 */
+const USER_SKILLS_DIR = '~/.microbot/skills';
 
 /** 技能摘要（用于启动时注入上下文） */
 export interface SkillSummary {
@@ -19,6 +23,8 @@ export interface Skill extends SkillSummary {
   license?: string;
   /** 环境兼容性要求 */
   compatibility?: string;
+  /** 是否自动加载完整内容 */
+  always?: boolean;
   /** 元数据 */
   metadata: Record<string, string>;
   /** 预批准工具列表 */
@@ -35,14 +41,16 @@ interface SkillFrontmatter {
   description?: string;
   license?: string;
   compatibility?: string;
+  always?: boolean;
   metadata?: Record<string, string>;
-  'allowed-tools'?: string;
+  'allowed-tools'?: unknown;
 }
 
 /**
  * 技能加载器
  * 
- * 从 skills 目录加载 SKILL.md 文件，遵循 Agent Skills 规范。
+ * 从多个目录加载 SKILL.md 文件，遵循 Agent Skills 规范。
+ * 加载优先级：项目 > 用户 > 内置（后加载覆盖前者）
  * 支持渐进式披露：启动时加载摘要，按需加载完整内容。
  */
 export class SkillsLoader {
@@ -57,15 +65,21 @@ export class SkillsLoader {
   load(): void {
     this.skills.clear();
 
-    // 加载内置技能
+    // 1. 加载内置技能（最低优先级）
     if (existsSync(this.builtinPath)) {
       this.loadFromDir(this.builtinPath);
     }
 
-    // 加载用户技能（优先级更高，会覆盖同名内置技能）
-    const userSkillsPath = join(this.workspacePath, 'skills');
+    // 2. 加载用户技能 ~/.microbot/skills（中等优先级）
+    const userSkillsPath = expandPath(USER_SKILLS_DIR);
     if (existsSync(userSkillsPath)) {
       this.loadFromDir(userSkillsPath);
+    }
+
+    // 3. 加载项目技能（最高优先级）
+    const projectSkillsPath = join(this.workspacePath, 'skills');
+    if (existsSync(projectSkillsPath)) {
+      this.loadFromDir(projectSkillsPath);
     }
   }
 
@@ -105,11 +119,20 @@ export class SkillsLoader {
       description: fm.description ?? '',
       license: fm.license,
       compatibility: fm.compatibility,
+      always: fm.always ?? false,
       metadata: fm.metadata ?? {},
-      allowedTools: fm['allowed-tools']?.split(/\s+/).filter(Boolean),
+      allowedTools: this.parseAllowedTools(fm['allowed-tools']),
       content: content.trim(),
       skillPath: skillDir,
     };
+  }
+
+  /** 解析 allowed-tools 字段 */
+  private parseAllowedTools(value: unknown): string[] | undefined {
+    if (!value) return undefined;
+    if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string');
+    if (typeof value === 'string') return value.split(/\s+/).filter(Boolean);
+    return undefined;
   }
 
   /** 验证技能名称 */
@@ -138,6 +161,14 @@ export class SkillsLoader {
     }));
   }
 
+  /**
+   * 获取 always=true 的技能（自动加载完整内容）
+   * 这些技能会直接注入到系统上下文中，无需 Agent 主动读取
+   */
+  getAlwaysSkills(): Skill[] {
+    return this.getAll().filter(s => s.always === true);
+  }
+
   /** 生成技能摘要 Markdown（用于注入系统提示） */
   getSummariesMarkdown(): string {
     const summaries = this.getSummaries();
@@ -151,4 +182,17 @@ export class SkillsLoader {
   get count(): number {
     return this.skills.size;
   }
+}
+
+/** 展开路径（支持 ~ 前缀） */
+function expandPath(path: string): string {
+  if (path.startsWith('~/')) {
+    return resolve(homedir(), path.slice(2));
+  }
+  return resolve(path);
+}
+
+/** 获取用户技能目录路径 */
+export function getUserSkillsPath(): string {
+  return expandPath(USER_SKILLS_DIR);
 }

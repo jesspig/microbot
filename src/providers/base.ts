@@ -65,8 +65,56 @@ export interface OpenAIResponse {
   }>;
 }
 
+/** OpenAI API 消息格式 */
+export interface OpenAIMessage {
+  role: string;
+  content: string;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
+}
+
+/**
+ * 将 LLMMessage 转换为 OpenAI API 格式
+ * 
+ * OpenAI API 要求 snake_case 字段名（tool_call_id, tool_calls）
+ */
+export function toOpenAIMessages(messages: LLMMessage[]): OpenAIMessage[] {
+  return messages.map(msg => {
+    const openaiMsg: OpenAIMessage = {
+      role: msg.role,
+      content: msg.content,
+    };
+
+    // 工具调用 ID（role=tool 时必须）
+    if (msg.toolCallId) {
+      openaiMsg.tool_call_id = msg.toolCallId;
+    }
+
+    // 工具调用列表（role=assistant 时）
+    if (msg.toolCalls?.length) {
+      openaiMsg.tool_calls = msg.toolCalls.map(tc => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: {
+          name: tc.name,
+          arguments: JSON.stringify(tc.arguments),
+        },
+      }));
+    }
+
+    return openaiMsg;
+  });
+}
+
 /** Provider 接口 */
-export interface ILLMProvider {
+export interface LLMProvider {
   /** Provider 名称 */
   readonly name: string;
   

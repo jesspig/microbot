@@ -21,7 +21,7 @@ describe('Web Tools', () => {
   describe('WebFetchTool', () => {
     it('should fetch webpage content', async () => {
       const result = await registry.execute('web_fetch', { 
-        url: 'https://github.com' 
+        url: 'https://qq.com' 
       }, defaultCtx);
       
       expect(result.length).toBeGreaterThan(0);

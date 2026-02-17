@@ -1,5 +1,5 @@
-import type { ILLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse } from './base';
-import { parseOpenAIResponse } from './base';
+import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse } from './base';
+import { parseOpenAIResponse, toOpenAIMessages } from './base';
 
 /** vLLM 配置 */
 export interface VLLMConfig {
@@ -13,7 +13,7 @@ export interface VLLMConfig {
  * 
  * 通过 OpenAI 兼容 API 连接 vLLM 服务。
  */
-export class VLLMProvider implements ILLMProvider {
+export class VLLMProvider implements LLMProvider {
   readonly name = 'vllm';
 
   constructor(private config: VLLMConfig) {}
@@ -36,7 +36,7 @@ export class VLLMProvider implements ILLMProvider {
       headers,
       body: JSON.stringify({
         model: model ?? this.config.defaultModel,
-        messages,
+        messages: toOpenAIMessages(messages),
         tools: tools?.length ? tools : undefined,
       }),
     });
