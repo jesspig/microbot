@@ -105,6 +105,7 @@ class AppImpl implements App {
       sessionStore,
       memoryStore,
       toolRegistry,
+      skillsLoader,
       {
         workspace: this.workspace,
         model: agentConfig.model,

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { AgentLoop, type AgentConfig } from '../../src/agent/loop';
-import type { ILLMProvider, LLMMessage, LLMResponse } from '../../src/providers/base';
+import type { LLMProvider, LLMMessage, LLMResponse } from '../../src/providers/base';
 import type { MessageBus } from '../../src/bus/queue';
 import type { SessionStore } from '../../src/session/store';
 import type { MemoryStore } from '../../src/memory/store';
@@ -8,7 +8,7 @@ import type { ToolRegistry } from '../../src/tools/registry';
 import type { InboundMessage } from '../../src/bus/events';
 
 // Mock implementations
-class MockProvider implements ILLMProvider {
+class MockProvider implements LLMProvider {
   readonly name = 'mock';
   private responses: LLMResponse[] = [];
   private callCount = 0;
@@ -101,6 +101,12 @@ const mockToolRegistry: ToolRegistry = {
   getDefinitions: () => [],
 } as ToolRegistry;
 
+const mockSkillsLoader = {
+  getSummaries: () => [],
+  getAlwaysSkills: () => [],
+  count: 0,
+};
+
 describe('AgentLoop', () => {
   let agent: AgentLoop;
   let bus: MockBus;
@@ -124,6 +130,7 @@ describe('AgentLoop', () => {
       sessionStore,
       mockMemoryStore,
       mockToolRegistry,
+      mockSkillsLoader as any,
       config
     );
   });
@@ -188,6 +195,7 @@ describe('AgentLoop', () => {
         sessionStore,
         mockMemoryStore,
         toolRegistry,
+        mockSkillsLoader as any,
         config
       );
 

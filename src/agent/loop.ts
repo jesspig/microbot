@@ -4,6 +4,7 @@ import type { SessionStore } from '../session/store';
 import type { MemoryStore } from '../memory/store';
 import type { ToolRegistry, ToolContext } from '../tools/registry';
 import type { InboundMessage, OutboundMessage, SessionKey } from '../bus/events';
+import type { SkillsLoader } from '../skills/loader';
 import { ContextBuilder } from './context';
 import { getLogger } from '@logtape/logtape';
 
@@ -44,6 +45,7 @@ export class AgentLoop {
     private sessionStore: SessionStore,
     private memoryStore: MemoryStore,
     private toolRegistry: ToolRegistry,
+    private skillsLoader: SkillsLoader,
     private config: AgentConfig = DEFAULT_CONFIG
   ) {}
 
@@ -52,7 +54,7 @@ export class AgentLoop {
    */
   async run(): Promise<void> {
     this.running = true;
-    log.info('Agent 循环已启动');
+    log.info('Agent 循环已启动，加载 {count} 个技能', { count: this.skillsLoader.count });
 
     while (this.running) {
       try {
@@ -91,11 +93,22 @@ export class AgentLoop {
     const currentDir = msg.currentDir || this.config.workspace;
     contextBuilder.setCurrentDir(currentDir);
     
+    // 注入 Always 技能（自动加载完整内容）
+    const alwaysSkills = this.skillsLoader.getAlwaysSkills();
+    if (alwaysSkills.length > 0) {
+      contextBuilder.setAlwaysSkills(alwaysSkills);
+      log.debug('Always 技能: {skills}', { skills: alwaysSkills.map(s => s.name).join(', ') });
+    }
+    
+    // 注入技能摘要（渐进式披露）
+    contextBuilder.setSkillSummaries(this.skillsLoader.getSummaries());
+    
     const history = this.getHistory(sessionKey);
     let messages = await contextBuilder.buildMessages(history, msg.content, msg.media);
-    log.debug('上下文: {messages} 条消息, {history} 条历史, currentDir: {dir}', { 
+    log.debug('上下文: {messages} 条消息, {history} 条历史, skills: {skills}, currentDir: {dir}', { 
       messages: messages.length, 
       history: history.length,
+      skills: this.skillsLoader.count,
       dir: currentDir 
     });
 
@@ -120,12 +133,28 @@ export class AgentLoop {
 
         // 执行工具
         for (const tc of response.toolCalls) {
-          log.info('执行工具: {tool}', { tool: tc.name });
+          // 格式化参数显示（截断过长的值）
+          const argsPreview = this.formatToolArgs(tc.arguments);
+          log.info('[Tool] 调用: {name}({args})', { name: tc.name, args: argsPreview });
+          
+          const startTime = Date.now();
           const result = await this.toolRegistry.execute(
             tc.name,
             tc.arguments,
             this.createToolContext(msg)
           );
+          const elapsed = Date.now() - startTime;
+          
+          // 判断执行结果
+          const isSuccess = !result.startsWith('错误') && !result.startsWith('参数错误') && !result.startsWith('执行错误');
+          const resultPreview = this.formatToolResult(result);
+          
+          if (isSuccess) {
+            log.info('[Tool] 成功: {name} ({ms}ms) → {result}', { name: tc.name, ms: elapsed, result: resultPreview });
+          } else {
+            log.error('[Tool] 失败: {name} ({ms}ms) → {result}', { name: tc.name, ms: elapsed, result: resultPreview });
+          }
+          
           messages = contextBuilder.addToolResult(messages, tc.id, result);
         }
       } else {
@@ -194,5 +223,36 @@ export class AgentLoop {
       currentDir: msg.currentDir || this.config.workspace,
       sendToBus: async (m) => this.bus.publishOutbound(m as OutboundMessage),
     };
+  }
+
+  /**
+   * 格式化工具参数（用于日志显示）
+   */
+  private formatToolArgs(args: Record<string, unknown>): string {
+    const entries = Object.entries(args);
+    if (entries.length === 0) return '';
+
+    const parts = entries.map(([key, value]) => {
+      const valueStr = this.truncateString(JSON.stringify(value), 50);
+      return `${key}=${valueStr}`;
+    });
+
+    const result = parts.join(', ');
+    return result.length > 200 ? result.slice(0, 200) + '...' : result;
+  }
+
+  /**
+   * 格式化工具结果（用于日志显示）
+   */
+  private formatToolResult(result: string): string {
+    return this.truncateString(result.replace(/\n/g, ' '), 150);
+  }
+
+  /**
+   * 截断字符串
+   */
+  private truncateString(str: string, maxLength: number): string {
+    if (str.length <= maxLength) return str;
+    return str.slice(0, maxLength) + '...';
   }
 }

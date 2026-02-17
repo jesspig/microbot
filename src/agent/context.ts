@@ -1,5 +1,6 @@
 import type { LLMMessage, ToolCall } from '../providers/base';
 import type { MemoryStore } from '../memory/store';
+import type { SkillSummary, Skill } from '../skills/loader';
 import { loadTemplateFile } from '../config/loader';
 
 /** Bootstrap 文件列表 */
@@ -10,6 +11,8 @@ const BOOTSTRAP_FILES = ['AGENTS.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md', 'SOU
  * 
  * 构建发送给 LLM 的消息上下文，包括：
  * - 系统消息（bootstrap 文件，按层级查找）
+ * - Always 技能（自动加载完整内容）
+ * - 技能摘要（渐进式披露）
  * - 记忆上下文
  * - 历史消息
  * - 当前消息
@@ -17,6 +20,10 @@ const BOOTSTRAP_FILES = ['AGENTS.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md', 'SOU
 export class ContextBuilder {
   /** 当前工作目录（用于目录级配置查找） */
   private currentDir: string;
+  /** 技能摘要列表 */
+  private skillSummaries: SkillSummary[] = [];
+  /** Always 技能（自动加载完整内容） */
+  private alwaysSkills: Skill[] = [];
 
   /**
    * @param workspace - 工作目录（项目级）
@@ -46,6 +53,21 @@ export class ContextBuilder {
   }
 
   /**
+   * 设置技能摘要
+   */
+  setSkillSummaries(summaries: SkillSummary[]): void {
+    this.skillSummaries = summaries;
+  }
+
+  /**
+   * 设置 Always 技能
+   * 这些技能会自动加载完整内容到上下文
+   */
+  setAlwaysSkills(skills: Skill[]): void {
+    this.alwaysSkills = skills;
+  }
+
+  /**
    * 构建消息列表
    * @param history - 历史消息
    * @param currentMessage - 当前消息内容
@@ -65,6 +87,18 @@ export class ContextBuilder {
       messages.push({ role: 'system', content: systemContent });
     }
 
+    // Always 技能（自动加载完整内容）
+    const alwaysContent = this.buildAlwaysSkillsContent();
+    if (alwaysContent) {
+      messages.push({ role: 'system', content: alwaysContent });
+    }
+
+    // 技能摘要（渐进式披露）
+    const skillsContent = this.buildSkillsContent();
+    if (skillsContent) {
+      messages.push({ role: 'system', content: skillsContent });
+    }
+
     // 记忆上下文
     const memoryContent = this.buildMemoryContent();
     if (memoryContent) {
@@ -81,6 +115,31 @@ export class ContextBuilder {
     messages.push({ role: 'user', content: userContent });
 
     return messages;
+  }
+
+  /**
+   * 构建 Always 技能内容
+   * 这些技能会自动加载完整内容，无需 Agent 主动读取
+   */
+  private buildAlwaysSkillsContent(): string {
+    if (this.alwaysSkills.length === 0) return '';
+
+    const parts = this.alwaysSkills.map(skill => {
+      const header = `## 技能: ${skill.name}\n\n${skill.description}`;
+      return `${header}\n\n${skill.content}`;
+    });
+
+    return `# 自动加载技能\n\n${parts.join('\n\n---\n\n')}`;
+  }
+
+  /**
+   * 构建技能摘要内容
+   */
+  private buildSkillsContent(): string {
+    if (this.skillSummaries.length === 0) return '';
+
+    const lines = this.skillSummaries.map(s => `- **${s.name}**: ${s.description}`);
+    return `# 可用技能\n\n${lines.join('\n')}\n\n使用 \`read_file\` 工具读取技能详细内容（路径: skills/<技能名>/SKILL.md）`;
   }
 
   /**
