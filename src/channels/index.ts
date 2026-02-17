@@ -7,6 +7,5 @@ export { ChannelManager } from './manager';
 // 通道实现
 export { FeishuChannel } from './feishu';
 export { QQChannel } from './qq';
-export { EmailChannel } from './email';
 export { DingTalkChannel } from './dingtalk';
 export { WeComChannel } from './wecom';

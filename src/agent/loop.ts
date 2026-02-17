@@ -5,6 +5,9 @@ import type { MemoryStore } from '../memory/store';
 import type { ToolRegistry, ToolContext } from '../tools/registry';
 import type { InboundMessage, OutboundMessage, SessionKey } from '../bus/events';
 import { ContextBuilder } from './context';
+import { getLogger } from '@logtape/logtape';
+
+const log = getLogger(['agent']);
 
 /** Agent 配置 */
 export interface AgentConfig {
@@ -49,17 +52,21 @@ export class AgentLoop {
    */
   async run(): Promise<void> {
     this.running = true;
+    log.info('Agent 循环已启动');
 
     while (this.running) {
       try {
+        log.debug('等待消息...');
         const msg = await this.bus.consumeInbound();
+        const preview = msg.content.slice(0, 30).replace(/\n/g, ' ');
+        log.info('收到消息: {preview}', { preview: preview + (msg.content.length > 30 ? '...' : '') });
         const response = await this.processMessage(msg);
         if (response) {
           await this.bus.publishOutbound(response);
+          log.info('回复已发送');
         }
       } catch (error) {
-        // 继续处理下一条消息
-        console.error('处理消息失败:', error);
+        log.error('处理消息失败: {error}', { error: error instanceof Error ? error.message : String(error) });
       }
     }
   }
@@ -81,6 +88,7 @@ export class AgentLoop {
     const contextBuilder = new ContextBuilder(this.config.workspace, this.memoryStore);
     const history = this.getHistory(sessionKey);
     let messages = await contextBuilder.buildMessages(history, msg.content, msg.media);
+    log.debug('上下文: {messages} 条消息, {history} 条历史', { messages: messages.length, history: history.length });
 
     // ReAct 循环
     let iteration = 0;
@@ -88,6 +96,7 @@ export class AgentLoop {
 
     while (iteration < this.config.maxIterations) {
       iteration++;
+      log.debug('[{iteration}/{max}] 调用 LLM...', { iteration, max: this.config.maxIterations });
 
       const tools = this.getToolDefinitions();
       const response = await this.provider.chat(messages, tools, this.config.model);
@@ -102,6 +111,7 @@ export class AgentLoop {
 
         // 执行工具
         for (const tc of response.toolCalls) {
+          log.info('执行工具: {tool}', { tool: tc.name });
           const result = await this.toolRegistry.execute(
             tc.name,
             tc.arguments,
@@ -123,6 +133,8 @@ export class AgentLoop {
     this.sessionStore.addMessage(sessionKey, 'user', msg.content);
     this.sessionStore.addMessage(sessionKey, 'assistant', finalContent);
 
+    const replyPreview = finalContent.slice(0, 100).replace(/\n/g, ' ');
+    log.info('回复: {content}', { content: replyPreview + (finalContent.length > 100 ? '...' : '') });
     return {
       channel: msg.channel,
       chatId: msg.chatId,

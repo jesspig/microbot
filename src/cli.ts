@@ -10,10 +10,28 @@
  */
 
 import { parseArgs } from 'util';
+import { configure, getConsoleSink, getLogger } from '@logtape/logtape';
+import { prettyFormatter } from '@logtape/pretty';
 import { createApp } from './index';
 import type { App } from './types/interfaces';
 
 const VERSION = '1.0.0';
+
+/** 初始化 LogTape */
+async function initLogTape(): Promise<void> {
+  await configure({
+    sinks: {
+      console: getConsoleSink({ formatter: prettyFormatter }),
+    },
+    loggers: [
+      { category: [], sinks: ['console'], lowestLevel: 'info' },
+      { category: ['logtape', 'meta'], lowestLevel: 'warning' },
+    ],
+    reset: true,
+  });
+}
+
+const log = getLogger(['cli']);
 
 /** 显示帮助信息 */
 function showHelp(): void {
@@ -52,26 +70,31 @@ function showStatus(app: App): void {
   const provider = app.getProviderStatus();
   const cronCount = app.getCronCount();
 
-  console.log('\nmicrobot 状态\n');
-  console.log(`运行中的通道: ${channels.length > 0 ? channels.join(', ') : '无'}`);
-  console.log(`Provider: ${provider}`);
-  console.log(`Cron 任务: ${cronCount} 个\n`);
+  console.log();
+  console.log('\x1b[1m\x1b[36mmicrobot 状态\x1b[0m');
+  console.log('─'.repeat(50));
+  console.log(`  \x1b[2m通道:\x1b[0m ${channels.length > 0 ? channels.join(', ') : '无'}`);
+  console.log(`  \x1b[2mProvider:\x1b[0m ${provider}`);
+  console.log(`  \x1b[2mCron 任务:\x1b[0m ${cronCount} 个`);
+  console.log();
 }
 
 /** 显示 Cron 任务列表 */
 function showCronList(app: App): void {
   const jobs = app.listCronJobs();
 
-  console.log('\n定时任务列表\n');
+  console.log();
+  console.log('\x1b[1m\x1b[36m定时任务\x1b[0m');
+  console.log('─'.repeat(50));
 
   if (jobs.length === 0) {
-    console.log('暂无任务\n');
+    log.info('暂无任务');
     return;
   }
 
   for (const job of jobs) {
     const schedule = job.scheduleValue ? `: ${job.scheduleValue}` : '';
-    console.log(`[${job.id}] ${job.name} - ${job.scheduleKind}${schedule}`);
+    console.log(`  \x1b[2m${job.name}:\x1b[0m ${job.scheduleKind}${schedule}`);
   }
   console.log();
 }
@@ -101,14 +124,14 @@ async function addCronJob(app: App, args: string[]): Promise<void> {
     return;
   }
 
-  console.log(`\n任务已添加: ${name}`);
-  console.log('注意: 当前会话需要重启才能生效\n');
+  log.info('任务已添加: {name}', { name });
+  log.debug('当前会话需要重启才能生效');
 }
 
 /** 删除 Cron 任务 */
 function removeCronJob(app: App, taskId: string): void {
-  console.log(`\n任务 ${taskId} 删除请求已记录`);
-  console.log('注意: 当前会话需要重启才能生效\n');
+  log.info('任务 {taskId} 已删除', { taskId });
+  log.debug('当前会话需要重启才能生效');
 }
 
 /** 处理 Cron 子命令 */
@@ -125,19 +148,22 @@ async function handleCron(app: App, subcommand: string, args: string[]): Promise
     case 'rm':
       const taskId = args[0];
       if (!taskId) {
-        console.log('用法: microbot cron remove <任务ID>');
+        log.warn('用法: microbot cron remove <任务ID>');
         return;
       }
       removeCronJob(app, taskId);
       break;
     default:
-      console.log('用法: microbot cron <list|add|remove>');
+      log.warn('用法: microbot cron <list|add|remove>');
   }
 }
 
 /** 启动服务 */
 async function startService(configPath?: string): Promise<void> {
-  console.log('正在启动 microbot...\n');
+  console.log('\x1b[2J\x1b[H'); // 清屏
+  console.log();
+  console.log('\x1b[1m\x1b[36mmicrobot\x1b[0m');
+  console.log('─'.repeat(50));
 
   const app = await createApp(configPath);
 
@@ -148,13 +174,14 @@ async function startService(configPath?: string): Promise<void> {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
-    console.log('\n正在关闭 microbot...');
+    console.log();
+    log.info('正在关闭...');
     try {
       await app.stop();
-      console.log('microbot 已停止');
+      log.info('已停止');
       process.exit(0);
     } catch (error) {
-      console.error('关闭失败:', error);
+      log.error('关闭失败: {error}', { error });
       process.exit(1);
     }
   };
@@ -165,18 +192,23 @@ async function startService(configPath?: string): Promise<void> {
   // 启动
   try {
     await app.start();
-    console.log('microbot 已启动');
-    console.log(`通道: ${app.getRunningChannels().join(', ') || '无'}`);
-    console.log(`Provider: ${app.getProviderStatus()}`);
-    console.log('按 Ctrl+C 停止\n');
+    console.log('─'.repeat(50));
+    console.log(`  \x1b[2m通道:\x1b[0m ${app.getRunningChannels().join(', ') || '无'}`);
+    console.log(`  \x1b[2mProvider:\x1b[0m ${app.getProviderStatus()}`);
+    console.log();
+    log.debug('按 Ctrl+C 停止');
+    console.log('─'.repeat(50));
   } catch (error) {
-    console.error('启动失败:', error);
+    log.error('启动失败: {error}', { error });
     process.exit(1);
   }
 }
 
 /** CLI 主入口 */
 export async function runCli(argv: string[] = process.argv.slice(2)): Promise<void> {
+  // 初始化 LogTape（必须在所有日志调用之前）
+  await initLogTape();
+
   // 解析全局选项
   const parsed = parseArgs({
     args: argv,
@@ -230,8 +262,8 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
       break;
 
     default:
-      console.log(`未知命令: ${command}`);
-      console.log('运行 microbot --help 查看帮助');
+      log.warn('未知命令: {command}', { command });
+      log.info('运行 microbot --help 查看帮助');
   }
 }
 

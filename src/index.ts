@@ -15,14 +15,17 @@ import { HeartbeatService } from './heartbeat/service';
 import { SkillsLoader } from './skills/loader';
 import { ToolRegistry } from './tools/registry';
 import { ReadFileTool, WriteFileTool, ListDirTool, ExecTool, WebSearchTool, WebFetchTool, MessageTool } from './tools';
-import { LLMGateway, OllamaProvider, LMStudioProvider, VLLMProvider, OpenAICompatibleProvider } from './providers';
+import { LLMGateway, OpenAICompatibleProvider } from './providers';
 import { AgentLoop } from './agent/loop';
 import { ChannelManager } from './channels/manager';
-import { FeishuChannel, QQChannel, EmailChannel, DingTalkChannel, WeComChannel } from './channels';
+import { FeishuChannel, QQChannel, DingTalkChannel, WeComChannel } from './channels';
 import type { App, CronJobSummary } from './types/interfaces';
-import type { Config } from './config/schema';
+import type { Config, ProviderEntry } from './config/schema';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { getLogger } from '@logtape/logtape';
+
+const log = getLogger(['app']);
 
 /** 获取内置技能路径 */
 function getBuiltinSkillsPath(): string {
@@ -48,7 +51,9 @@ class AppImpl implements App {
     private workspace: string
   ) {
     this.channelManager = new ChannelManager();
-    this.gateway = new LLMGateway();
+    // 第一个 provider 作为默认
+    const firstProvider = Object.keys(config.providers)[0] || 'ollama';
+    this.gateway = new LLMGateway({ defaultProvider: firstProvider, fallbackEnabled: true });
   }
 
   async start(): Promise<void> {
@@ -111,7 +116,7 @@ class AppImpl implements App {
       this.cronStore,
       async (job) => {
         await messageBus.publishInbound({
-          channel: (job.channel as 'feishu' | 'qq' | 'email' | 'dingtalk' | 'wecom') || 'system',
+          channel: (job.channel as 'feishu' | 'qq' | 'dingtalk' | 'wecom') || 'system',
           senderId: 'cron',
           chatId: job.toAddress || 'system',
           content: job.message,
@@ -148,8 +153,25 @@ class AppImpl implements App {
     // 11. 启动通道
     await this.channelManager.startAll();
 
-    // 12. 启动 Agent 循环（在后台运行）
+    // 12. 启动出站消息消费者
+    this.startOutboundConsumer(messageBus);
+
+    // 13. 启动 Agent 循环（在后台运行）
     this.agentLoop.run().catch(console.error);
+  }
+
+  /** 启动出站消息消费者 */
+  private startOutboundConsumer(messageBus: MessageBus): void {
+    (async () => {
+      while (true) {
+        try {
+          const msg = await messageBus.consumeOutbound();
+          await this.channelManager.send(msg);
+        } catch (error) {
+          log.error('发送消息失败: {error}', { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    })().catch(console.error);
   }
 
   async stop(): Promise<void> {
@@ -197,44 +219,31 @@ class AppImpl implements App {
 
   /** 初始化 Provider */
   private initProviders(): void {
-    const providers = this.config.providers;
+    const providers = this.config.providers as Record<string, ProviderEntry | undefined>;
     const defaultModel = this.config.agents.defaults.model;
+    let hasProvider = false;
 
-    // Ollama
-    if (providers.ollama) {
-      const p = new OllamaProvider({
-        baseUrl: providers.ollama.baseUrl,
-        defaultModel: providers.ollama.models?.[0] ?? defaultModel,
+    // 遍历所有 provider 配置（支持自定义名称）
+    for (const [name, config] of Object.entries(providers)) {
+      if (!config) continue;
+
+      const provider = new OpenAICompatibleProvider({
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        defaultModel: config.models?.[0] ?? defaultModel,
       });
-      this.gateway.registerProvider('ollama', p, providers.ollama.models || ['qwen3'], 1);
+
+      this.gateway.registerProvider(name, provider, config.models || ['*'], hasProvider ? 100 : 1);
+      hasProvider = true;
     }
 
-    // LM Studio
-    if (providers.lmStudio) {
-      const p = new LMStudioProvider({
-        baseUrl: providers.lmStudio.baseUrl,
-        defaultModel: providers.lmStudio.models?.[0] ?? defaultModel,
+    // 默认 Provider：如果没有配置任何 provider，自动注册 Ollama
+    if (!hasProvider) {
+      const provider = new OpenAICompatibleProvider({
+        baseUrl: 'http://localhost:11434/v1',
+        defaultModel,
       });
-      this.gateway.registerProvider('lm-studio', p, providers.lmStudio.models || ['*'], 2);
-    }
-
-    // vLLM
-    if (providers.vllm) {
-      const p = new VLLMProvider({
-        baseUrl: providers.vllm.baseUrl,
-        defaultModel: providers.vllm.models?.[0] ?? defaultModel,
-      });
-      this.gateway.registerProvider('vllm', p, providers.vllm.models || ['*'], 3);
-    }
-
-    // OpenAI Compatible
-    if (providers.openaiCompatible) {
-      const p = new OpenAICompatibleProvider({
-        baseUrl: providers.openaiCompatible.baseUrl,
-        apiKey: providers.openaiCompatible.apiKey,
-        defaultModel: providers.openaiCompatible.models?.[0] ?? defaultModel,
-      });
-      this.gateway.registerProvider('openai-compatible', p, providers.openaiCompatible.models || ['*'], 4);
+      this.gateway.registerProvider('ollama', provider, [defaultModel], 1);
     }
   }
 
@@ -257,20 +266,6 @@ class AppImpl implements App {
       const channel = new QQChannel(bus, {
         appId: channels.qq.appId,
         secret: channels.qq.secret,
-        allowFrom: [],
-      });
-      this.channelManager.register(channel);
-    }
-
-    // 邮箱
-    if (channels.email?.enabled && channels.email.consentGranted) {
-      const channel = new EmailChannel(bus, {
-        imapHost: channels.email.imapHost || '',
-        imapPort: channels.email.imapPort || 993,
-        smtpHost: channels.email.smtpHost || '',
-        smtpPort: channels.email.smtpPort || 587,
-        user: channels.email.user || '',
-        password: channels.email.password || '',
         allowFrom: [],
       });
       this.channelManager.register(channel);
