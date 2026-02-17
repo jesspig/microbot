@@ -1,5 +1,5 @@
 import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse } from './base';
-import { parseOpenAIResponse } from './base';
+import { parseOpenAIResponse, toOpenAIMessages } from './base';
 
 /** Ollama 配置 */
 export interface OllamaConfig {
@@ -36,7 +36,7 @@ export class OllamaProvider implements LLMProvider {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: model ?? this.config.defaultModel,
-          messages,
+          messages: toOpenAIMessages(messages),
           tools: tools?.length ? tools : undefined,
         }),
         signal: controller.signal,

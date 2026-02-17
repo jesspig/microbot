@@ -1,5 +1,5 @@
 import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse } from './base';
-import { parseOpenAIResponse } from './base';
+import { parseOpenAIResponse, toOpenAIMessages } from './base';
 
 /** vLLM 配置 */
 export interface VLLMConfig {
@@ -36,7 +36,7 @@ export class VLLMProvider implements LLMProvider {
       headers,
       body: JSON.stringify({
         model: model ?? this.config.defaultModel,
-        messages,
+        messages: toOpenAIMessages(messages),
         tools: tools?.length ? tools : undefined,
       }),
     });

@@ -6,7 +6,9 @@ export {
   type LLMResponse,
   type LLMToolDefinition,
   type LLMProvider,
+  type OpenAIMessage,
   parseOpenAIResponse,
+  toOpenAIMessages,
 } from './base';
 
 // Provider 实现
