@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { AgentLoop, type AgentConfig } from '../../src/agent/loop';
-import type { LLMProvider, LLMMessage, LLMResponse } from '../../src/providers/base';
-import type { MessageBus } from '../../src/bus/queue';
-import type { SessionStore } from '../../src/session/store';
-import type { MemoryStore } from '../../src/memory/store';
-import type { ToolRegistry } from '../../src/tools/registry';
-import type { InboundMessage } from '../../src/bus/events';
+import { AgentLoop, type AgentConfig } from '../../src/core/agent/loop';
+import type { LLMProvider, LLMMessage, LLMResponse } from '../../src/core/providers/base';
+import type { MessageBus } from '../../src/core/bus/queue';
+import type { SessionStore } from '../../src/extensions/storage/session/store';
+import type { MemoryStore } from '../../src/extensions/storage/memory/store';
+import type { ToolRegistry } from '../../src/extensions/tool/registry';
+import type { InboundMessage } from '../../src/core/bus/events';
 
 // Mock implementations
 class MockProvider implements LLMProvider {

@@ -34,8 +34,17 @@ const TEMPLATE_FILE_NAMES = ['SOUL.md', 'AGENTS.md', 'USER.md', 'IDENTITY.md', '
 
 /** 获取系统级默认目录 */
 function getSystemDefaultsDir(): string {
-  // 获取当前模块所在目录，向上查找到 src/defaults
+  // 获取当前模块所在目录，向上查找到 workspace/
+  // 优先使用项目根目录的 workspace/，回退到 src/defaults/
   const currentDir = dirname(fileURLToPath(import.meta.url));
+  
+  // 尝试项目根目录的 workspace/
+  const workspaceDir = resolve(currentDir, '../../../workspace');
+  if (existsSync(workspaceDir)) {
+    return workspaceDir;
+  }
+  
+  // 回退到 src/defaults/
   return resolve(currentDir, '../../defaults');
 }
 
@@ -457,4 +466,81 @@ export function createDefaultUserConfig(): void {
  */
 export function getSystemDefaultsPath(): string {
   return SYSTEM_DEFAULTS_DIR;
+}
+
+/** 默认允许访问的路径 */
+const ALLOWED_DEFAULT_PATHS: string[] = [
+  // 系统安装目录（运行时确定）
+  // ~/.microbot/
+  // ~/.microbot/workspace
+];
+
+/**
+ * 验证工作区访问权限
+ * 
+ * 默认允许访问的路径：
+ * - 系统安装目录
+ * - ~/.microbot/
+ * - ~/.microbot/workspace
+ * 
+ * 其他路径需要在 settings.yaml 的 workspaces 中配置
+ * 
+ * @param workspace - 要访问的工作区路径
+ * @param allowedWorkspaces - 配置中允许的工作区列表
+ * @throws {Error} 非法访问时抛出错误
+ */
+export function validateWorkspaceAccess(
+  workspace: string,
+  allowedWorkspaces: string[] = []
+): void {
+  const normalizedWorkspace = resolve(expandPath(workspace));
+  const userDir = expandPath(USER_CONFIG_DIR);
+  const defaultWorkspace = resolve(userDir, 'workspace');
+  
+  // 构建允许的路径列表
+  const allowedPaths = [
+    ...ALLOWED_DEFAULT_PATHS,
+    SYSTEM_DEFAULTS_DIR,
+    userDir,
+    defaultWorkspace,
+    ...allowedWorkspaces.map(expandPath),
+  ];
+  
+  // 检查是否在允许列表中
+  for (const allowed of allowedPaths) {
+    if (normalizedWorkspace === resolve(allowed)) {
+      return; // 允许访问
+    }
+    // 检查是否为允许路径的子目录
+    if (normalizedWorkspace.startsWith(resolve(allowed) + '/')) {
+      return; // 允许访问子目录
+    }
+  }
+  
+  // 拒绝访问
+  throw new Error(
+    `工作区访问被拒绝: ${workspace}\n` +
+    `如需访问此路径，请在 ~/.microbot/settings.yaml 中添加:\n` +
+    `workspaces:\n` +
+    `  - ${workspace}`
+  );
+}
+
+/**
+ * 检查工作区是否可访问
+ * 
+ * @param workspace - 要访问的工作区路径
+ * @param allowedWorkspaces - 配置中允许的工作区列表
+ * @returns 是否可访问
+ */
+export function canAccessWorkspace(
+  workspace: string,
+  allowedWorkspaces: string[] = []
+): boolean {
+  try {
+    validateWorkspaceAccess(workspace, allowedWorkspaces);
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { LLMGateway } from '../../src/providers/gateway';
-import type { ILLMProvider, LLMMessage, LLMResponse } from '../../src/providers/base';
+import { LLMGateway } from '../../src/core/providers/gateway';
+import type { ILLMProvider, LLMMessage, LLMResponse } from '../../src/core/providers/base';
 
 /** Mock Provider 用于测试 */
 class MockProvider implements ILLMProvider {

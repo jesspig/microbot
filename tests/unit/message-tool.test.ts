@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { MessageTool, ToolRegistry } from '../../src/tools';
-import type { ToolContext } from '../../src/tools';
+import { MessageTool, ToolRegistry } from '../../src/extensions/tool';
+import type { ToolContext } from '../../src/extensions/tool';
 
 describe('MessageTool', () => {
   let registry: ToolRegistry;

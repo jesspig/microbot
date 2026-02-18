@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { QQChannel } from '../../src/channels/qq';
-import type { MessageBus } from '../../src/bus/queue';
-import type { OutboundMessage } from '../../src/bus/events';
+import { QQChannel } from '../../src/extensions/channel/qq';
+import type { MessageBus } from '../../src/core/bus/queue';
+import type { OutboundMessage } from '../../src/core/bus/events';
 
 class MockBus implements MessageBus {
   publishedInbound: unknown[] = [];

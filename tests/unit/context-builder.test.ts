@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { ContextBuilder } from '../../src/agent/context';
-import type { MemoryStore } from '../../src/memory/store';
+import { ContextBuilder } from '../../src/core/agent/context';
+import type { MemoryStore } from '../../src/extensions/storage/memory/store';
 
 const testWorkspace = join(process.cwd(), 'test-agent-workspace');
 

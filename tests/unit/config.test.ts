@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
-import { loadConfig, expandPath, findTemplateFile } from '../../src/config/loader';
+import { loadConfig, expandPath, findTemplateFile } from '../../src/core/config/loader';
 
 const TEST_DIR = join(import.meta.dir, '__config_test__');
 

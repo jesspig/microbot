@@ -1,7 +1,7 @@
-import type { LLMMessage, ToolCall } from '../../providers/base';
-import type { MemoryStore } from '../../memory/store';
-import type { SkillSummary, Skill } from '../../skills/loader';
-import { loadTemplateFile } from '../../config/loader';
+import type { LLMMessage, ToolCall } from '../providers/base';
+import type { MemoryStore } from '../../extensions/storage/memory/store';
+import type { SkillSummary, Skill } from '../../extensions/skill/loader';
+import { loadTemplateFile } from '../config/loader';
 
 /** Bootstrap 文件列表 */
 const BOOTSTRAP_FILES = ['AGENTS.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md', 'SOUL.md'] as const;

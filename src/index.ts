@@ -4,24 +4,24 @@
  * 提供 createApp() 工厂函数，组装所有模块。
  */
 
-import { expandPath, loadConfig } from './config/loader';
+import { expandPath, loadConfig } from './core/config/loader';
 import { DatabaseManager, DEFAULT_DB_CONFIG } from './db/manager';
-import { MessageBus } from './bus/queue';
-import { SessionStore } from './session/store';
-import { MemoryStore } from './memory/store';
-import { CronStore } from './cron/store';
-import { CronService } from './cron/service';
-import { HeartbeatService } from './heartbeat/service';
-import { SkillsLoader } from './skills/loader';
-import { ToolRegistry } from './tools/registry';
-import { ReadFileTool, WriteFileTool, ListDirTool, ExecTool, WebSearchTool, WebFetchTool, MessageTool } from './tools';
-import { LLMGateway, OpenAICompatibleProvider } from './providers';
-import { AgentLoop } from './agent/loop';
-import { ChannelManager } from './channels/manager';
-import { ChannelHelper } from './channels/helper';
-import { FeishuChannel, QQChannel, DingTalkChannel, WeComChannel } from './channels';
-import type { App, CronJobSummary } from './types/interfaces';
-import type { Config, ProviderEntry } from './config/schema';
+import { MessageBus } from './core/bus/queue';
+import { SessionStore } from './extensions/storage/session/store';
+import { MemoryStore } from './extensions/storage/memory/store';
+import { CronStore } from './extensions/storage/cron/store';
+import { CronService } from './extensions/service/cron/service';
+import { HeartbeatService } from './extensions/service/heartbeat/service';
+import { SkillsLoader } from './extensions/skill/loader';
+import { ToolRegistry } from './extensions/tool/registry';
+import { ReadFileTool, WriteFileTool, ListDirTool, ExecTool, WebSearchTool, WebFetchTool, MessageTool } from './extensions/tool';
+import { LLMGateway, OpenAICompatibleProvider } from './core/providers';
+import { AgentLoop } from './core/agent/loop';
+import { ChannelManager } from './extensions/channel/manager';
+import { ChannelHelper } from './extensions/channel/helper';
+import { FeishuChannel, QQChannel, DingTalkChannel, WeComChannel } from './extensions/channel';
+import type { App, CronJobSummary } from './core/types/interfaces';
+import type { Config, ProviderEntry } from './core/config/schema';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getLogger } from '@logtape/logtape';
@@ -74,7 +74,7 @@ class AppImpl implements App {
 
     // 2. 初始化存储
     const sessionStore = new SessionStore(this.dbManager.getSessionsDb());
-    const memoryStore = new MemoryStore(this.dbManager.getMemoryDb(), this.workspace);
+    const memoryStore = new MemoryStore(this.dbManager.getMemoryDb());
     this.cronStore = new CronStore(this.dbManager.getCronDb());
 
     // 3. 初始化消息总线
@@ -320,3 +320,9 @@ export type { App, CronJobSummary } from './types/interfaces';
 
 // Core SDK 子路径导出
 export * as core from './core/index';
+
+// Extensions SDK 子路径导出
+export * as extensions from './extensions/index';
+
+// Hot-plug SDK 子路径导出
+export * as hotPlug from './hot-plug/index';

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { DingTalkChannel } from '../../src/channels/dingtalk';
-import type { MessageBus } from '../../src/bus/queue';
+import { DingTalkChannel } from '../../src/extensions/channel/dingtalk';
+import type { MessageBus } from '../../src/core/bus/queue';
 
 class MockBus implements MessageBus {
   async publishInbound(): Promise<void> {}

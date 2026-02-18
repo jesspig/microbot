@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { BaseChannel, type Channel } from '../../src/channels/base';
-import type { OutboundMessage } from '../../src/bus/events';
-import type { MessageBus } from '../../src/bus/queue';
-import type { ChannelType } from '../../src/types/interfaces';
+import { BaseChannel, type Channel } from '../../src/extensions/channel/base';
+import type { OutboundMessage } from '../../src/core/bus/events';
+import type { MessageBus } from '../../src/core/bus/queue';
+import type { ChannelType } from '../../src/core/types/interfaces';
 
 // Mock MessageBus
 class MockBus implements MessageBus {

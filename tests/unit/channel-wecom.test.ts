@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { WeComChannel } from '../../src/channels/wecom';
-import type { MessageBus } from '../../src/bus/queue';
+import { WeComChannel } from '../../src/extensions/channel/wecom';
+import type { MessageBus } from '../../src/core/bus/queue';
 
 class MockBus implements MessageBus {
   async publishInbound(): Promise<void> {}
