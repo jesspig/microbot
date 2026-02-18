@@ -12,9 +12,6 @@ export {
 } from './base';
 
 // Provider 实现
-export { OllamaProvider, type OllamaConfig } from './ollama';
-export { LMStudioProvider, type LMStudioConfig } from './lm-studio';
-export { VLLMProvider, type VLLMConfig } from './vllm';
 export { OpenAICompatibleProvider, type OpenAICompatibleConfig } from './openai-compatible';
 
 // Gateway

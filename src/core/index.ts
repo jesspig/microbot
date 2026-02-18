@@ -38,3 +38,18 @@ export * from './bus';
 
 // Config 模块
 export * from './config';
+
+// Tool 模块
+export * from './tool';
+
+// Channel 模块
+export * from './channel';
+
+// Skill 模块
+export * from './skill';
+
+// Storage 模块
+export * from './storage';
+
+// Service 模块
+export * from './service';

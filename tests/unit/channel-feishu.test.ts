@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { FeishuChannel } from '../../src/extensions/channel/feishu';
+import { FeishuChannel } from '../../extensions/channel/feishu';
 import type { MessageBus } from '../../src/core/bus/queue';
 import type { OutboundMessage } from '../../src/core/bus/events';
 

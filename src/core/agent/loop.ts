@@ -1,10 +1,10 @@
 import type { LLMProvider, LLMMessage, LLMToolDefinition } from '../providers/base';
 import type { MessageBus } from '../bus/queue';
-import type { SessionStore } from '../../extensions/storage/session/store';
-import type { MemoryStore } from '../../extensions/storage/memory/store';
-import type { ToolRegistry, ToolContext } from '../../extensions/tool/registry';
+import type { SessionStore } from '../storage/session/store';
+import type { MemoryStore } from '../storage/memory/store';
+import type { ToolRegistry, ToolContext } from '../tool/registry';
 import type { InboundMessage, OutboundMessage, SessionKey } from '../bus/events';
-import type { SkillsLoader } from '../../extensions/skill/loader';
+import type { SkillsLoader } from '../skill/loader';
 import { ContextBuilder } from './context';
 import { getLogger } from '@logtape/logtape';
 

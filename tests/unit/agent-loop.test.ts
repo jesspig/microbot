@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { AgentLoop, type AgentConfig } from '../../src/core/agent/loop';
 import type { LLMProvider, LLMMessage, LLMResponse } from '../../src/core/providers/base';
 import type { MessageBus } from '../../src/core/bus/queue';
-import type { SessionStore } from '../../src/extensions/storage/session/store';
-import type { MemoryStore } from '../../src/extensions/storage/memory/store';
-import type { ToolRegistry } from '../../src/extensions/tool/registry';
+import type { SessionStore } from '../../src/core/storage/session/store';
+import type { MemoryStore } from '../../src/core/storage/memory/store';
+import type { ToolRegistry } from '../../src/core/tool/registry';
 import type { InboundMessage } from '../../src/core/bus/events';
 
 // Mock implementations

@@ -3,7 +3,7 @@ import { z } from 'zod';
 /** Agent 配置 Schema */
 export const AgentConfigSchema = z.object({
   workspace: z.string().default('~/.microbot/workspace'),
-  model: z.string().default('ollama/qwen3'),
+  model: z.string().default('openai-compatible/gpt-4o'),
   maxTokens: z.number().default(8192),
   temperature: z.number().default(0.7),
   maxToolIterations: z.number().default(20),

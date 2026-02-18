@@ -193,7 +193,7 @@ function loadSystemConfig(): Record<string, unknown> {
       agents: {
         defaults: {
           workspace: '~/.microbot/workspace',
-          model: 'ollama/qwen3',
+          model: 'openai-compatible/gpt-4o',
           maxTokens: 8192,
           temperature: 0.7,
           maxToolIterations: 20,

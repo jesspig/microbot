@@ -17,7 +17,7 @@ export interface GatewayConfig {
 }
 
 const DEFAULT_CONFIG: GatewayConfig = {
-  defaultProvider: 'ollama',
+  defaultProvider: 'openai-compatible',
   fallbackEnabled: true,
 };
 
@@ -26,7 +26,7 @@ const DEFAULT_CONFIG: GatewayConfig = {
  * 
  * 聚合多个 Provider，支持自动路由和故障转移。
  * 
- * 模型名称格式：`provider/model`（如 `ollama/qwen3`）
+ * 模型名称格式：`provider/model`（如 `openai-compatible/gpt-4o`）
  * - 如果指定了 provider 前缀，直接路由到对应 provider
  * - 如果没有前缀，自动查找支持该模型的 provider
  */

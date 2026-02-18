@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { ExecTool, ToolRegistry } from '../../src/extensions/tool';
-import type { ToolContext } from '../../src/extensions/tool';
+import { ExecTool } from '../../extensions/tool';
+import { ToolRegistry } from '../../src/core/tool';
+import type { ToolContext } from '../../src/core/tool';
 
 const defaultCtx: ToolContext = {
   channel: 'test',

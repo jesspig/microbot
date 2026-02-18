@@ -1,5 +1,5 @@
-import type { LLMProvider, LLMMessage } from '../../providers/base';
-import type { MessageBus } from '../../bus/queue';
+import type { LLMProvider, LLMMessage } from '../providers/base';
+import type { MessageBus } from '../bus/queue';
 
 /**
  * 子代理管理器

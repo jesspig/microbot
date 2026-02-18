@@ -5,7 +5,7 @@
  */
 
 /** 通道类型 */
-export type ChannelType = 'feishu' | 'qq' | 'email' | 'dingtalk' | 'wecom' | 'system';
+export type ChannelType = 'feishu' | 'email' | 'system';
 
 /** 依赖注入容器 */
 export interface Container {
@@ -39,9 +39,6 @@ export interface DatabaseConfig {
   memoryDb: string;
 }
 
-/** 调度类型 */
-export type ScheduleKind = 'at' | 'every' | 'cron';
-
 /** Cron 任务摘要 */
 export interface CronJobSummary {
   /** 任务 ID */
@@ -49,7 +46,7 @@ export interface CronJobSummary {
   /** 任务名称 */
   name: string;
   /** 调度类型 */
-  scheduleKind: ScheduleKind;
+  scheduleKind: 'at' | 'every' | 'cron';
   /** 调度值 */
   scheduleValue?: string;
 }

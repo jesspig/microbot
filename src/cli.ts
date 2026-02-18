@@ -13,7 +13,7 @@ import { parseArgs } from 'util';
 import { configure, getConsoleSink, getLogger } from '@logtape/logtape';
 import { prettyFormatter } from '@logtape/pretty';
 import { createApp } from './index';
-import type { App } from './types/interfaces';
+import type { App } from './core/types/interfaces';
 
 const VERSION = '1.0.0';
 

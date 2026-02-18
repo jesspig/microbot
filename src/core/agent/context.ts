@@ -1,6 +1,6 @@
 import type { LLMMessage, ToolCall } from '../providers/base';
-import type { MemoryStore } from '../../extensions/storage/memory/store';
-import type { SkillSummary, Skill } from '../../extensions/skill/loader';
+import type { MemoryStore } from '../storage/memory/store';
+import type { SkillSummary, Skill } from '../skill';
 import { loadTemplateFile } from '../config/loader';
 
 /** Bootstrap 文件列表 */
@@ -126,7 +126,9 @@ export class ContextBuilder {
 
     const parts = this.alwaysSkills.map(skill => {
       const header = `## 技能: ${skill.name}\n\n${skill.description}`;
-      return `${header}\n\n${skill.content}`;
+      // 注入 skill 目录路径，替换内容中的相对路径
+      const content = skill.content.replace(/<skill-dir>/g, skill.skillPath);
+      return `${header}\n\n**Skill 目录: ${skill.skillPath}**\n\n${content}`;
     });
 
     return `# 自动加载技能\n\n${parts.join('\n\n---\n\n')}`;

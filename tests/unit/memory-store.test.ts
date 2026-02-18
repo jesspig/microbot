@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
-import { MemoryStore, type MemoryEntry } from '../../src/extensions/storage/memory/store';
+import { MemoryStore, type MemoryEntry } from '../../src/core/storage/memory/store';
 
 describe('MemoryStore', () => {
   let db: Database;
