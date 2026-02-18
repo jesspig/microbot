@@ -13,6 +13,16 @@
     "microbot": "./src/cli.ts"
   },
   "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./core": {
+      "types": "./src/core/index.ts",
+      "default": "./src/core/index.ts"
+    }
+  },
   "scripts": {
     "dev": "bun run src/cli.ts start",
     "start": "bun run src/cli.ts start",

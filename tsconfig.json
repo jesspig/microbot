@@ -16,7 +16,9 @@
     "rootDir": "./src",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@core/*": ["./src/core/*"],
+      "@extensions/*": ["./src/extensions/*"]
     },
     "types": ["bun-types"]
   },

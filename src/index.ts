@@ -317,3 +317,6 @@ export async function createApp(configPath?: string): Promise<App> {
 
 // 导出类型
 export type { App, CronJobSummary } from './types/interfaces';
+
+// Core SDK 子路径导出
+export * as core from './core/index';
