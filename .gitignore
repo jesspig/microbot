@@ -28,6 +28,9 @@ logs/
 # 测试覆盖率
 coverage/
 
+# 测试输出
+test_output.txt
+
 # 测试临时文件
 test-skills-temp/
 test-agent-workspace/

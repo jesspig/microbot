@@ -1,4 +1,5 @@
-import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition } from './base';
+import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, GenerationConfig } from './base';
+import type { ModelConfig } from '../config/schema';
 import { getLogger } from '@logtape/logtape';
 
 const log = getLogger(['gateway']);
@@ -7,6 +8,7 @@ const log = getLogger(['gateway']);
 interface ProviderEntry {
   provider: LLMProvider;
   models: string[];
+  modelConfigs: ModelConfig[];
   priority: number;
 }
 
@@ -17,7 +19,7 @@ export interface GatewayConfig {
 }
 
 const DEFAULT_CONFIG: GatewayConfig = {
-  defaultProvider: 'openai-compatible',
+  defaultProvider: 'ollama',
   fallbackEnabled: true,
 };
 
@@ -43,14 +45,16 @@ export class LLMGateway implements LLMProvider {
    * @param provider - Provider 实例
    * @param models - 支持的模型列表（不带 provider 前缀）
    * @param priority - 优先级（越小越优先）
+   * @param modelConfigs - 模型配置列表（包含 level 等信息）
    */
   registerProvider(
     name: string,
     provider: LLMProvider,
     models: string[],
-    priority: number = 100
+    priority: number = 100,
+    modelConfigs: ModelConfig[] = []
   ): void {
-    this.providers.set(name, { provider, models, priority });
+    this.providers.set(name, { provider, models, modelConfigs, priority });
   }
 
   /**
@@ -61,12 +65,22 @@ export class LLMGateway implements LLMProvider {
   }
 
   /**
+   * 获取模型的配置（包括 level）
+   */
+  private getModelConfig(providerName: string, modelId: string): ModelConfig | undefined {
+    const entry = this.providers.get(providerName);
+    if (!entry) return undefined;
+    return entry.modelConfigs.find(m => m.id === modelId);
+  }
+
+  /**
    * 聊天（自动路由到合适的 Provider）
    */
   async chat(
     messages: LLMMessage[],
     tools?: LLMToolDefinition[],
-    model?: string
+    model?: string,
+    config?: GenerationConfig
   ): Promise<LLMResponse> {
     const { providerName, modelName } = this.parseModel(model);
     const entry = this.providers.get(providerName);
@@ -75,12 +89,25 @@ export class LLMGateway implements LLMProvider {
       throw new Error(`未找到 Provider: ${providerName}`);
     }
 
+    const actualModelName = modelName ?? entry.provider.getDefaultModel();
+    
     try {
-      return await entry.provider.chat(messages, tools, modelName);
+      const response = await entry.provider.chat(messages, tools, actualModelName, config);
+      const modelConfig = this.getModelConfig(providerName, actualModelName);
+      // 标记实际使用的 provider、model 和 level
+      return {
+        ...response,
+        usedProvider: providerName,
+        usedModel: actualModelName,
+        usedLevel: modelConfig?.level,
+      };
     } catch (error) {
-      log.error('Provider {name} 失败: {error}', { name: providerName, error: error instanceof Error ? error.message : String(error) });
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      log.error('Provider {name} 失败: {error}', { name: providerName, error: errorMsg });
+      
       if (this.config.fallbackEnabled) {
-        return this.fallback(messages, tools, modelName, providerName);
+        log.info('尝试故障转移到其他 Provider...');
+        return this.fallback(messages, tools, actualModelName, providerName, config);
       }
       throw error;
     }
@@ -88,34 +115,128 @@ export class LLMGateway implements LLMProvider {
 
   /**
    * 故障转移
+   * 
+   * 当首选模型失败时：
+   * 1. 先检查提供商是否可用（调用 listModels）
+   * 2. 如果提供商可用，优先切换同一提供商的其他模型
+   * 3. 如果提供商不可用，才切换到其他提供商
    */
   private async fallback(
     messages: LLMMessage[],
     tools: LLMToolDefinition[] | undefined,
-    model: string | undefined,
-    failedProvider: string
+    failedModel: string | undefined,
+    failedProvider: string,
+    config?: GenerationConfig
   ): Promise<LLMResponse> {
-    const sorted = Array.from(this.providers.entries())
-      .filter(([name]) => name !== failedProvider)
-      .sort((a, b) => a[1].priority - b[1].priority);
-
-    // 没有其他 provider 可用
-    if (sorted.length === 0) {
-      throw new Error(`Provider "${failedProvider}" 请求失败，且没有其他可用 Provider`);
-    }
-
-    for (const [name, entry] of sorted) {
-      if (await entry.provider.isAvailable()) {
-        try {
-          return await entry.provider.chat(messages, tools, model);
-        } catch {
-          // 继续尝试下一个
-          continue;
+    const entry = this.providers.get(failedProvider);
+    
+    // 尝试检查提供商是否可用
+    if (entry) {
+      const availableModels = await entry.provider.listModels();
+      
+      if (availableModels !== null) {
+        // 提供商可用，尝试切换同一提供商的其他模型
+        log.info('[Fallback] 提供商 {provider} 可用，尝试切换模型', { provider: failedProvider });
+        
+        // 过滤掉失败的模型，优先使用配置的其他模型
+        const otherModels = entry.models.filter(m => m !== failedModel && m !== '*');
+        
+        for (const modelId of otherModels) {
+          // 检查模型是否在可用列表中
+          if (availableModels.length > 0 && !availableModels.includes(modelId)) {
+            continue;
+          }
+          
+          try {
+            log.info('[Fallback] 尝试 {provider}/{model}', { provider: failedProvider, model: modelId });
+            const response = await entry.provider.chat(messages, tools, modelId, config);
+            const modelConfig = this.getModelConfig(failedProvider, modelId);
+            log.info('[Fallback] 成功切换到模型 {provider}/{model}', { provider: failedProvider, model: modelId });
+            return {
+              ...response,
+              usedProvider: failedProvider,
+              usedModel: modelId,
+              usedLevel: modelConfig?.level,
+            };
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            log.warn('[Fallback] 模型 {model} 失败: {error}', { model: modelId, error: errorMsg });
+            continue;
+          }
         }
+        
+        // 同一提供商没有其他可用模型，使用默认模型
+        const defaultModel = entry.provider.getDefaultModel();
+        if (defaultModel !== failedModel) {
+          try {
+            log.info('[Fallback] 尝试默认模型 {provider}/{model}', { provider: failedProvider, model: defaultModel });
+            const response = await entry.provider.chat(messages, tools, defaultModel, config);
+            const modelConfig = this.getModelConfig(failedProvider, defaultModel);
+            log.info('[Fallback] 成功切换到默认模型 {provider}/{model}', { provider: failedProvider, model: defaultModel });
+            return {
+              ...response,
+              usedProvider: failedProvider,
+              usedModel: defaultModel,
+              usedLevel: modelConfig?.level,
+            };
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            log.warn('[Fallback] 默认模型失败: {error}', { error: errorMsg });
+          }
+        }
+        
+        log.warn('[Fallback] 提供商 {provider} 无其他可用模型，尝试切换提供商', { provider: failedProvider });
+      } else {
+        log.info('[Fallback] 提供商 {provider} 不可用，尝试切换提供商', { provider: failedProvider });
       }
     }
 
-    throw new Error('所有 Provider 不可用');
+    // 提供商不可用，尝试其他提供商
+    return this.fallbackToOtherProvider(messages, tools, failedProvider, config);
+  }
+
+  /**
+   * 切换到其他提供商
+   */
+  private async fallbackToOtherProvider(
+    messages: LLMMessage[],
+    tools: LLMToolDefinition[] | undefined,
+    excludeProvider: string,
+    config?: GenerationConfig
+  ): Promise<LLMResponse> {
+    const sorted = Array.from(this.providers.entries())
+      .filter(([name]) => name !== excludeProvider)
+      .sort((a, b) => a[1].priority - b[1].priority);
+
+    if (sorted.length === 0) {
+      throw new Error(`Provider "${excludeProvider}" 请求失败，且没有其他可用 Provider`);
+    }
+
+    const errors: string[] = [];
+
+    for (const [name, entry] of sorted) {
+      try {
+        const fallbackModel = entry.provider.getDefaultModel();
+        log.info('[Fallback] 尝试 {provider}/{model}', { provider: name, model: fallbackModel });
+        
+        const response = await entry.provider.chat(messages, tools, fallbackModel, config);
+        const modelConfig = this.getModelConfig(name, fallbackModel);
+        log.info('[Fallback] 成功切换到 {provider}', { provider: name });
+        return {
+          ...response,
+          usedProvider: name,
+          usedModel: fallbackModel,
+          usedLevel: modelConfig?.level,
+        };
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        errors.push(`${name}: ${errorMsg}`);
+        log.warn('[Fallback] {provider} 失败: {error}', { provider: name, error: errorMsg });
+        continue;
+      }
+    }
+
+    throw new Error(`所有 Provider 尝试失败:\n${errors.join('\n')}`);
   }
 
   /**
@@ -165,5 +286,22 @@ export class LLMGateway implements LLMProvider {
       if (await entry.provider.isAvailable()) return true;
     }
     return false;
+  }
+
+  /**
+   * 获取模型能力配置
+   * @param modelId - 模型名称，格式为 `provider/model` 或 `model`
+   * @returns 模型能力配置
+   */
+  getModelCapabilities(modelId: string): ModelConfig {
+    const { providerName, modelName } = this.parseModel(modelId);
+    const entry = this.providers.get(providerName);
+
+    if (!entry) {
+      // 返回默认能力
+      return { id: modelName ?? modelId, vision: false, think: false, tool: true };
+    }
+
+    return entry.provider.getModelCapabilities(modelName ?? modelId);
   }
 }

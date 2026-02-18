@@ -61,6 +61,8 @@ export interface App {
   getRunningChannels(): string[];
   /** 获取 Provider 状态 */
   getProviderStatus(): string;
+  /** 获取路由状态 */
+  getRouterStatus(): { auto: boolean; max: boolean; chatModel: string; checkModel?: string };
   /** 获取 Cron 任务数量 */
   getCronCount(): number;
   /** 列出所有 Cron 任务摘要 */

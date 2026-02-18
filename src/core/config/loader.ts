@@ -191,13 +191,11 @@ function loadSystemConfig(): Record<string, unknown> {
     // 如果系统级配置不存在，返回最小默认值
     return {
       agents: {
-        defaults: {
-          workspace: '~/.microbot/workspace',
-          model: 'openai-compatible/gpt-4o',
-          maxTokens: 8192,
-          temperature: 0.7,
-          maxToolIterations: 20,
-        },
+        workspace: '~/.microbot/workspace',
+        model: 'ollama/qwen3',
+        maxTokens: 8192,
+        temperature: 0.7,
+        maxToolIterations: 20,
       },
       providers: {},
       channels: {},
@@ -247,7 +245,8 @@ function findConfigFile(dir: string): string | null {
  * 深度合并对象
  * 
  * 规则：
- * - 对象：深度合并（高优先级覆盖同名键）
+ * - providers 字段：完全覆盖（不合并）
+ * - 其他对象：深度合并
  * - 数组：完全替换
  * - 基本类型：覆盖
  */
@@ -261,8 +260,16 @@ function deepMerge<T extends Record<string, unknown>>(
     const sourceValue = source[key];
     const targetValue = result[key];
     
+    if (sourceValue === undefined) continue;
+    
+    // providers 字段完全覆盖，不进行深度合并
+    if (key === 'providers') {
+      result[key] = sourceValue as T[keyof T];
+      continue;
+    }
+    
+    // 其他对象字段：深度合并
     if (
-      sourceValue !== undefined &&
       sourceValue !== null &&
       typeof sourceValue === 'object' &&
       !Array.isArray(sourceValue) &&
@@ -271,13 +278,12 @@ function deepMerge<T extends Record<string, unknown>>(
       typeof targetValue === 'object' &&
       !Array.isArray(targetValue)
     ) {
-      // 两者都是对象，深度合并
       result[key] = deepMerge(
         targetValue as Record<string, unknown>,
         sourceValue as Record<string, unknown>
       ) as T[keyof T];
-    } else if (sourceValue !== undefined) {
-      // 其他情况直接覆盖
+    } else {
+      // 数组和基本类型：直接覆盖
       result[key] = sourceValue as T[keyof T];
     }
   }
