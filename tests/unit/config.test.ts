@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
-import { loadConfig, expandPath, findTemplateFile } from '../../src/core/config/loader';
+import { loadConfig, expandPath, findTemplateFile } from '@microbot/core/config';
 
 const TEST_DIR = join(import.meta.dir, '__config_test__');
 
@@ -19,9 +19,10 @@ describe('Config Loader', () => {
   });
 
   describe('loadConfig', () => {
-    it('should return default config when no file exists', () => {
+    it('should return empty models when no file exists', () => {
       const config = loadConfig({ configPath: '/nonexistent/path.yaml' });
-      expect(config.agents.models.chat).toBe('ollama/qwen3');
+      // 无配置时，models 应该为空（用户需要自行配置）
+      expect(config.agents.models).toBeUndefined();
       expect(config.agents.maxTokens).toBe(8192);
     });
 
@@ -35,7 +36,7 @@ agents:
 `);
 
       const config = loadConfig({ configPath });
-      expect(config.agents.models.chat).toBe('custom-model');
+      expect(config.agents.models?.chat).toBe('custom-model');
       expect(config.agents.maxTokens).toBe(4096);
     });
 
@@ -44,7 +45,8 @@ agents:
       const configPath = join(TEST_DIR, 'config.yaml');
       // 使用反引号模板字符串避免转义问题
       writeFileSync(configPath, `agents:
-  model: test
+  models:
+    chat: test
 providers:
   openaiCompatible:
     baseUrl: https://api.example.com/v1
@@ -97,7 +99,7 @@ providers:
       const config = loadConfig({ workspace, currentDir: dirC });
       
       // agents 深度合并：B 的 models.chat 覆盖 A 的，A 的 maxTokens 保留
-      expect(config.agents.models.chat).toBe('model-B');
+      expect(config.agents.models?.chat).toBe('model-B');
       expect(config.agents.maxTokens).toBe(2000);
       
       // providers 完全覆盖：只有 B 的 deepseek，没有 A 的 ollama 和 openai

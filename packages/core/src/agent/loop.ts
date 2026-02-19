@@ -20,7 +20,7 @@ const log = getLogger(['agent']);
 /** Agent 配置 */
 export interface AgentConfig {
   workspace: string;
-  models: ModelsConfig;
+  models?: ModelsConfig;
   maxIterations: number;
   generation?: GenerationConfig;
   auto?: boolean;
@@ -31,7 +31,6 @@ export interface AgentConfig {
 
 const DEFAULT_CONFIG: AgentConfig = {
   workspace: './workspace',
-  models: { chat: 'qwen3' },
   maxIterations: 20,
   generation: {
     maxTokens: 8192,
@@ -61,8 +60,8 @@ export class AgentLoop {
     private config: AgentConfig = DEFAULT_CONFIG
   ) {
     this.router = new ModelRouter({
-      chatModel: config.models.chat,
-      checkModel: config.models.check,
+      chatModel: config.models?.chat || '',
+      checkModel: config.models?.check,
       auto: config.auto ?? true,
       max: config.max ?? false,
       models: config.availableModels ?? new Map(),

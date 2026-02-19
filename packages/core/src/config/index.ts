@@ -23,4 +23,6 @@ export {
   getUserConfigPath,
   createDefaultUserConfig,
   getSystemDefaultsPath,
+  getConfigStatus,
+  type ConfigStatus,
 } from './loader';

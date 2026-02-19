@@ -13,6 +13,7 @@ import { parseArgs } from 'util';
 import { configure, getConsoleSink, getLogger } from '@logtape/logtape';
 import { prettyFormatter } from '@logtape/pretty';
 import { createApp } from './index';
+import { loadConfig, getConfigStatus } from '@microbot/core/config';
 import type { App } from './core/types/interfaces';
 
 const VERSION = '1.0.0';
@@ -164,6 +165,26 @@ async function startService(configPath?: string): Promise<void> {
   console.log();
   console.log('\x1b[1m\x1b[36mmicrobot\x1b[0m');
   console.log('─'.repeat(50));
+
+  // 检查配置状态
+  const baseConfig = loadConfig(configPath ? { configPath } : {});
+  const configStatus = getConfigStatus(baseConfig);
+
+  if (configStatus.needsSetup) {
+    console.log();
+    console.log('\x1b[33m  ⚠ 未检测到用户配置\x1b[0m');
+    console.log();
+    console.log('  请编辑 ~/.microbot/settings.yaml 配置：');
+    console.log('    1. 在 providers 中添加模型提供商');
+    console.log('    2. 在 channels 中启用消息通道');
+    console.log();
+    console.log('  示例配置：');
+    console.log('    \x1b[2mproviders:\x1b[0m');
+    console.log('    \x1b[2m  ollama:\x1b[0m');
+    console.log('    \x1b[2m    baseUrl: http://localhost:11434/v1\x1b[0m');
+    console.log('    \x1b[2m    models: [qwen3]\x1b[0m');
+    console.log();
+  }
 
   const app = await createApp(configPath);
 
