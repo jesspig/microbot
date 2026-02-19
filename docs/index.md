@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: Microbot
+  name: MicroBot
   text: 超轻量级个人 AI 助手框架
   tagline: 基于 TypeScript + Bun 构建的现代化 AI 助手框架
   actions:
@@ -26,7 +26,7 @@ features:
 
 ## 项目简介
 
-Microbot 是一个超轻量级的个人 AI 助手框架，使用 TypeScript 开发，Bun 作为运行时。
+MicroBot 是一个超轻量级的个人 AI 助手框架，使用 TypeScript 开发，Bun 作为运行时。
 
 ### 核心特性
 

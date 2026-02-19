@@ -1,5 +1,5 @@
 /**
- * microbot 应用入口
+ * MicroBot 应用入口
  * 
  * 提供 createApp() 工厂函数，组装所有模块。
  */

@@ -2,8 +2,9 @@ import { defineConfig } from 'vitepress';
 import { mermaidPlugin } from './mermaid-plugin';
 
 export default defineConfig({
-  title: 'Microbot',
+  title: 'MicroBot',
   description: '超轻量级个人 AI 助手框架',
+  base: '/microbot/',
   appearance: 'dark',
   lastUpdated: true,
   cleanUrls: true,
@@ -17,7 +18,7 @@ export default defineConfig({
   },
   themeConfig: {
     logo: '/logo.svg',
-    siteTitle: 'Microbot',
+    siteTitle: 'MicroBot',
     nav: [
       { text: '指南', link: '/guide/' },
       { text: '核心模块', link: '/core/' },
@@ -33,6 +34,7 @@ export default defineConfig({
             { text: '快速开始', link: '/guide/' },
             { text: '架构概述', link: '/guide/architecture' },
             { text: '核心概念', link: '/guide/concepts' },
+            { text: '更新日志', link: '/guide/changelog' },
           ],
         },
       ],
