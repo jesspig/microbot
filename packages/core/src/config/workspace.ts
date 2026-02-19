@@ -4,14 +4,23 @@
 
 import { resolve, dirname } from 'path';
 import { homedir } from 'os';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { expandPath } from './loader';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 
 /** 用户配置目录 */
 const USER_CONFIG_DIR = '~/.microbot';
 
 /** 默认允许访问的路径 */
 const ALLOWED_DEFAULT_PATHS: string[] = [];
+
+/**
+ * 展开路径（支持 ~ 前缀）
+ */
+export function expandPath(path: string): string {
+  if (path.startsWith('~/')) {
+    return resolve(homedir(), path.slice(2));
+  }
+  return resolve(path);
+}
 
 /**
  * 验证工作区访问权限
@@ -84,8 +93,9 @@ export function getUserConfigPath(): string {
 
 /**
  * 创建默认用户配置
+ * 从系统模板复制完整配置文件
  */
-export function createDefaultUserConfig(): void {
+export function createDefaultUserConfig(systemDefaultsDir: string): void {
   const configPath = getUserConfigPath();
   if (existsSync(configPath)) return;
 
@@ -94,28 +104,39 @@ export function createDefaultUserConfig(): void {
     mkdirSync(configDir, { recursive: true });
   }
 
-  const minimalConfig = `# microbot 用户配置
-# 系统默认配置在 src/defaults/settings.yaml
+  // 从系统模板复制
+  const templatePath = resolve(systemDefaultsDir, 'settings.yaml');
+  if (existsSync(templatePath)) {
+    const template = readFileSync(templatePath, 'utf-8');
+    writeFileSync(configPath, template, 'utf-8');
+  } else {
+    // 内置最小配置
+    writeFileSync(configPath, getMinimalConfig(), 'utf-8');
+  }
+}
 
-# agents:
-#   defaults:
-#     model: ollama/qwen3
+/**
+ * 获取最小配置（无模板时的备用）
+ */
+function getMinimalConfig(): string {
+  return `# microbot 配置文件
+# 文档：https://github.com/jesspig/microbot
 
-# providers:
-#   deepseek:
-#     baseUrl: https://api.deepseek.com/v1
-#     apiKey: \${DEEPSEEK_API_KEY}
-#     models: [deepseek-chat]
+agents:
+  models:
+    chat: ollama/qwen3
+  maxTokens: 8192
+  temperature: 0.7
 
-# channels:
-#   feishu:
-#     enabled: true
-#     appId: your-app-id
-#     appSecret: your-app-secret
+providers:
+  ollama:
+    baseUrl: http://localhost:11434/v1
+    models:
+      - id: qwen3
+        level: medium
+
+channels: {}
 `;
-
-  writeFileSync(configPath, minimalConfig, 'utf-8');
-  console.log(`已创建用户配置: ${configPath}`);
 }
 
 /** 配置文件名列表 */

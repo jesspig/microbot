@@ -33,6 +33,7 @@ import { DatabaseManager, DEFAULT_DB_CONFIG } from './db/manager';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getLogger } from '@logtape/logtape';
+import { homedir } from 'os';
 
 // 扩展组件导入
 import { ReadFileTool, WriteFileTool, ListDirTool } from '../extensions/tool/filesystem';
@@ -70,11 +71,11 @@ class AppImpl implements App {
   ) {
     this.channelManager = new ChannelManager();
     // 从模型配置解析 provider：格式为 "provider/model"
-    const chatModel = config.agents.models.chat;
+    const chatModel = config.agents.models?.chat || '';
     const slashIndex = chatModel.indexOf('/');
     const defaultProvider = slashIndex > 0
       ? chatModel.slice(0, slashIndex)
-      : Object.keys(config.providers)[0] || 'openai-compatible';
+      : Object.keys(config.providers)[0] || '';
     this.gateway = new LLMGateway({ defaultProvider, fallbackEnabled: true });
   }
 
@@ -82,19 +83,22 @@ class AppImpl implements App {
     if (this.running) return;
     this.running = true;
 
-    // 1. 初始化数据库
+    // 1. 初始化数据库（仅用于 cron 和 memory）
     const dataDir = expandPath(DEFAULT_DB_CONFIG.dataDir);
     this.dbManager = new DatabaseManager({
       ...DEFAULT_DB_CONFIG,
       dataDir,
-      sessionsDb: `${dataDir}/sessions.db`,
       cronDb: `${dataDir}/cron.db`,
       memoryDb: `${dataDir}/memory.db`,
     });
     this.dbManager.init();
 
     // 2. 初始化存储
-    const sessionStore = new SessionStore(this.dbManager.getSessionsDb());
+    // SessionStore 使用 JSONL 格式，独立于数据库
+    const sessionStore = new SessionStore({
+      sessionsDir: `${homedir()}/.microbot/sessions`,
+      sessionTimeout: 30 * 60 * 1000, // 30 分钟超时
+    });
     const memoryStore = new MemoryStore(this.dbManager.getMemoryDb());
     this.cronStore = new CronStore(this.dbManager.getCronDb());
 
@@ -223,6 +227,10 @@ class AppImpl implements App {
   }
 
   getProviderStatus(): string {
+    // 没有配置 provider 时返回未配置
+    if (!this.config.agents.models?.chat && Object.keys(this.config.providers).length === 0) {
+      return '未配置';
+    }
     return this.gateway.getDefaultModel();
   }
 
@@ -230,8 +238,8 @@ class AppImpl implements App {
     return {
       auto: this.config.agents.auto,
       max: this.config.agents.max,
-      chatModel: this.config.agents.models.chat,
-      checkModel: this.config.agents.models.check,
+      chatModel: this.config.agents.models?.chat || '未配置',
+      checkModel: this.config.agents.models?.check,
     };
   }
 
@@ -252,7 +260,7 @@ class AppImpl implements App {
 
   private initProviders(): void {
     const providers = this.config.providers as Record<string, ProviderEntry | undefined>;
-    const chatModel = this.config.agents.models.chat;
+    const chatModel = this.config.agents.models?.chat || '';
     
     // 从模型配置解析默认 provider
     const slashIndex = chatModel.indexOf('/');
@@ -281,15 +289,6 @@ class AppImpl implements App {
       // 默认 provider 优先级为 1，其他为 100
       const priority = name === defaultProviderName ? 1 : 100;
       this.gateway.registerProvider(name, provider, modelIds.length > 0 ? modelIds : ['*'], priority, modelConfigs);
-    }
-
-    // 如果没有配置任何 provider，使用本地 Ollama
-    if (this.gateway.getProviderNames().length === 0) {
-      const provider = new OpenAICompatibleProvider({
-        baseUrl: 'http://localhost:11434/v1',
-        defaultModel: 'qwen3',
-      });
-      this.gateway.registerProvider('ollama', provider, ['*'], 1, []);
     }
   }
 

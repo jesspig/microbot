@@ -8,6 +8,7 @@ import { resolve, dirname, basename } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { ConfigSchema, type Config } from './schema';
+import { createDefaultUserConfig, expandPath } from './workspace';
 
 /** 配置层级（优先级从低到高） */
 export enum ConfigLevel {
@@ -33,16 +34,6 @@ const CONFIG_FILE_NAMES = ['settings.yaml', 'settings.yml', 'settings.json'];
 /** 系统级默认目录 */
 const SYSTEM_DEFAULTS_DIR = getSystemDefaultsDir();
 
-/**
- * 展开路径（支持 ~ 前缀）
- */
-export function expandPath(path: string): string {
-  if (path.startsWith('~/')) {
-    return resolve(homedir(), path.slice(2));
-  }
-  return resolve(path);
-}
-
 /** 配置加载选项 */
 export interface LoadConfigOptions {
   configPath?: string;
@@ -55,6 +46,9 @@ export interface LoadConfigOptions {
  */
 export function loadConfig(options: LoadConfigOptions = {}): Config {
   const { configPath, workspace, currentDir } = options;
+
+  // 确保用户配置目录存在
+  createDefaultUserConfig(SYSTEM_DEFAULTS_DIR);
 
   if (configPath) {
     if (existsSync(configPath)) {
@@ -83,7 +77,8 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
  */
 function getSystemDefaultsDir(): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
-  const workspaceDir = resolve(currentDir, '../../../workspace');
+  // 从 packages/core/src/config/ 到项目根/workspace 需要 4 层
+  const workspaceDir = resolve(currentDir, '../../../../workspace');
   if (existsSync(workspaceDir)) return workspaceDir;
   return resolve(currentDir, '../../defaults');
 }
@@ -179,20 +174,37 @@ function loadSystemConfig(): Record<string, unknown> {
   const systemConfigPath = resolve(SYSTEM_DEFAULTS_DIR, 'settings.yaml');
 
   if (!existsSync(systemConfigPath)) {
-    return {
-      agents: {
-        workspace: '~/.microbot/workspace',
-        model: 'ollama/qwen3',
-        maxTokens: 8192,
-        temperature: 0.7,
-        maxToolIterations: 20,
-      },
-      providers: {},
-      channels: {},
-    };
+    return getBuiltinDefaults();
   }
 
-  return loadConfigFile(systemConfigPath);
+  const config = loadConfigFile(systemConfigPath);
+  const defaults = getBuiltinDefaults();
+  
+  // 如果配置文件只有注释（没有 providers），使用内置默认值
+  if (Object.keys(config.providers || {}).length === 0) {
+    return deepMerge(defaults, config);
+  }
+  
+  return config;
+}
+
+/**
+ * 获取内置默认配置
+ * 仅提供必要的默认值，不预设任何 provider 或 channel
+ */
+function getBuiltinDefaults(): Record<string, unknown> {
+  return {
+    agents: {
+      workspace: '~/.microbot/workspace',
+      maxTokens: 8192,
+      temperature: 0.7,
+      maxToolIterations: 20,
+      auto: true,
+      max: false,
+    },
+    providers: {},
+    channels: {},
+  };
 }
 
 /**
@@ -295,6 +307,7 @@ export {
   canAccessWorkspace,
   getUserConfigPath,
   createDefaultUserConfig,
+  expandPath,
 } from './workspace';
 
 export {
@@ -303,3 +316,46 @@ export {
   loadTemplateFile,
   loadAllTemplateFiles,
 } from './template';
+
+/**
+ * 检查配置状态
+ */
+export interface ConfigStatus {
+  hasProviders: boolean;
+  hasChannels: boolean;
+  needsSetup: boolean;
+}
+
+/**
+ * 检查用户配置文件是否有实际配置
+ */
+function checkUserConfigFile(): { hasProviders: boolean; hasChannels: boolean } {
+  const userDir = expandPath(USER_CONFIG_DIR);
+  const userConfigPath = findConfigFile(userDir);
+  
+  if (!userConfigPath || !existsSync(userConfigPath)) {
+    return { hasProviders: false, hasChannels: false };
+  }
+  
+  const config = loadConfigFile(userConfigPath);
+  
+  return {
+    hasProviders: Object.keys(config.providers || {}).length > 0,
+    hasChannels: Object.values(config.channels || {}).some(
+      (ch: unknown) => ch && typeof ch === 'object' && 'enabled' in ch && (ch as { enabled?: boolean }).enabled
+    ),
+  };
+}
+
+/**
+ * 获取配置状态
+ */
+export function getConfigStatus(config: Config): ConfigStatus {
+  const userConfig = checkUserConfigFile();
+  
+  return {
+    hasProviders: userConfig.hasProviders,
+    hasChannels: userConfig.hasChannels,
+    needsSetup: !userConfig.hasProviders && !userConfig.hasChannels,
+  };
+}

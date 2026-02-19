@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 /** 模型配置 Schema */
 export const ModelsConfigSchema = z.object({
-  /** 对话模型（必填） */
-  chat: z.string(),
+  /** 对话模型 */
+  chat: z.string().optional(),
   /** 意图识别模型（可选，默认使用 chat） */
   check: z.string().optional(),
 });
@@ -12,7 +12,7 @@ export const ModelsConfigSchema = z.object({
 export const AgentConfigSchema = z.object({
   workspace: z.string().default('~/.microbot/workspace'),
   /** 模型配置 */
-  models: ModelsConfigSchema,
+  models: ModelsConfigSchema.optional(),
   /** 生成的最大 token 数量 */
   maxTokens: z.number().default(8192),
   /** 控制响应的随机性，值越低越确定，值越高越随机 */
