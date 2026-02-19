@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * microbot CLI 入口
+ * MicroBot CLI 入口
  * 
  * 命令:
  * - start: 启动服务
@@ -16,7 +16,7 @@ import { createApp } from './index';
 import { loadConfig, getConfigStatus } from '@microbot/core/config';
 import type { App } from './core/types/interfaces';
 
-const VERSION = '1.0.0';
+const VERSION = '0.1.0';
 
 /** 初始化 LogTape */
 async function initLogTape(): Promise<void> {
@@ -37,7 +37,7 @@ const log = getLogger(['cli']);
 /** 显示帮助信息 */
 function showHelp(): void {
   console.log(`
-microbot - 轻量级 AI 助手框架
+MicroBot - 轻量级 AI 助手框架
 
 用法:
   microbot [命令] [选项]
@@ -62,7 +62,7 @@ microbot - 轻量级 AI 助手框架
 
 /** 显示版本 */
 function showVersion(): void {
-  console.log(`microbot v${VERSION}`);
+  console.log(`MicroBot v${VERSION}`);
 }
 
 /** 显示状态 */
@@ -72,7 +72,7 @@ function showStatus(app: App): void {
   const cronCount = app.getCronCount();
 
   console.log();
-  console.log('\x1b[1m\x1b[36mmicrobot 状态\x1b[0m');
+  console.log('\x1b[1m\x1b[36mMicroBot 状态\x1b[0m');
   console.log('─'.repeat(50));
   console.log(`  \x1b[2m通道:\x1b[0m ${channels.length > 0 ? channels.join(', ') : '无'}`);
   console.log(`  \x1b[2mProvider:\x1b[0m ${provider}`);
@@ -163,8 +163,7 @@ async function handleCron(app: App, subcommand: string, args: string[]): Promise
 async function startService(configPath?: string): Promise<void> {
   console.log('\x1b[2J\x1b[H'); // 清屏
   console.log();
-  console.log('\x1b[1m\x1b[36mmicrobot\x1b[0m');
-  console.log('─'.repeat(50));
+      console.log('\x1b[1m\x1b[36mMicroBot\x1b[0m');  console.log('─'.repeat(50));
 
   // 检查配置状态
   const baseConfig = loadConfig(configPath ? { configPath } : {});
