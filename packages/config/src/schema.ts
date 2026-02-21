@@ -12,8 +12,22 @@ export const ModelsConfigSchema = z.object({
   check: z.string().optional(),
 });
 
+/** 工作区配置 Schema */
+export const WorkspaceConfigSchema = z.object({
+  /** 工作区路径 */
+  path: z.string(),
+  /** 工作区名称（可选，用于显示） */
+  name: z.string().optional(),
+  /** 工作区描述（可选） */
+  description: z.string().optional(),
+});
+
+/** 工作区配置类型 */
+export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
+
 /** Agent 配置 Schema */
 export const AgentConfigSchema = z.object({
+  /** 默认工作区路径 */
   workspace: z.string().default('~/.microbot/workspace'),
   /** 模型配置 */
   models: ModelsConfigSchema.optional(),
@@ -197,6 +211,8 @@ export const ChannelConfigSchema = z.object({
 /** 完整配置 Schema */
 export const ConfigSchema = z.object({
   agents: AgentConfigSchema,
+  /** 工作区列表（隔离环境，只能读写工作区内的文件） */
+  workspaces: z.array(z.union([z.string(), WorkspaceConfigSchema])).default([]),
   providers: ProviderConfigSchema,
   channels: ChannelConfigSchema,
   routing: RoutingConfigSchema.optional(),
@@ -242,4 +258,20 @@ export function getModelCapabilities(
   const configs = parseModelConfigs(models);
   const found = configs.find(m => m.id === modelId);
   return found ?? { id: modelId, vision: false, think: false, tool: true, level: 'medium' };
+}
+
+/**
+ * 解析工作区列表为统一格式
+ */
+export function parseWorkspaces(workspaces: (string | WorkspaceConfig)[]): WorkspaceConfig[] {
+  return workspaces.map(w => {
+    if (typeof w === 'string') {
+      return { path: w };
+    }
+    return {
+      path: w.path,
+      name: w.name,
+      description: w.description,
+    };
+  });
 }

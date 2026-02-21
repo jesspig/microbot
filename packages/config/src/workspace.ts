@@ -5,12 +5,10 @@
 import { resolve, dirname } from 'path';
 import { homedir } from 'os';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import type { WorkspaceConfig } from './schema';
 
 /** 用户配置目录 */
 const USER_CONFIG_DIR = '~/.microbot';
-
-/** 默认允许访问的路径 */
-const ALLOWED_DEFAULT_PATHS: string[] = [];
 
 /**
  * 展开路径（支持 ~ 前缀）
@@ -23,35 +21,51 @@ export function expandPath(path: string): string {
 }
 
 /**
+ * 解析工作区路径列表
+ */
+export function resolveWorkspacePaths(workspaces: WorkspaceConfig[]): string[] {
+  return workspaces.map(w => expandPath(w.path));
+}
+
+/**
  * 验证工作区访问权限
+ *
+ * MicroBot 是隔离的，只能读写工作区内的文件
  */
 export function validateWorkspaceAccess(
-  workspace: string,
-  allowedWorkspaces: string[] = [],
-  systemDefaultsDir: string
+  targetPath: string,
+  allowedWorkspaces: WorkspaceConfig[] = []
 ): void {
-  const normalizedWorkspace = resolve(expandPath(workspace));
+  const normalizedTarget = resolve(expandPath(targetPath));
   const userDir = expandPath(USER_CONFIG_DIR);
   const defaultWorkspace = resolve(userDir, 'workspace');
 
+  // 允许访问的路径
   const allowedPaths = [
-    ...ALLOWED_DEFAULT_PATHS,
-    systemDefaultsDir,
-    userDir,
-    defaultWorkspace,
-    ...allowedWorkspaces.map(expandPath),
+    userDir,                    // ~/.microbot（配置目录）
+    defaultWorkspace,           // 默认工作区
+    ...resolveWorkspacePaths(allowedWorkspaces),
   ];
 
   for (const allowed of allowedPaths) {
-    if (normalizedWorkspace === resolve(allowed)) return;
-    if (normalizedWorkspace.startsWith(resolve(allowed) + '/')) return;
+    const normalizedAllowed = resolve(allowed);
+    // 精确匹配或子路径匹配
+    if (normalizedTarget === normalizedAllowed) return;
+    if (normalizedTarget.startsWith(normalizedAllowed + '/')) return;
+    if (normalizedTarget.startsWith(normalizedAllowed + '\\')) return;
   }
 
+  // 构建错误信息
+  const workspaceList = allowedWorkspaces.length > 0
+    ? allowedWorkspaces.map(w => `  - ${w.path}`).join('\n')
+    : '  （未配置）';
+
   throw new Error(
-    `工作区访问被拒绝: ${workspace}\n` +
+    `工作区访问被拒绝: ${targetPath}\n` +
+    `当前允许的工作区:\n${workspaceList}\n` +
     `如需访问此路径，请在 ~/.microbot/settings.yaml 中添加:\n` +
     `workspaces:\n` +
-    `  - ${workspace}`
+    `  - ${targetPath}`
   );
 }
 
@@ -59,12 +73,11 @@ export function validateWorkspaceAccess(
  * 检查工作区是否可访问
  */
 export function canAccessWorkspace(
-  workspace: string,
-  allowedWorkspaces: string[] = [],
-  systemDefaultsDir: string
+  targetPath: string,
+  allowedWorkspaces: WorkspaceConfig[] = []
 ): boolean {
   try {
-    validateWorkspaceAccess(workspace, allowedWorkspaces, systemDefaultsDir);
+    validateWorkspaceAccess(targetPath, allowedWorkspaces);
     return true;
   } catch {
     return false;

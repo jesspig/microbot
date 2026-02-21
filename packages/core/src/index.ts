@@ -36,8 +36,8 @@ export * from './providers';
 // Bus 模块
 export * from './bus';
 
-// Config 模块
-export * from './config';
+// Config 模块（从 @microbot/config re-export）
+export * from '@microbot/config';
 
 // Tool 模块
 export * from './tool';

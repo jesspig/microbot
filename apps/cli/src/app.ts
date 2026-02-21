@@ -19,6 +19,15 @@ import {
   SessionStore,
   AgentExecutor,
 } from '@microbot/sdk';
+import {
+  ReadFileTool,
+  WriteFileTool,
+  ListDirTool,
+  createExecTool,
+  WebFetchTool,
+  MessageTool,
+} from '../../../extensions/tool';
+import { FeishuChannel } from '../../../extensions/channel';
 import type {
   App,
   Config,

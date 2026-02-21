@@ -40,20 +40,17 @@
       "types": "./src/bus/index.ts",
       "default": "./src/bus/index.ts"
     },
-    "./config": {
-      "types": "./src/config/index.ts",
-      "default": "./src/config/index.ts"
-    },
     "./skills": {
       "types": "./src/skill/index.ts",
       "default": "./src/skill/index.ts"
     }
   },
   "dependencies": {
+    "@microbot/config": "workspace:*",
+    "@microbot/types": "workspace:*",
     "@logtape/logtape": "^2.0.2",
     "ai": "^6.0.87",
     "gray-matter": "^4.0.3",
-    "js-yaml": "^4.1.1",
     "mitt": "^3.0.1",
     "zod": "^4.3.6"
   },

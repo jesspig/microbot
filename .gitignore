@@ -52,6 +52,7 @@ test-config-test/
 /.gemini
 /.trae
 /.iflow
+/.specify
 /specs
 
 GEMINI.md

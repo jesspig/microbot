@@ -13,10 +13,12 @@ export {
   RoutingRuleSchema,
   ProviderConfigSchema,
   ChannelConfigSchema,
+  WorkspaceConfigSchema,
   DEFAULT_ROUTING_RULES,
   DEFAULT_ROUTING_CONFIG,
   parseModelConfigs,
   getModelCapabilities,
+  parseWorkspaces,
 } from './schema';
 
 export type {
@@ -30,6 +32,7 @@ export type {
   RoutingRule,
   ProviderConfig,
   ProviderEntry,
+  WorkspaceConfig,
 } from './schema';
 
 // Loader

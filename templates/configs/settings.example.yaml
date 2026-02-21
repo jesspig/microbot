@@ -2,19 +2,14 @@
 # MicroBot 配置文件示例
 # ─────────────────────────────────────────────────────────────────
 #
-# 复制此文件到以下位置：
-#   - 用户级：~/.microbot/settings.yaml（全局配置）
-#   - 项目级：<workspace>/.microbot/settings.yaml（项目配置）
-#   - 目录级：<path>/.microbot/settings.yaml（目录配置）
-#
-# 配置合并顺序（后者覆盖前者）：
-#   用户级 < 项目级 < 目录级
+# 复制此文件到 ~/.microbot/settings.yaml
 #
 # 环境变量：支持 ${VAR_NAME} 语法
 #
 # ─────────────────────────────────────────────────────────────────
 
 agents:
+  # 默认工作区路径
   workspace: ~/.microbot/workspace
 
   # 模型配置（必填）
@@ -25,16 +20,32 @@ agents:
   # 生成参数
   # maxTokens: 8192
   # temperature: 0.7
-  # topK: 50
-  # topP: 0.7
-  # frequencyPenalty: 0.5
   # maxToolIterations: 20
 
   # 自动路由
   # auto: true
   # max: false
 
+# ─────────────────────────────────────────────────────────────────
+# 工作区列表（隔离环境）
+# ─────────────────────────────────────────────────────────────────
+# MicroBot 是隔离的，只能读写工作区内的文件
+#
+# workspaces:
+#   # 简写形式（仅路径）
+#   - ~/projects/my-project
+#
+#   # 完整形式
+#   - path: ~/projects/my-project
+#     name: My Project
+#     description: 我的项目描述
+#
+#   - path: ~/Documents
+#     name: Documents
+
+# ─────────────────────────────────────────────────────────────────
 # Provider 配置
+# ─────────────────────────────────────────────────────────────────
 # providers:
 #   ollama:
 #     baseUrl: http://localhost:11434/v1
@@ -48,7 +59,9 @@ agents:
 #       - id: deepseek-chat
 #         level: medium
 
+# ─────────────────────────────────────────────────────────────────
 # Channel 配置
+# ─────────────────────────────────────────────────────────────────
 # channels:
 #   feishu:
 #     enabled: true
@@ -56,7 +69,13 @@ agents:
 #     appSecret: your-app-secret
 #     allowFrom: []
 
+# ─────────────────────────────────────────────────────────────────
 # Routing 配置
+# ─────────────────────────────────────────────────────────────────
 # routing:
 #   enabled: true
-#   rules: []
+#   rules:
+#     - keywords: [架构, 重构]
+#       level: ultra
+#     - keywords: [调试, 修复]
+#       level: high
