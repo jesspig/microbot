@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { ReadFileTool, WriteFileTool, ListDirTool } from '../../extensions/tool';
-import { ToolRegistry } from '@microbot/core/tools';
-import type { ToolContext } from '@microbot/core/tools';
+import { ToolRegistry } from '@microbot/sdk';
+import type { ToolContext } from '@microbot/types';
 
 const testDir = join(process.cwd(), 'test-fs-workspace');
 
@@ -11,6 +11,7 @@ const defaultCtx: ToolContext = {
   channel: 'test',
   chatId: '123',
   workspace: testDir,
+  currentDir: testDir,
   sendToBus: async () => {},
 };
 
@@ -24,9 +25,9 @@ describe('Filesystem Tools', () => {
     }
     
     registry = new ToolRegistry();
-    registry.register(new ReadFileTool());
-    registry.register(new WriteFileTool());
-    registry.register(new ListDirTool());
+    registry.register(ReadFileTool);
+    registry.register(WriteFileTool);
+    registry.register(ListDirTool);
   });
 
   afterEach(() => {

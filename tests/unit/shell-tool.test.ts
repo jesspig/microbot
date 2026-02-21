@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { ExecTool } from '../../extensions/tool';
-import { ToolRegistry, type ToolContext } from '@microbot/core/tools';
+import { createExecTool } from '../../extensions/tool';
+import { ToolRegistry } from '@microbot/sdk';
+import type { ToolContext } from '@microbot/types';
 
 const defaultCtx: ToolContext = {
   channel: 'test',
   chatId: '123',
   workspace: process.cwd(),
+  currentDir: process.cwd(),
   sendToBus: async () => {},
 };
 
@@ -14,7 +16,7 @@ describe('ShellTool', () => {
 
   beforeEach(() => {
     registry = new ToolRegistry();
-    registry.register(new ExecTool(process.cwd()));
+    registry.register(createExecTool(process.cwd()));
   });
 
   describe('命令执行', () => {

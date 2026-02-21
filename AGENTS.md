@@ -183,6 +183,50 @@ llm:
 
 ---
 
+## Active Technologies
+
+- TypeScript 5.9+ + Bun 1.0+
+- zod ^4.x, mitt ^3.x
+- MCP (Model Context Protocol) - Tool/Resource/Prompt 原语
+- ACP (Agent Client Protocol) - IDE 集成（规划中）
+
+---
+
+## 包结构（8层 Monorepo）
+
+```
+packages/
+├── types/              # L1: 核心类型定义（MCP 兼容）
+├── runtime/            # L2: 运行时引擎（Container、EventBus、HookSystem）
+├── config/             # L2: 三级配置系统
+├── storage/            # L2: 会话存储
+├── sdk/                # L3: 聚合 SDK，统一开发接口
+├── providers/          # L3: LLM Provider 抽象
+├── extension-system/   # L3: 扩展发现、加载、热重载
+└── server/             # L4: 服务层（Channel、Queue、Events）
+
+apps/
+└── cli/                # L5: CLI 应用
+
+extensions/
+├── tool/               # 工具扩展（defineTool）
+├── channel/            # 通道扩展（defineChannel）
+└── skills/             # 技能扩展（defineSkill）
+```
+
+---
+
+## Recent Changes
+
+- v0.2.0: 重构为 8 层 Monorepo 架构
+  - Types → Runtime/Config/Storage → SDK/Providers/Extension-System → Server → CLI
+  - 支持 MCP 兼容的 Tool/Resource/Prompt 原语
+  - 三级配置作用域（user < project < directory）
+  - 扩展热插拔（defineTool/defineChannel/defineSkill）
+  - 双向 LLM/Agent 网关（规划中）
+
+---
+
 ## 开发规范
 
 ### 命名规范

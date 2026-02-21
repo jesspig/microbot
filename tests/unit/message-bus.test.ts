@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { MessageBus } from '@microbot/core/bus';
+import { MessageBus } from '@microbot/sdk';
 
 describe('MessageBus', () => {
   let bus: MessageBus;

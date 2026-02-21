@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { SessionStore } from '@microbot/core/storage';
+import { SessionStore } from '@microbot/sdk';
 
 const TEST_DIR = join(homedir(), '.microbot', 'test-sessions');
 

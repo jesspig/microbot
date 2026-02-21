@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { WebFetchTool } from '../../extensions/tool';
-import { ToolRegistry } from '@microbot/core';
-import type { ToolContext } from '@microbot/core';
+import { ToolRegistry } from '@microbot/sdk';
+import type { ToolContext } from '@microbot/types';
 
 const defaultCtx: ToolContext = {
   channel: 'test',
   chatId: '123',
   workspace: process.cwd(),
+  currentDir: process.cwd(),
   sendToBus: async () => {},
 };
 
@@ -15,7 +16,7 @@ describe('Web Tools', () => {
 
   beforeEach(() => {
     registry = new ToolRegistry();
-    registry.register(new WebFetchTool());
+    registry.register(WebFetchTool);
   });
 
   describe('WebFetchTool', () => {

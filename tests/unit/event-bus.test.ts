@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { EventBus } from '@microbot/core';
+import { EventBus } from '@microbot/sdk';
 
 describe('EventBus', () => {
   let bus: EventBus;
