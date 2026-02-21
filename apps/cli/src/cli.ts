@@ -2,36 +2,35 @@
 
 /**
  * MicroBot CLI 入口
- * 
+ *
  * 命令:
  * - start: 启动服务
  * - status: 显示状态
+ * - ext: 扩展管理
  */
 
 import { parseArgs } from 'util';
-import { configure, getConsoleSink, getLogger } from '@logtape/logtape';
+import { configure, getConsoleSink } from '@logtape/logtape';
 import { prettyFormatter } from '@logtape/pretty';
-import { createApp } from './index';
-import { loadConfig, getConfigStatus } from '@microbot/core/config';
-import type { App } from './core/types/interfaces';
+import { createApp } from './app';
+import { loadConfig, getConfigStatus } from '@microbot/config';
+import type { App } from '@microbot/types';
 
 const VERSION = '0.1.0';
 
 /** 初始化 LogTape */
-async function initLogTape(): Promise<void> {
+async function initLogTape(verbose: boolean = false): Promise<void> {
   await configure({
     sinks: {
       console: getConsoleSink({ formatter: prettyFormatter }),
     },
     loggers: [
-      { category: [], sinks: ['console'], lowestLevel: 'info' },
+      { category: [], sinks: ['console'], lowestLevel: verbose ? 'debug' : 'info' },
       { category: ['logtape', 'meta'], lowestLevel: 'warning' },
     ],
     reset: true,
   });
 }
-
-const log = getLogger(['cli']);
 
 /** 显示帮助信息 */
 function showHelp(): void {
@@ -44,16 +43,20 @@ MicroBot - 轻量级 AI 助手框架
 命令:
   start       启动服务
   status      显示状态
+  ext         扩展管理
 
 选项:
   -c, --config <path>   配置文件路径
+  -v, --verbose         显示详细日志
   -h, --help            显示帮助
-  -v, --version         显示版本
+      --version         显示版本
 
 示例:
   microbot start
+  microbot start -v
   microbot start -c ./config.yaml
   microbot status
+  microbot ext list
 `);
 }
 
@@ -96,7 +99,7 @@ async function startService(configPath?: string): Promise<void> {
     console.log();
     console.log('  示例配置：');
     console.log('    \x1b[2mproviders:\x1b[0m');
-    console.log('    \x1b[2m  ollama:\x1b[0m');
+    console.log('    \x1b[2m  ollama:\x1b[2m');
     console.log('    \x1b[2m    baseUrl: http://localhost:11434/v1\x1b[0m');
     console.log('    \x1b[2m    models: [qwen3]\x1b[0m');
     console.log();
@@ -112,13 +115,13 @@ async function startService(configPath?: string): Promise<void> {
     isShuttingDown = true;
 
     console.log();
-    log.info('正在关闭...');
+    console.log('正在关闭...');
     try {
       await app.stop();
-      log.info('已停止');
+      console.log('已停止');
       process.exit(0);
     } catch (error) {
-      log.error('关闭失败: {error}', { error });
+      console.error('关闭失败:', error);
       process.exit(1);
     }
   };
@@ -140,33 +143,34 @@ async function startService(configPath?: string): Promise<void> {
       console.log(`  \x1b[2m路由:\x1b[0m 固定`);
     }
     console.log();
-    log.debug('按 Ctrl+C 停止');
+    console.log('按 Ctrl+C 停止');
     console.log('─'.repeat(50));
   } catch (error) {
-    log.error('启动失败: {error}', { error });
+    console.error('启动失败:', error);
     process.exit(1);
   }
 }
 
 /** CLI 主入口 */
 export async function runCli(argv: string[] = process.argv.slice(2)): Promise<void> {
-  // 初始化 LogTape（必须在所有日志调用之前）
-  await initLogTape();
-
   // 解析全局选项
   const parsed = parseArgs({
     args: argv,
     options: {
       config: { type: 'string', short: 'c' },
+      verbose: { type: 'boolean', short: 'v' },
       help: { type: 'boolean', short: 'h' },
-      version: { type: 'boolean', short: 'v' },
+      version: { type: 'boolean' },
     },
     allowPositionals: true,
     strict: false,
   });
 
-  const { help, version, config } = parsed.values;
+  const { help, version, config, verbose } = parsed.values;
   const positionals = parsed.positionals;
+
+  // 初始化 LogTape（必须在所有日志调用之前）
+  await initLogTape(verbose);
 
   // 全局选项
   if (help && positionals.length === 0) {
@@ -193,13 +197,19 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
       break;
     }
 
+    case 'ext': {
+      const { runExtCommand } = await import('./commands/ext');
+      await runExtCommand(positionals.slice(1));
+      break;
+    }
+
     case undefined:
       showHelp();
       break;
 
     default:
-      log.warn('未知命令: {command}', { command });
-      log.info('运行 microbot --help 查看帮助');
+      console.log(`未知命令: ${command}`);
+      console.log('运行 microbot --help 查看帮助');
   }
 }
 
