@@ -64,6 +64,17 @@ export class LLMGateway implements LLMProvider {
     }
 
     const actualModel = modelName ?? entry.provider.getDefaultModel();
+    
+    // 记录路由决策
+    log.info('📡 路由决策: provider={provider}, model={model}', { 
+      provider: providerName, 
+      model: actualModel 
+    });
+    log.info('  原因: {reason}', { 
+      reason: model 
+        ? `用户指定模型 ${model}` 
+        : `使用默认 Provider ${this.config.defaultProvider}` 
+    });
 
     try {
       const response = await entry.provider.chat(messages, tools, actualModel, config);

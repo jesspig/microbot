@@ -73,3 +73,7 @@ export {
   loadTemplateFile,
   loadAllTemplateFiles,
 } from './template';
+
+// Logger
+export { initLogger, getLogDir } from './logger';
+export type { LogConfig } from './logger';

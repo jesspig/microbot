@@ -20,6 +20,8 @@
   "files": ["src"],
   "dependencies": {
     "@microbot/types": "workspace:*",
+    "@microbot/config": "workspace:*",
+    "@microbot/providers": "workspace:*",
     "@logtape/logtape": "^2.0.2",
     "mitt": "^3.0.1"
   },

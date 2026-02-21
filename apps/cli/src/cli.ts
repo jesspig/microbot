@@ -10,27 +10,12 @@
  */
 
 import { parseArgs } from 'util';
-import { configure, getConsoleSink } from '@logtape/logtape';
-import { prettyFormatter } from '@logtape/pretty';
+import { initLogger } from '@microbot/config';
 import { createApp } from './app';
 import { loadConfig, getConfigStatus } from '@microbot/config';
 import type { App } from '@microbot/types';
 
-const VERSION = '0.1.0';
-
-/** 初始化 LogTape */
-async function initLogTape(verbose: boolean = false): Promise<void> {
-  await configure({
-    sinks: {
-      console: getConsoleSink({ formatter: prettyFormatter }),
-    },
-    loggers: [
-      { category: [], sinks: ['console'], lowestLevel: verbose ? 'debug' : 'info' },
-      { category: ['logtape', 'meta'], lowestLevel: 'warning' },
-    ],
-    reset: true,
-  });
-}
+const VERSION = '0.2.0';
 
 /** 显示帮助信息 */
 function showHelp(): void {
@@ -169,8 +154,8 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
   const { help, version, config, verbose } = parsed.values;
   const positionals = parsed.positionals;
 
-  // 初始化 LogTape（必须在所有日志调用之前）
-  await initLogTape(verbose);
+  // 初始化日志（必须在所有日志调用之前）
+  await initLogger({ verbose });
 
   // 全局选项
   if (help && positionals.length === 0) {

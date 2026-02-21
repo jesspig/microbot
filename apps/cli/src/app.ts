@@ -122,10 +122,17 @@ class AppImpl implements App {
       this.toolRegistry,
       {
         workspace: this.workspace,
-        maxIterations: 20,
-        maxTokens: 8192,
-        temperature: 0.7,
+        maxIterations: this.config.agents.maxToolIterations ?? 20,
+        maxTokens: this.config.agents.maxTokens ?? 8192,
+        temperature: this.config.agents.temperature ?? 0.7,
         systemPrompt: this.loadSystemPrompt(),
+        // 路由配置
+        auto: this.config.agents.auto ?? false,
+        max: this.config.agents.max ?? false,
+        chatModel: this.config.agents.models?.chat,
+        checkModel: this.config.agents.models?.check,
+        availableModels: this.availableModels,
+        routing: this.config.routing,
       }
     );
     

@@ -102,3 +102,6 @@ export {
   type MCPTransportConfig,
   type MCPClientConfig,
 } from './mcp';
+
+// 工具函数
+export { convertToPlainText, buildUserContent } from './utils';

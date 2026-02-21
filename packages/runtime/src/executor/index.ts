@@ -5,8 +5,10 @@
  */
 
 import type { InboundMessage, OutboundMessage, ToolContext, ToolCall, ToolResult } from '@microbot/types';
-import type { LLMGateway, LLMMessage, LLMToolDefinition } from '@microbot/providers';
+import type { LLMGateway, LLMMessage, LLMToolDefinition, GenerationConfig, MessageContent } from '@microbot/providers';
 import type { MessageBus } from '../bus/queue';
+import type { ModelConfig, RoutingConfig } from '@microbot/config';
+import { ModelRouter, convertToPlainText, buildUserContent, type RouteResult } from '@microbot/providers';
 import { getLogger } from '@logtape/logtape';
 
 const log = getLogger(['executor']);
@@ -47,6 +49,18 @@ export interface AgentExecutorConfig {
   temperature: number;
   /** 系统提示词 */
   systemPrompt?: string;
+  /** 自动路由 */
+  auto?: boolean;
+  /** 性能优先模式 */
+  max?: boolean;
+  /** 对话模型 */
+  chatModel?: string;
+  /** 意图识别模型 */
+  checkModel?: string;
+  /** 可用模型列表 */
+  availableModels?: Map<string, ModelConfig[]>;
+  /** 路由配置 */
+  routing?: RoutingConfig;
 }
 
 const DEFAULT_CONFIG: AgentExecutorConfig = {
@@ -54,6 +68,8 @@ const DEFAULT_CONFIG: AgentExecutorConfig = {
   maxIterations: 20,
   maxTokens: 8192,
   temperature: 0.7,
+  auto: true,
+  max: false,
 };
 
 /**
@@ -64,13 +80,25 @@ const DEFAULT_CONFIG: AgentExecutorConfig = {
 export class AgentExecutor {
   private running = false;
   private conversationHistory = new Map<string, LLMMessage[]>();
+  private router: ModelRouter;
 
   constructor(
     private bus: MessageBus,
     private gateway: LLMGateway,
     private tools: ToolRegistryLike,
     private config: AgentExecutorConfig = DEFAULT_CONFIG
-  ) {}
+  ) {
+    // 初始化路由器
+    this.router = new ModelRouter({
+      chatModel: config.chatModel || '',
+      checkModel: config.checkModel,
+      auto: config.auto ?? true,
+      max: config.max ?? false,
+      models: config.availableModels ?? new Map(),
+      routing: config.routing,
+    });
+    this.router.setProvider(gateway);
+  }
 
   /**
    * 启动执行器
@@ -84,6 +112,17 @@ export class AgentExecutor {
       temperature: this.config.temperature,
     });
     
+    // 显示路由配置
+    const routerStatus = this.router.getStatus();
+    log.info('路由配置: auto={auto}, max={max}, chatModel={chatModel}', {
+      auto: routerStatus.auto,
+      max: routerStatus.max,
+      chatModel: routerStatus.chatModel,
+    });
+    if (routerStatus.rulesCount > 0) {
+      log.info('路由规则: {count} 条', { count: routerStatus.rulesCount });
+    }
+    
     // 显示可用工具
     const tools = this.tools.getDefinitions();
     log.info('可用工具 ({count}个): {tools}', { 
@@ -94,7 +133,7 @@ export class AgentExecutor {
     // 显示系统提示词长度
     if (this.config.systemPrompt) {
       log.info('系统提示词: {length} 字符', { length: this.config.systemPrompt.length });
-      log.info('系统提示词预览:\n{preview}', { 
+      log.debug('系统提示词预览:\n{preview}', { 
         preview: this.config.systemPrompt.length > 500 
           ? this.config.systemPrompt.slice(0, 500) + '...\n[已截断]' 
           : this.config.systemPrompt 
@@ -146,17 +185,23 @@ export class AgentExecutor {
     
     // 构建发送给 LLM 的消息列表（包含系统提示词）
     const messages: LLMMessage[] = [];
-    
+
     // 1. 添加系统消息（每次都重新添加）
     if (this.config.systemPrompt) {
       messages.push({ role: 'system', content: this.config.systemPrompt });
     }
-    
+
     // 2. 添加历史消息
     messages.push(...sessionHistory);
-    
-    // 3. 添加当前用户消息
-    messages.push({ role: 'user', content: msg.content });
+
+    // 3. 添加当前用户消息（包含媒体）
+    const userContent: MessageContent = buildUserContent(msg.content, msg.media);
+    messages.push({ role: 'user', content: userContent });
+
+    // 记录媒体信息
+    if (msg.media && msg.media.length > 0) {
+      log.info('  媒体: {count} 个', { count: msg.media.length });
+    }
 
     try {
       // ReAct 循环
@@ -174,14 +219,22 @@ export class AgentExecutor {
         // 获取工具定义并转换为 LLM 格式
         const toolDefinitions = toLLMToolDefinitions(availableTools);
         
-        // 调用 LLM（使用包含系统消息的 messages）
-        const llmStartTime = Date.now();
-        log.info('  🤖 调用 LLM...');
+        // 选择模型
+        const routeResult = await this.selectModel(messages, msg.media, iteration);
+        const generationConfig = this.mergeGenerationConfig(routeResult.config);
         
-        const response = await this.gateway.chat(messages, toolDefinitions, undefined, {
-          maxTokens: this.config.maxTokens,
-          temperature: this.config.temperature,
-        });
+        // 视觉检查：非视觉模型需要转换消息为纯文本
+        const processedMessages = routeResult.config.vision 
+          ? messages 
+          : convertToPlainText(messages);
+        
+        // 调用 LLM
+        const llmStartTime = Date.now();
+        log.info('  🤖 调用 LLM: {model}', { model: routeResult.model });
+        log.info('    路由原因: {reason}', { reason: routeResult.reason });
+        log.info('    视觉支持: {vision}', { vision: routeResult.config.vision ?? false });
+        
+        const response = await this.gateway.chat(processedMessages, toolDefinitions, routeResult.model, generationConfig);
         const llmElapsed = Date.now() - llmStartTime;
 
         // 记录 LLM 响应详情
@@ -197,7 +250,10 @@ export class AgentExecutor {
             total: response.usage.totalTokens,
           });
         }
-        log.debug('    内容: {content}', { content: this.preview(response.content, 200) });
+        // 显示 LLM 回复内容
+        if (response.content) {
+          log.info('    回复: {content}', { content: this.preview(response.content, 500) });
+        }
 
         // 添加助手回复到消息列表
         const assistantMessage: LLMMessage = {
@@ -309,6 +365,47 @@ export class AgentExecutor {
     const sessionKey = `${channel}:${chatId}`;
     this.conversationHistory.delete(sessionKey);
     log.info('会话已清除: {sessionKey}', { sessionKey });
+  }
+
+  /**
+   * 选择模型（自动路由）
+   */
+  private async selectModel(
+    messages: LLMMessage[],
+    media: string[] | undefined,
+    iteration: number
+  ): Promise<RouteResult> {
+    // 第一次迭代且启用自动路由时，进行意图识别
+    if (iteration === 1 && this.config.auto) {
+      const intent = await this.router.analyzeIntent(messages, media);
+      log.info('  🎯 意图识别: model={model}, reason={reason}', { 
+        model: intent.model, 
+        reason: intent.reason 
+      });
+      return this.router.selectModelByIntent(intent);
+    }
+    
+    // 后续迭代使用路由规则
+    return this.router.route(messages, iteration === 1 ? media : undefined);
+  }
+
+  /**
+   * 合并生成配置
+   */
+  private mergeGenerationConfig(modelConfig: ModelConfig): GenerationConfig {
+    const merged: GenerationConfig = {
+      maxTokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+    };
+    
+    // 模型特定配置覆盖默认配置
+    if (modelConfig.maxTokens !== undefined) merged.maxTokens = modelConfig.maxTokens;
+    if (modelConfig.temperature !== undefined) merged.temperature = modelConfig.temperature;
+    if (modelConfig.topK !== undefined) merged.topK = modelConfig.topK;
+    if (modelConfig.topP !== undefined) merged.topP = modelConfig.topP;
+    if (modelConfig.frequencyPenalty !== undefined) merged.frequencyPenalty = modelConfig.frequencyPenalty;
+    
+    return merged;
   }
 
   private preview(text: string, maxLen = 50): string {

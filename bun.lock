@@ -8,7 +8,7 @@
         "@larksuiteoapi/node-sdk": "^1.59.0",
         "@logtape/logtape": "^2.0.2",
         "@logtape/pretty": "^2.0.2",
-        "@microbot/core": "workspace:*",
+        "@microbot/sdk": "workspace:*",
         "ai": "^6.0.92",
         "gray-matter": "^4.0.3",
         "js-yaml": "^4.1.1",
@@ -54,6 +54,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@logtape/logtape": "^2.0.2",
+        "@logtape/pretty": "^2.0.2",
         "@microbot/types": "workspace:*",
         "gray-matter": "^4.0.3",
         "js-yaml": "^4.1.1",
@@ -115,6 +116,8 @@
       "version": "0.1.0",
       "dependencies": {
         "@logtape/logtape": "^2.0.2",
+        "@microbot/config": "workspace:*",
+        "@microbot/providers": "workspace:*",
         "@microbot/types": "workspace:*",
         "mitt": "^3.0.1",
       },
