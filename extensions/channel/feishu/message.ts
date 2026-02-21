@@ -36,7 +36,7 @@ export async function parseMessageContent(
       case 'image':
         content = '[图片]';
         const imageKey = parsed.image_key || parsed.file_key;
-        log.debug('图片消息: messageId={messageId}, imageKey={imageKey}', { messageId, imageKey });
+        log.debug('图片消息', { messageId, imageKey });
         if (imageKey) {
           const imgUrl = await getImageResource(client, messageId, imageKey);
           if (imgUrl) {

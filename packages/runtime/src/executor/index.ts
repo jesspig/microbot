@@ -83,14 +83,11 @@ const DEFAULT_CONFIG: AgentExecutorConfig = {
 
 /**
  * Agent 执行器
- *
- * 处理消息并协调工具调用。
  */
 export class AgentExecutor {
   private running = false;
   private conversationHistory = new Map<string, LLMMessage[]>();
   private router: ModelRouter;
-  /** 缓存的工具定义 */
   private cachedToolDefinitions: LLMToolDefinition[] | null = null;
 
   constructor(
@@ -116,40 +113,28 @@ export class AgentExecutor {
   async run(): Promise<void> {
     this.running = true;
     log.info('Agent 执行器已启动');
-    log.info('配置: maxIterations={maxIterations}, maxTokens={maxTokens}, temperature={temperature}', {
+
+    log.debug('配置详情', {
       maxIterations: this.config.maxIterations,
       maxTokens: this.config.maxTokens,
       temperature: this.config.temperature,
+      auto: this.config.auto,
+      max: this.config.max,
     });
-
-    const routerStatus = this.router.getStatus();
-    log.info('路由配置: auto={auto}, max={max}, chatModel={chatModel}', {
-      auto: routerStatus.auto,
-      max: routerStatus.max,
-      chatModel: routerStatus.chatModel,
-    });
-    if (routerStatus.rulesCount > 0) {
-      log.info('路由规则: {count} 条', { count: routerStatus.rulesCount });
-    }
-
-    const tools = this.tools.getDefinitions();
-    log.info('可用工具 ({count}个): {tools}', {
-      count: tools.length,
-      tools: tools.map(t => t.name).join(', ')
-    });
-
-    if (this.config.systemPrompt) {
-      log.info('系统提示词: {length} 字符', { length: this.config.systemPrompt.length });
-    }
 
     while (this.running) {
       try {
         const msg = await this.bus.consumeInbound();
-        log.info('════════════════════════════════════════════════════════════');
-        log.info('📥 收到消息');
-        log.info('  通道: {channel}, 聊天ID: {chatId}', { channel: msg.channel, chatId: msg.chatId });
-        log.info('  发送者: {senderId}', { senderId: msg.senderId });
-        log.info('  内容: {content}', { content: msg.content });
+
+        // CLI: 用户输入
+        log.info('📥 用户输入', { content: msg.content });
+
+        log.debug('消息详情', {
+          channel: msg.channel,
+          chatId: msg.chatId,
+          senderId: msg.senderId,
+          mediaCount: msg.media?.length ?? 0,
+        });
 
         const startTime = Date.now();
         const response = await this.processMessage(msg);
@@ -157,12 +142,10 @@ export class AgentExecutor {
 
         if (response) {
           await this.bus.publishOutbound(response);
-          log.info('📤 回复已发送 (耗时 {elapsed}ms)', { elapsed });
-          log.info('  内容预览: {preview}', { preview: this.preview(response.content, 100) });
+          log.info('📤 回复已发送', { elapsed: `${elapsed}ms` });
         }
-        log.info('════════════════════════════════════════════════════════════');
       } catch (error) {
-        log.error('❌ 处理消息失败: {error}', { error: this.safeErrorMsg(error) });
+        log.error('❌ 处理消息失败', { error: this.safeErrorMsg(error) });
       }
     }
   }
@@ -182,13 +165,10 @@ export class AgentExecutor {
     const sessionKey = `${msg.channel}:${msg.chatId}`;
     const sessionHistory = this.conversationHistory.get(sessionKey) ?? [];
 
-    // 构建消息
     const messages = this.buildMessages(sessionHistory, msg);
 
     try {
       const result = await this.runReActLoop(messages, msg);
-
-      // 更新会话历史（跳过系统消息）
       this.updateHistory(sessionKey, messages.slice(1));
 
       return {
@@ -199,35 +179,28 @@ export class AgentExecutor {
         metadata: msg.metadata,
       };
     } catch (error) {
-      log.error('❌ 处理消息异常: {error}', { error: this.safeErrorMsg(error) });
+      log.error('❌ 处理消息异常', { error: this.safeErrorMsg(error) });
       return this.createErrorResponse(msg);
     }
   }
 
   /**
-   * 构建发送给 LLM 的消息列表
+   * 构建消息列表
    */
   private buildMessages(history: LLMMessage[], msg: InboundMessage): LLMMessage[] {
     const messages: LLMMessage[] = [];
 
-    // 系统消息
     if (this.config.systemPrompt) {
       messages.push({ role: 'system', content: this.config.systemPrompt });
     }
 
-    // 历史消息
     messages.push(...history);
 
-    // 用户消息（包含媒体）
     const userContent: MessageContent = buildUserContent(msg.content, msg.media);
     messages.push({ role: 'user', content: userContent });
 
-    // 记录媒体信息
     if (msg.media && msg.media.length > 0) {
-      log.info('  媒体: {count} 个', { count: msg.media.length });
-      if (msg.media.length > MAX_MEDIA_COUNT) {
-        log.warn('  ⚠️ 媒体数量超限，已截断为 {max} 个', { max: MAX_MEDIA_COUNT });
-      }
+      log.info('📎 媒体', { count: msg.media.length });
     }
 
     return messages;
@@ -239,78 +212,69 @@ export class AgentExecutor {
   private async runReActLoop(messages: LLMMessage[], msg: InboundMessage): Promise<{ content: string }> {
     let iteration = 0;
     let lastContent = '';
-
-    // 获取工具定义（缓存）
     const toolDefinitions = this.getToolDefinitions();
 
     while (iteration < this.config.maxIterations) {
       iteration++;
-      log.info('🔄 ReAct 迭代 #{iteration}', { iteration });
 
       const routeResult = await this.selectModel(messages, msg.media, iteration);
       const generationConfig = this.mergeGenerationConfig(routeResult.config);
 
-      // 视觉检查
       const processedMessages = routeResult.config.vision
         ? messages
         : convertToPlainText(messages);
 
-      // 调用 LLM
-      log.info('  🤖 调用 LLM: {model}', { model: routeResult.model });
-      log.info('    路由原因: {reason}', { reason: routeResult.reason });
-      log.info('    视觉支持: {vision}', { vision: routeResult.config.vision ?? false });
+      // CLI: 模型选择
+      log.info('🤖 调用模型', { model: routeResult.model, reason: routeResult.reason });
 
+      log.debug('路由详情', {
+        provider: routeResult.config.id,
+        vision: routeResult.config.vision,
+        iteration,
+      });
+
+      const llmStartTime = Date.now();
       const response = await this.gateway.chat(processedMessages, toolDefinitions, routeResult.model, generationConfig);
+      const llmElapsed = Date.now() - llmStartTime;
 
-      // 记录响应
-      this.logResponse(response);
+      // CLI: LLM 响应统计
+      log.info('💬 LLM 响应', {
+        model: `${response.usedProvider}/${response.usedModel}`,
+        tokens: response.usage ? `${response.usage.inputTokens}→${response.usage.outputTokens}` : 'N/A',
+        elapsed: `${llmElapsed}ms`,
+      });
 
-      // 添加助手消息
+      // 文件日志: 详细响应
+      log.debug('LLM 详细响应', {
+        content: response.content,
+        hasToolCalls: response.hasToolCalls,
+        toolCallCount: response.toolCalls?.length ?? 0,
+        usage: response.usage,
+      });
+
       messages.push(this.buildAssistantMessage(response));
 
-      // 无工具调用则返回
       if (!response.hasToolCalls || !response.toolCalls || response.toolCalls.length === 0) {
-        log.info('  📝 无工具调用，返回最终回复');
+        // CLI: 最终回复
+        log.info('📝 回复', { content: response.content });
         return { content: response.content };
       }
 
-      // 执行工具调用
       lastContent = await this.executeToolCalls(response.toolCalls, msg, messages);
     }
 
-    log.warn('  ⚠️ 达到最大迭代次数 {maxIterations}', { maxIterations: this.config.maxIterations });
+    log.warn('⚠️ 达到最大迭代次数', { maxIterations: this.config.maxIterations });
     return { content: lastContent };
   }
 
   /**
-   * 获取工具定义（带缓存）
+   * 获取工具定义
    */
   private getToolDefinitions(): LLMToolDefinition[] {
     if (!this.cachedToolDefinitions) {
       this.cachedToolDefinitions = toLLMToolDefinitions(this.tools.getDefinitions());
     }
     return this.cachedToolDefinitions;
-  }
-
-  /**
-   * 记录 LLM 响应
-   */
-  private logResponse(response: { content: string; usedProvider?: string; usedModel?: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number } }): void {
-    log.info('  ✅ LLM 响应');
-    log.info('    模型: {provider}/{model}', {
-      provider: response.usedProvider ?? 'unknown',
-      model: response.usedModel ?? 'unknown'
-    });
-    if (response.usage) {
-      log.info('    Token: 输入={input}, 输出={output}, 总计={total}', {
-        input: response.usage.inputTokens,
-        output: response.usage.outputTokens,
-        total: response.usage.totalTokens,
-      });
-    }
-    if (response.content) {
-      log.info('    回复: {content}', { content: this.preview(response.content, 500) });
-    }
   }
 
   /**
@@ -328,19 +292,21 @@ export class AgentExecutor {
    * 执行工具调用
    */
   private async executeToolCalls(toolCalls: ToolCall[], msg: InboundMessage, messages: LLMMessage[]): Promise<string> {
-    log.info('  🔧 执行 {count} 个工具调用...', { count: toolCalls.length });
     let lastResult = '';
 
     for (const toolCall of toolCalls) {
-      log.info('    ▶ 工具: {name}', { name: toolCall.name });
-      log.info('      参数: {args}', { args: JSON.stringify(toolCall.arguments, null, 2) });
-
       const startTime = Date.now();
+
+      // CLI: 工具调用
+      log.info('🔧 工具调用', { tool: toolCall.name });
+
+      log.debug('工具参数', { args: toolCall.arguments });
+
       const result = await this.runTool(toolCall, msg);
       const elapsed = Date.now() - startTime;
 
-      log.info('      ✅ 完成 (耗时 {elapsed}ms)', { elapsed: elapsed });
-      log.info('      结果: {result}', { result: this.preview(result, 500) });
+      // CLI: 工具结果
+      log.info('✅ 工具结果', { tool: toolCall.name, elapsed: `${elapsed}ms`, result });
 
       messages.push({ role: 'tool', content: result, toolCallId: toolCall.id });
       lastResult = result;
@@ -356,8 +322,7 @@ export class AgentExecutor {
     try {
       return await this.tools.execute(toolCall.name, toolCall.arguments, this.createContext(msg));
     } catch (error) {
-      const errorMsg = this.safeErrorMsg(error);
-      log.error('      ❌ 工具执行失败: {error}', { error: errorMsg });
+      log.error('❌ 工具执行失败', { tool: toolCall.name, error: this.safeErrorMsg(error) });
       return JSON.stringify({ error: '工具执行失败', tool: toolCall.name });
     }
   }
@@ -366,14 +331,11 @@ export class AgentExecutor {
    * 更新会话历史
    */
   private updateHistory(sessionKey: string, history: LLMMessage[]): void {
-    // 限制历史长度
     const trimmed = history.length > MAX_HISTORY_PER_SESSION
       ? history.slice(-MAX_HISTORY_PER_SESSION)
       : history;
 
     this.conversationHistory.set(sessionKey, trimmed);
-
-    // 清理过期会话
     this.trimSessions();
   }
 
@@ -383,7 +345,6 @@ export class AgentExecutor {
   private trimSessions(): void {
     if (this.conversationHistory.size <= MAX_SESSIONS) return;
 
-    // 删除最旧的会话
     const keysToDelete = Array.from(this.conversationHistory.keys())
       .slice(0, this.conversationHistory.size - MAX_SESSIONS);
 
@@ -391,7 +352,7 @@ export class AgentExecutor {
       this.conversationHistory.delete(key);
     }
 
-    log.debug('清理了 {count} 个过期会话', { count: keysToDelete.length });
+    log.debug('清理过期会话', { count: keysToDelete.length });
   }
 
   /**
@@ -405,13 +366,6 @@ export class AgentExecutor {
       media: [],
       metadata: msg.metadata,
     };
-  }
-
-  /**
-   * 执行工具调用
-   */
-  private async executeToolCall(toolCall: ToolCall, msg: InboundMessage): Promise<string> {
-    return this.runTool(toolCall, msg);
   }
 
   /**
@@ -433,11 +387,11 @@ export class AgentExecutor {
   clearSession(channel: string, chatId: string): void {
     const sessionKey = `${channel}:${chatId}`;
     this.conversationHistory.delete(sessionKey);
-    log.info('会话已清除: {sessionKey}', { sessionKey });
+    log.debug('会话已清除', { sessionKey });
   }
 
   /**
-   * 选择模型（自动路由）
+   * 选择模型
    */
   private async selectModel(
     messages: LLMMessage[],
@@ -446,10 +400,10 @@ export class AgentExecutor {
   ): Promise<RouteResult> {
     if (iteration === 1 && this.config.auto) {
       const intent = await this.router.analyzeIntent(messages, media);
-      log.info('  🎯 意图识别: model={model}, reason={reason}', {
-        model: intent.model,
-        reason: intent.reason
-      });
+
+      // CLI: 意图识别
+      log.info('🎯 意图识别', { model: intent.model, reason: intent.reason });
+
       return this.router.selectModelByIntent(intent);
     }
 
@@ -474,33 +428,16 @@ export class AgentExecutor {
     return merged;
   }
 
-  private preview(text: string, maxLen = 50): string {
-    if (!text) return '';
-    return text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
-  }
-
   /**
    * 安全的错误消息（脱敏）
    */
   private safeErrorMsg(error: unknown): string {
     if (!(error instanceof Error)) return '未知错误';
 
-    // 移除可能的敏感信息
     let msg = error.message;
-
-    // 移除路径
     msg = msg.replace(/[A-Z]:\\[^\s]+/gi, '[路径]');
-
-    // 移除 API 密钥
     msg = msg.replace(/[a-zA-Z0-9_-]{20,}/g, '[密钥]');
 
     return msg;
-  }
-
-  /**
-   * 完整的错误消息（仅用于日志）
-   */
-  private errorMsg(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
   }
 }

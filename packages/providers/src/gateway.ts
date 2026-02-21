@@ -64,26 +64,22 @@ export class LLMGateway implements LLMProvider {
     }
 
     const actualModel = modelName ?? entry.provider.getDefaultModel();
-    
-    // 记录路由决策
-    log.info('📡 路由决策: provider={provider}, model={model}', { 
-      provider: providerName, 
-      model: actualModel 
-    });
-    log.info('  原因: {reason}', { 
-      reason: model 
-        ? `用户指定模型 ${model}` 
-        : `使用默认 Provider ${this.config.defaultProvider}` 
+
+    // 详细日志（仅文件）
+    log.debug('路由决策', {
+      provider: providerName,
+      model: actualModel,
+      reason: model ? `用户指定` : `默认 Provider`,
     });
 
     try {
       const response = await entry.provider.chat(messages, tools, actualModel, config);
       return this.withMeta(response, providerName, actualModel);
     } catch (error) {
-      log.error('Provider {name} 失败: {error}', { name: providerName, error: this.errorMsg(error) });
+      log.error('Provider 失败', { provider: providerName, error: this.errorMsg(error) });
 
       if (this.config.fallbackEnabled) {
-        log.info('尝试故障转移到其他 Provider...');
+        log.debug('尝试故障转移', { from: providerName });
         return this.fallback({
           messages, tools, failedModel: actualModel, failedProvider: providerName, config
         });
@@ -123,7 +119,7 @@ export class LLMGateway implements LLMProvider {
     tools?: LLMToolDefinition[],
     config?: GenerationConfig
   ): Promise<LLMResponse | null> {
-    log.info('[Fallback] 提供商 {provider} 可用，尝试切换模型', { provider: providerName });
+    log.debug('同 Provider 切换模型', { provider: providerName });
 
     const otherModels = entry.models.filter(m => m !== failedModel && m !== '*');
     for (const modelId of otherModels) {
@@ -139,7 +135,7 @@ export class LLMGateway implements LLMProvider {
       if (result) return result;
     }
 
-    log.warn('[Fallback] 提供商 {provider} 无其他可用模型', { provider: providerName });
+    log.debug('Provider 无其他可用模型', { provider: providerName });
     return null;
   }
 
@@ -152,12 +148,12 @@ export class LLMGateway implements LLMProvider {
     config?: GenerationConfig
   ): Promise<LLMResponse | null> {
     try {
-      log.info('[Fallback] 尝试 {provider}/{model}', { provider: providerName, model: modelId });
+      log.debug('尝试模型', { provider: providerName, model: modelId });
       const response = await entry.provider.chat(messages, tools, modelId, config);
-      log.info('[Fallback] 成功切换到模型 {provider}/{model}', { provider: providerName, model: modelId });
+      log.debug('模型切换成功', { provider: providerName, model: modelId });
       return this.withMeta(response, providerName, modelId);
     } catch (err) {
-      log.warn('[Fallback] 模型 {model} 失败: {error}', { model: modelId, error: this.errorMsg(err) });
+      log.debug('模型失败', { model: modelId, error: this.errorMsg(err) });
       return null;
     }
   }
@@ -181,13 +177,13 @@ export class LLMGateway implements LLMProvider {
     for (const [name, entry] of sorted) {
       try {
         const model = entry.provider.getDefaultModel();
-        log.info('[Fallback] 尝试 {provider}/{model}', { provider: name, model });
+        log.debug('尝试其他 Provider', { provider: name, model });
         const response = await entry.provider.chat(messages, tools, model, config);
-        log.info('[Fallback] 成功切换到 {provider}', { provider: name });
+        log.debug('切换成功', { provider: name });
         return this.withMeta(response, name, model);
       } catch (err) {
         errors.push(`${name}: ${this.errorMsg(err)}`);
-        log.warn('[Fallback] {provider} 失败: {error}', { provider: name, error: this.errorMsg(err) });
+        log.debug('Provider 失败', { provider: name, error: this.errorMsg(err) });
       }
     }
 

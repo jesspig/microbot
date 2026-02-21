@@ -70,7 +70,7 @@ export class FeishuChannel implements Channel {
 
     this.wsClient.start({ eventDispatcher });
     this._running = true;
-    log.info('飞书通道已启动 (WebSocket 长连接)');
+    log.info('飞书通道已启动');
   }
 
   /**
@@ -110,10 +110,10 @@ export class FeishuChannel implements Channel {
         },
       });
       if (response.code !== 0) {
-        log.error('发送失败: {msg}', { msg: response.msg });
+        log.error('发送失败', { msg: response.msg });
       }
     } catch (error) {
-      log.error('发送飞书消息失败: {error}', {
+      log.error('发送飞书消息失败', {
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
@@ -163,7 +163,7 @@ export class FeishuChannel implements Channel {
 
       // 检查发送者权限
       if (!this.isSenderAllowed(senderId)) {
-        log.debug('发送者不在允许列表中: {senderId}', { senderId });
+        log.debug('发送者不在允许列表中', { senderId });
         return;
       }
 
@@ -179,12 +179,15 @@ export class FeishuChannel implements Channel {
       if (!content.trim() && media.length === 0) return;
 
       const replyTo = chatType === 'group' ? chatId : senderId;
-      const chatTypeLabel = chatType === 'p2p' ? '私聊' : '群聊';
       const mediaInfo = media.length > 0 ? ` (+${media.length}个媒体)` : '';
-      log.info('飞书消息 [{type}]: "{content}"{media}', {
-        type: chatTypeLabel,
-        content: content.slice(0, 30) || '[媒体消息]',
-        media: mediaInfo,
+
+      // 详细日志（文件）
+      log.debug('飞书消息', {
+        chatType,
+        chatId: replyTo,
+        senderId,
+        content: content.slice(0, 100),
+        mediaCount: media.length,
       });
 
       // 发布入站消息到总线
@@ -200,7 +203,7 @@ export class FeishuChannel implements Channel {
 
       await this.bus.publishInbound(inboundMsg);
     } catch (error) {
-      log.error('处理飞书消息失败: {error}', {
+      log.error('处理飞书消息失败', {
         error: error instanceof Error ? error.message : String(error),
       });
     }

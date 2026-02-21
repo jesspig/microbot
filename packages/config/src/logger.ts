@@ -1,9 +1,9 @@
 /**
  * 日志系统配置
  *
- * 双输出:
- * 1. CLI: pretty 格式 + properties 显示
- * 2. 文件: JSONL 结构化日志
+ * 双输出模式:
+ * 1. CLI: logtape/pretty 格式，显示关键信息
+ * 2. 文件: JSONL 结构化日志，包含完整调试信息
  */
 
 import { configure, type LogRecord } from '@logtape/logtape';
@@ -11,6 +11,7 @@ import { prettyFormatter } from '@logtape/pretty';
 import { appendFileSync, mkdirSync, existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
+
 /** 日志目录 */
 const LOG_DIR = resolve(homedir(), '.microbot', 'logs');
 
@@ -22,7 +23,7 @@ function formatDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-/** 当前日志文件 */
+/** 当前日志文件路径 */
 function getLogFilePath(): string {
   const date = formatDate(new Date());
   return join(LOG_DIR, `microbot-${date}.log`);
@@ -35,34 +36,51 @@ function ensureLogDir(): void {
   }
 }
 
-/** JSONL 格式化器 */
-function jsonlFormatter(record: LogRecord): string {
-  const entry = {
-    timestamp: new Date().toISOString(),
-    level: record.level,
-    category: record.category.join('.'),
-    message: record.message,
-    properties: record.properties && Object.keys(record.properties).length > 0 
-      ? record.properties 
-      : undefined,
-  };
-  return JSON.stringify(entry);
-}
-
-/** Pretty 格式化器（带 properties） */
-function prettyWithProperties(record: LogRecord): string {
-  // 基础 pretty 格式
+/**
+ * CLI 格式化器 - 使用 logtape/pretty 并添加关键信息
+ */
+function cliFormatter(record: LogRecord): string {
+  // 使用 pretty 基础格式
   let output = prettyFormatter(record);
-  
+
   // 添加 properties
   if (record.properties && Object.keys(record.properties).length > 0) {
     const props = Object.entries(record.properties)
-      .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+      .map(([k, v]) => {
+        if (k === 'content') {
+          const str = String(v);
+          return `${k}=${str.length > 100 ? str.slice(0, 100) + '...' : str}`;
+        }
+        return `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`;
+      })
       .join(' ');
     output += ` \x1b[2m[${props}]\x1b[0m`;
   }
-  
+
   return output;
+}
+
+/**
+ * 文件格式化器 - JSONL 结构化日志
+ */
+function jsonlFormatter(record: LogRecord): string {
+  const entry: Record<string, unknown> = {
+    timestamp: new Date().toISOString(),
+    level: record.level,
+    category: record.category.join('.'),
+    message: record.message.join(''),
+  };
+
+  if (record.properties && Object.keys(record.properties).length > 0) {
+    entry.properties = record.properties;
+  }
+
+  return JSON.stringify(entry);
+}
+
+/** CLI sink */
+function cliSink(record: LogRecord): void {
+  console.log(cliFormatter(record));
 }
 
 /** 文件 sink */
@@ -70,11 +88,6 @@ function fileSink(record: LogRecord): void {
   ensureLogDir();
   const line = jsonlFormatter(record) + '\n';
   appendFileSync(getLogFilePath(), line, 'utf-8');
-}
-
-/** CLI sink */
-function cliSink(record: LogRecord): void {
-  console.log(prettyWithProperties(record));
 }
 
 export interface LogConfig {
@@ -89,30 +102,30 @@ export interface LogConfig {
  */
 export async function initLogger(config: LogConfig = {}): Promise<void> {
   const { verbose = false, file = true } = config;
-  
+
   const sinks: Record<string, (record: LogRecord) => void> = {
     cli: cliSink,
   };
-  
+
   const loggerSinks = ['cli'];
-  
+
   if (file) {
     sinks.file = fileSink;
     loggerSinks.push('file');
   }
-  
+
   await configure({
     sinks,
     loggers: [
-      { 
-        category: [], 
-        sinks: loggerSinks, 
-        lowestLevel: verbose ? 'debug' : 'info' 
+      {
+        category: [],
+        sinks: loggerSinks,
+        lowestLevel: verbose ? 'debug' : 'info'
       },
-      { 
-        category: ['logtape', 'meta'], 
-        sinks: ['cli'], 
-        lowestLevel: 'warning' 
+      {
+        category: ['logtape', 'meta'],
+        sinks: ['cli'],
+        lowestLevel: 'warning'
       },
     ],
     reset: true,
