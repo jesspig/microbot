@@ -126,7 +126,7 @@ const provider = new OpenAICompatibleProvider({
 
 ## 源码位置
 
-- 接口定义: `packages/core/src/providers/base.ts`
-- OpenAI 兼容: `packages/core/src/providers/openai-compatible.ts`
-- 模型网关: `packages/core/src/providers/gateway.ts`
-- 智能路由: `packages/core/src/providers/router.ts`
+- 接口定义: `packages/providers/src/base.ts`
+- OpenAI 兼容: `packages/providers/src/openai-compatible.ts`
+- 模型网关: `packages/providers/src/gateway.ts`
+- 智能路由: `packages/providers/src/router.ts`

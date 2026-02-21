@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect } from 'bun:test';
-import { isValidImageUrl, isImageUrl, buildUserContent, convertToPlainText } from '../../packages/providers/src/utils';
-import type { LLMMessage } from '../../packages/providers/src/base';
+import { isValidImageUrl, isImageUrl, buildUserContent, convertToPlainText } from '../packages/providers/src/utils';
+import type { LLMMessage } from '../packages/providers/src/base';
 
 describe('Provider Utils', () => {
   describe('isValidImageUrl', () => {

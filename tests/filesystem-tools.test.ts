@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { ReadFileTool, WriteFileTool, ListDirTool } from '../../extensions/tool';
+import { ReadFileTool, WriteFileTool, ListDirTool } from '../extensions/tool';
 import { ToolRegistry } from '@microbot/sdk';
 import type { ToolContext } from '@microbot/types';
 

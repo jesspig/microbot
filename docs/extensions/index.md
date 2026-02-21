@@ -2,11 +2,11 @@
 
 ## 扩展架构
 
-Microbot 采用插件式扩展架构，接口在 Core，实现在 Extensions。
+Microbot 采用插件式扩展架构，接口在 Types，实现在 Extensions。
 
 ```
-packages/core/src/    # 接口定义
-extensions/          # 实现
+packages/types/       # 接口定义
+extensions/           # 实现
 ```
 
 ## 扩展类型

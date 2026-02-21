@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { createExecTool } from '../../extensions/tool';
+import { createExecTool } from '../extensions/tool';
 import { ToolRegistry } from '@microbot/sdk';
 import type { ToolContext } from '@microbot/types';
 

@@ -72,5 +72,5 @@ interface OutboundMessage {
 
 ## 源码位置
 
-- 基类: `packages/core/src/channel/base.ts`
-- 管理器: `packages/core/src/channel/manager.ts`
+- 基类: `packages/types/src/channel.ts`
+- 管理器: `packages/server/src/channel/manager.ts`

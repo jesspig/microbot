@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { WebFetchTool } from '../../extensions/tool';
+import { WebFetchTool } from '../extensions/tool';
 import { ToolRegistry } from '@microbot/sdk';
 import type { ToolContext } from '@microbot/types';
 

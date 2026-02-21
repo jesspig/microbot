@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { FeishuChannel } from '../../extensions/channel/feishu';
-import type { MessageBus } from '../../src/core/bus/queue';
-import type { OutboundMessage } from '../../src/core/bus/events';
+import { FeishuChannel } from '../extensions/channel/feishu';
+import type { MessageBus } from '../packages/runtime/src/bus/queue';
+import type { OutboundMessage } from '../packages/types/src/events';
 
 // Mock MessageBus
 class MockBus implements MessageBus {

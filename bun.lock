@@ -66,23 +66,6 @@
         "typescript": "^5.9.3",
       },
     },
-    "packages/core": {
-      "name": "@microbot/core",
-      "version": "0.1.0",
-      "dependencies": {
-        "@logtape/logtape": "^2.0.2",
-        "ai": "^6.0.87",
-        "gray-matter": "^4.0.3",
-        "js-yaml": "^4.1.1",
-        "mitt": "^3.0.1",
-        "zod": "^4.3.6",
-      },
-      "devDependencies": {
-        "@types/js-yaml": "^4.0.9",
-        "@types/node": "^25.2.3",
-        "typescript": "^5.9.3",
-      },
-    },
     "packages/extension-system": {
       "name": "@microbot/extension-system",
       "version": "0.1.0",
@@ -200,8 +183,6 @@
     "@microbot/cli": ["@microbot/cli@workspace:apps/cli"],
 
     "@microbot/config": ["@microbot/config@workspace:packages/config"],
-
-    "@microbot/core": ["@microbot/core@workspace:packages/core"],
 
     "@microbot/extension-system": ["@microbot/extension-system@workspace:packages/extension-system"],
 

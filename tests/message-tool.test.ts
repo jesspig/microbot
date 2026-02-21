@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { MessageTool } from '../../extensions/tool';
+import { MessageTool } from '../extensions/tool';
 import { ToolRegistry } from '@microbot/sdk';
 import type { ToolContext } from '@microbot/types';
 

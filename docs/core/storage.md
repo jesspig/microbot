@@ -23,4 +23,4 @@ const session = store.get('channel:chatId');
 
 ## 源码位置
 
-- 会话: `packages/core/src/storage/session/store.ts`
+- 会话: `packages/storage/src/session/store.ts`

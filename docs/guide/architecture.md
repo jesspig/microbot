@@ -145,29 +145,15 @@ graph LR
 ### 目录结构
 
 ```
-packages/core/src/
-├── container.ts        # 依赖注入容器
-├── event-bus.ts        # 事件总线
-├── hook-system.ts      # 钩子系统
-├── pipeline.ts         # 中间件管道
-├── agent/              # Agent 模块
-│   ├── loop.ts        # ReAct 循环
-│   ├── context.ts     # 上下文构建
-│   └── subagent.ts    # 子代理管理
-├── providers/          # LLM 提供商
-│   ├── base.ts        # Provider 接口
-│   ├── gateway.ts     # 模型网关
-│   └── router.ts      # 智能路由
-├── tool/               # 工具系统
-│   ├── registry.ts    # 工具注册表
-│   └── base.ts        # 工具基类
-├── channel/            # 消息通道
-│   ├── base.ts        # 通道接口
-│   └── manager.ts     # 通道管理器
-├── storage/            # 存储层
-│   └── session/       # 会话存储
-└── skill/              # 技能系统
-    └── loader.ts      # 技能加载器
+packages/
+├── types/              # L1: 核心类型定义（MCP 兼容）
+├── runtime/            # L2: 运行时引擎（Container、EventBus、HookSystem）
+├── config/             # L2: 三级配置系统
+├── storage/            # L2: 会话存储
+├── sdk/                # L3: 聚合 SDK，统一开发接口
+├── providers/          # L3: LLM Provider 抽象
+├── extension-system/   # L3: 扩展发现、加载、热重载
+└── server/             # L4: 服务层（Channel、Queue、Events）
 ```
 
 ## 扩展机制
