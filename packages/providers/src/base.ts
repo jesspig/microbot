@@ -89,8 +89,6 @@ export interface LLMResponse {
   usedProvider?: string;
   /** 实际使用的模型 ID */
   usedModel?: string;
-  /** 实际使用的模型性能级别 */
-  usedLevel?: string;
 }
 
 /** 工具定义（LLM 格式） */

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 工作区访问控制
  */
 
@@ -57,15 +57,15 @@ export function validateWorkspaceAccess(
 
   // 构建错误信息
   const workspaceList = allowedWorkspaces.length > 0
-    ? allowedWorkspaces.map(w => `  - ${w.path}`).join('\n')
+    ? allowedWorkspaces.map(w => '  - ' + w.path).join('\n')
     : '  （未配置）';
 
   throw new Error(
-    `工作区访问被拒绝: ${targetPath}\n` +
-    `当前允许的工作区:\n${workspaceList}\n` +
-    `如需访问此路径，请在 ~/.microbot/settings.yaml 中添加:\n` +
-    `workspaces:\n` +
-    `  - ${targetPath}`
+    '工作区访问被拒绝: ' + targetPath + '\n' +
+    '当前允许的工作区:\n' + workspaceList + '\n' +
+    '如需访问此路径，请在 ~/.microbot/settings.yaml 中添加:\n' +
+    'workspaces:\n' +
+    '  - ' + targetPath
   );
 }
 
@@ -106,8 +106,18 @@ export function createDefaultUserConfig(systemDefaultsDir: string): void {
     mkdirSync(configDir, { recursive: true });
   }
 
-  const templatePath = resolve(systemDefaultsDir, 'settings.yaml');
-  if (existsSync(templatePath)) {
+  // 查找模板文件（优先 settings.example.yaml）
+  const templateNames = ['settings.example.yaml', 'settings.yaml'];
+  let templatePath: string | null = null;
+  for (const name of templateNames) {
+    const p = resolve(systemDefaultsDir, name);
+    if (existsSync(p)) {
+      templatePath = p;
+      break;
+    }
+  }
+
+  if (templatePath) {
     const template = readFileSync(templatePath, 'utf-8');
     writeFileSync(configPath, template, 'utf-8');
   } else {
@@ -119,24 +129,20 @@ export function createDefaultUserConfig(systemDefaultsDir: string): void {
  * 获取最小配置（无模板时的备用）
  */
 function getMinimalConfig(): string {
-  return `# microbot 配置文件
-# 文档：https://github.com/jesspig/microbot
-
-agents:
-  models:
-    chat: ollama/qwen3
-  maxTokens: 8192
-  temperature: 0.7
-
-providers:
-  ollama:
-    baseUrl: http://localhost:11434/v1
-    models:
-      - id: qwen3
-        level: medium
-
-channels: {}
-`;
+  return '' +
+'# MicroBot 配置文件\n' +
+'# 文档：https://microbot.dev/config\n' +
+'\n' +
+'agents:\n' +
+'  models:\n' +
+'    # chat: ollama/qwen3  # 必填\n' +
+'\n' +
+'providers:\n' +
+'  # ollama:\n' +
+'  #   baseUrl: http://localhost:11434/v1\n' +
+'  #   models:\n' +
+'  #     - qwen3\n' +
+'\n';
 }
 
 /** 配置文件名列表 */

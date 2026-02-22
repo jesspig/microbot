@@ -23,7 +23,7 @@ describe('Config Loader', () => {
       const config = loadConfig({ configPath: '/nonexistent/path.yaml' });
       // 无配置时，models 应该为空（用户需要自行配置）
       expect(config.agents.models).toBeUndefined();
-      expect(config.agents.maxTokens).toBe(8192);
+      expect(config.agents.maxTokens).toBe(512);
     });
 
     it('should load config from yaml file', () => {

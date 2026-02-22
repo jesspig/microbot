@@ -29,16 +29,13 @@ export { OpenAICompatibleProvider, type OpenAICompatibleConfig } from './openai-
 export { LLMGateway, type GatewayConfig } from './gateway';
 
 // Model Router
-export { ModelRouter, type ModelRouterConfig, type RouteResult, type ComplexityScore } from './router';
+export { ModelRouter, type ModelRouterConfig, type RouteResult } from './router';
 
-// 复杂度计算
-export { calculateComplexity, complexityToLevel, hasImageMedia, LEVEL_PRIORITY, COMPLEXITY_THRESHOLDS } from './complexity';
-
-// 路由工具
-export { matchRule, collectVisionModels } from './router-utils';
+// 媒体检测
+export { hasImageMedia } from './complexity';
 
 // 提示词类型
-export { type IntentResult, type ModelInfo, type IntentPromptBuilder, type UserPromptBuilder } from './prompts';
+export { type TaskTypeResult, type TaskType, type ModelInfo, type IntentPromptBuilder, type UserPromptBuilder } from './prompts';
 
 // ACP (Agent Client Protocol)
 export {

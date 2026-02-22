@@ -75,13 +75,12 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
 }
 
 /**
- * 获取系统级默认目录
+ * 获取系统级默认目录（指向 templates/configs）
  */
 function getSystemDefaultsDir(): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
-  const workspaceDir = resolve(currentDir, '../../../../workspace');
-  if (existsSync(workspaceDir)) return workspaceDir;
-  return resolve(currentDir, '../../defaults');
+  // 指向项目根目录的 templates/configs
+  return resolve(currentDir, '../../../templates/configs');
 }
 
 /**
@@ -170,41 +169,46 @@ function loadSystemConfig(): Record<string, unknown> {
 
 /** 配置状态 */
 export interface ConfigStatus {
+  /** 是否有可用的 provider */
   hasProviders: boolean;
+  /** 是否有启用的 channel */
   hasChannels: boolean;
+  /** 是否配置了 chat 模型 */
+  hasChatModel: boolean;
+  /** 缺失的必填项 */
+  missingRequired: string[];
+  /** 是否需要设置（向后兼容） */
   needsSetup: boolean;
-}
-
-/**
- * 检查用户配置文件是否有实际配置
- */
-function checkUserConfigFile(): { hasProviders: boolean; hasChannels: boolean } {
-  const userDir = expandPath(USER_CONFIG_DIR);
-  const userConfigPath = findConfigFile(userDir);
-  
-  if (!userConfigPath || !existsSync(userConfigPath)) {
-    return { hasProviders: false, hasChannels: false };
-  }
-  
-  const config = loadConfigFile(userConfigPath);
-  
-  return {
-    hasProviders: Object.keys(config.providers || {}).length > 0,
-    hasChannels: Object.values(config.channels || {}).some(
-      (ch: unknown) => ch && typeof ch === 'object' && 'enabled' in ch && (ch as { enabled?: boolean }).enabled
-    ),
-  };
 }
 
 /**
  * 获取配置状态
  */
 export function getConfigStatus(config: Config): ConfigStatus {
-  const userConfig = checkUserConfigFile();
+  const missingRequired: string[] = [];
+  
+  // 检查 chat 模型
+  const hasChatModel = Boolean(config.agents?.models?.chat);
+  if (!hasChatModel) {
+    missingRequired.push('agents.models.chat');
+  }
+  
+  // 检查 provider
+  const hasProviders = Object.keys(config.providers || {}).length > 0;
+  if (!hasProviders) {
+    missingRequired.push('providers');
+  }
+  
+  // 检查 channel
+  const hasChannels = Object.values(config.channels || {}).some(
+    (ch: unknown) => ch && typeof ch === 'object' && 'enabled' in ch && (ch as { enabled?: boolean }).enabled
+  );
   
   return {
-    hasProviders: userConfig.hasProviders,
-    hasChannels: userConfig.hasChannels,
-    needsSetup: !userConfig.hasProviders && !userConfig.hasChannels,
+    hasProviders,
+    hasChannels,
+    hasChatModel,
+    missingRequired,
+    needsSetup: missingRequired.length > 0,
   };
 }

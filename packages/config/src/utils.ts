@@ -8,6 +8,11 @@ import { resolve, dirname, basename } from 'path';
 
 /**
  * 深度合并对象
+ * 
+ * 规则：
+ * - null 值会被跳过（YAML 空值不应覆盖默认值）
+ * - undefined 值会被跳过
+ * - providers 字段直接替换（而非合并）
  */
 export function deepMerge<T extends Record<string, unknown>>(
   target: T,
@@ -19,17 +24,17 @@ export function deepMerge<T extends Record<string, unknown>>(
     const sourceValue = source[key];
     const targetValue = result[key];
 
-    if (sourceValue === undefined) continue;
+    // 跳过 null 和 undefined
+    if (sourceValue === undefined || sourceValue === null) continue;
 
-    // providers 特殊处理：直接替换
-    if (key === 'providers') {
+    // providers 特殊处理：直接替换（但仅当有实际内容时）
+    if (key === 'providers' && typeof sourceValue === 'object') {
       result[key] = sourceValue as T[keyof T];
       continue;
     }
 
     // 递归合并对象
     if (
-      sourceValue !== null &&
       typeof sourceValue === 'object' &&
       !Array.isArray(sourceValue) &&
       targetValue !== undefined &&
@@ -131,11 +136,9 @@ export function getBuiltinDefaults(): Record<string, unknown> {
   return {
     agents: {
       workspace: '~/.microbot/workspace',
-      maxTokens: 8192,
+      maxTokens: 512,
       temperature: 0.7,
       maxToolIterations: 20,
-      auto: true,
-      max: false,
     },
     providers: {},
     channels: {},

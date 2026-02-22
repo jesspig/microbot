@@ -44,5 +44,5 @@ export interface App {
   /** 获取 Provider 状态 */
   getProviderStatus(): string;
   /** 获取路由状态 */
-  getRouterStatus(): { auto: boolean; max: boolean; chatModel: string; intentModel?: string };
+  getRouterStatus(): { chatModel: string; visionModel?: string; coderModel?: string; intentModel?: string };
 }

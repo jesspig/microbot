@@ -1,6 +1,9 @@
 /**
- * 意图识别类型定义
+ * 任务类型识别类型定义
  */
+
+/** 任务类型 */
+export type TaskType = 'vision' | 'coder' | 'chat';
 
 /** 模型信息（用于提示词） */
 export interface ModelInfo {
@@ -10,9 +13,9 @@ export interface ModelInfo {
   think: boolean;
 }
 
-/** 意图识别结果 */
-export interface IntentResult {
-  model: string;
+/** 任务类型识别结果 */
+export interface TaskTypeResult {
+  type: TaskType;
   reason: string;
 }
 

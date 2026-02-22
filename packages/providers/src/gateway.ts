@@ -191,12 +191,10 @@ export class LLMGateway implements LLMProvider {
   }
 
   private withMeta(response: LLMResponse, provider: string, model: string): LLMResponse {
-    const modelConfig = this.getModelConfig(provider, model);
     return {
       ...response,
       usedProvider: provider,
       usedModel: model,
-      usedLevel: modelConfig?.level,
     };
   }
 
