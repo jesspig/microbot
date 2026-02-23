@@ -75,6 +75,8 @@ interface LLMResponse {
   content: string;
   toolCalls?: ToolCall[];
   hasToolCalls: boolean;
+  reasoning?: string;      // 深度思考模型的推理过程
+  usage?: UsageStats;      // Token 使用统计
   usedProvider?: string;
   usedModel?: string;
 }
@@ -86,11 +88,14 @@ interface LLMResponse {
 
 支持 OpenAI API 兼容的所有后端：
 
-- OpenAI
-- Claude (via API)
-- DeepSeek
-- Ollama
-- LM Studio
+| Provider | baseUrl | 特点 |
+|----------|---------|------|
+| Ollama | `http://localhost:11434/v1` | 本地运行，无需 apiKey |
+| GLM (智谱) | `https://open.bigmodel.cn/api/paas/v4` | 国产大模型 |
+| DeepSeek | `https://api.deepseek.com/v1` | 深度推理模型 |
+| MiniMax | `https://api.minimax.chat/v1` | 海螺 AI |
+| Kimi (Moonshot) | `https://api.moonshot.cn/v1` | 长上下文 |
+| OpenAI | `https://api.openai.com/v1` | GPT 系列 |
 
 ```typescript
 import { OpenAICompatibleProvider } from '@microbot/sdk/providers';
@@ -101,6 +106,14 @@ const provider = new OpenAICompatibleProvider({
   model: 'deepseek-chat',
 });
 ```
+
+## 协议支持
+
+| 协议 | 用途 | 说明 |
+|------|------|------|
+| ACP | IDE 集成 | 支持 Cursor、Claude Desktop 等 IDE 集成 |
+| A2A | Agent 通信 | Agent 间通信协议 |
+| MCP | 工具接入 | Model Context Protocol，外部工具/资源接入 |
 
 ## 源码位置
 

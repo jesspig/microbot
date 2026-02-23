@@ -15,12 +15,14 @@
 |------|------|
 | 轻量高效 | Bun 原生性能，核心代码简洁 |
 | 8层 Monorepo | Types → Runtime/Config/Storage → SDK/Providers/Extension-System → Server → CLI |
-| 智能路由 | 根据任务复杂度自动选择模型 |
+| 智能路由 | 根据任务类型自动选择合适模型 |
 | 🧠 长期记忆 | LanceDB 向量存储、语义检索、自动摘要、跨会话上下文保持 |
 | Channel Gateway | 消息处理枢纽，多通道聚合、响应广播、自动重连 |
-| 多通道支持 | 飞书（更多通道开发中） |
+| 多通道支持 | CLI、飞书（更多通道开发中） |
 | 本地优先 LLM | Ollama / LM Studio / OpenAI Compatible |
 | MCP 兼容 | Model Context Protocol 工具接口 |
+| 热重载 | 扩展开发时支持文件变更自动重载 |
+| 多协议支持 | ACP（IDE集成）、A2A（Agent通信）、MCP（工具接入） |
 
 ## 安装
 
