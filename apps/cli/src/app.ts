@@ -18,6 +18,10 @@ import {
   MessageBus,
   SessionStore,
   AgentExecutor,
+  MemoryStore,
+  ConversationSummarizer,
+  OpenAIEmbedding,
+  NoEmbedding,
 } from '@microbot/sdk';
 import {
   ReadFileTool,
@@ -33,6 +37,7 @@ import type {
   App,
   Config,
   ProviderEntry,
+  InboundMessage,
 } from '@microbot/types';
 import type { ModelConfig } from '@microbot/config';
 import { resolve, dirname } from 'path';
@@ -159,6 +164,8 @@ class AppImpl implements App {
   private toolRegistry: ToolRegistry;
   private executor: AgentExecutor | null = null;
   private skillsLoader: SkillsLoader | null = null;
+  private memoryStore: MemoryStore | null = null;
+  private summarizer: ConversationSummarizer | null = null;
 
   constructor(config: Config, workspace: string) {
     this.config = config;
@@ -208,13 +215,16 @@ class AppImpl implements App {
     // 4. 初始化通道
     this.initChannels();
 
-    // 5. 启动通道
+    // 5. 初始化记忆系统
+    await this.initMemorySystem();
+
+    // 6. 启动通道
     await this.channelManager.startAll();
 
-    // 6. 启动出站消息消费者
+    // 7. 启动出站消息消费者
     this.startOutboundConsumer();
 
-    // 7. 创建并启动 Agent 执行器
+    // 8. 创建并启动 Agent 执行器
     this.executor = new AgentExecutor(
       this.messageBus,
       this.gateway,
@@ -234,7 +244,12 @@ class AppImpl implements App {
         buildUserPrompt: buildIntentUserPrompt,
         buildReActPrompt: (tools) => buildReActSystemPrompt(tools, this.buildSkillsPrompt()),
         buildObservation: buildObservationMessage,
-      }
+        memoryEnabled: this.config.agents.memory?.enabled,
+        summarizeThreshold: this.config.agents.memory?.summarizeThreshold,
+        idleTimeout: this.config.agents.memory?.idleTimeout,
+      },
+      this.memoryStore ?? undefined,
+      this.summarizer ?? undefined
     );
 
     this.executor.run().catch(error => {
@@ -374,6 +389,28 @@ ${skillsSummary}`);
     };
   }
 
+  /**
+   * 交互式对话
+   */
+  async chat(input: string): Promise<string> {
+    if (!this.executor) {
+      throw new Error('Agent 执行器未初始化');
+    }
+
+    const msg: InboundMessage = {
+      channel: 'cli',
+      chatId: 'default',
+      senderId: 'user',
+      content: input,
+      media: [],
+      metadata: {},
+      timestamp: new Date(),
+    };
+
+    const response = await this.executor.processMessage(msg);
+    return response?.content || '无响应';
+  }
+
   private initProviders(): void {
     const providers = this.config.providers as Record<string, ProviderEntry | undefined>;
     const chatModel = this.config.agents.models?.chat || '';
@@ -414,6 +451,85 @@ ${skillsSummary}`);
         allowFrom: channels.feishu.allowFrom ?? [],
       });
       this.channelManager.register(channel);
+    }
+  }
+
+  /**
+   * 初始化记忆系统
+   */
+  private async initMemorySystem(): Promise<void> {
+    const memoryConfig = this.config.agents.memory;
+    
+    // 检查是否启用记忆系统
+    if (memoryConfig?.enabled === false) {
+      console.log('  记忆系统已禁用');
+      return;
+    }
+
+    try {
+      // 初始化嵌入服务
+      let embeddingService;
+      const embedModel = this.config.agents.models?.embed;
+      
+      if (embedModel) {
+        // 使用配置的嵌入模型，从 providers 配置中获取 API 信息
+        const slashIndex = embedModel.indexOf('/');
+        const providerName = slashIndex > 0 ? embedModel.slice(0, slashIndex) : Object.keys(this.config.providers)[0];
+        const providerConfig = this.config.providers[providerName || ''];
+        
+        if (providerConfig?.baseUrl && providerConfig?.apiKey) {
+          embeddingService = new OpenAIEmbedding(
+            embedModel,
+            providerConfig.baseUrl,
+            providerConfig.apiKey
+          );
+          console.log(`  记忆系统: 使用嵌入模型 ${embedModel}`);
+        } else {
+          embeddingService = new NoEmbedding();
+          console.log('  记忆系统: 嵌入模型配置缺失 API 信息，使用全文检索');
+        }
+      } else {
+        // 无嵌入模型，使用 NoEmbedding
+        embeddingService = new NoEmbedding();
+        console.log('  记忆系统: 无嵌入模型，使用全文检索');
+      }
+
+      // 初始化 MemoryStore
+      const storagePath = memoryConfig?.storagePath 
+        ? expandPath(memoryConfig.storagePath)
+        : resolve(homedir(), '.microbot/memory');
+
+      this.memoryStore = new MemoryStore({
+        storagePath,
+        embeddingService,
+        defaultSearchLimit: memoryConfig?.searchLimit ?? 10,
+        shortTermRetentionDays: memoryConfig?.shortTermRetentionDays ?? 7,
+      });
+
+      await this.memoryStore.initialize();
+      console.log(`  记忆存储路径: ${storagePath}`);
+
+      // 初始化 Summarizer
+      if (memoryConfig?.autoSummarize !== false && this.memoryStore) {
+        this.summarizer = new ConversationSummarizer(
+          this.gateway,
+          this.memoryStore,
+          {
+            minMessages: memoryConfig?.summarizeThreshold ?? 20,
+            maxLength: 2000,
+            idleTimeout: memoryConfig?.idleTimeout ?? 300000,
+          }
+        );
+        console.log(`  自动摘要: 启用 (阈值: ${memoryConfig?.summarizeThreshold ?? 20} 条消息)`);
+      } else {
+        console.log('  自动摘要: 禁用');
+      }
+
+    } catch (error) {
+      console.error('记忆系统初始化失败:', error instanceof Error ? error.message : String(error));
+      // 继续运行，但不使用记忆系统
+      this.memoryStore = null;
+      this.summarizer = null;
     }
   }
 }

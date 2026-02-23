@@ -54,9 +54,20 @@ export interface Config {
     workspace: string;
     models?: {
       chat?: string;
+      tool?: string;
+      embed?: string;
       vision?: string;
       coder?: string;
       intent?: string;
+    };
+    memory?: {
+      enabled?: boolean;
+      storagePath?: string;
+      autoSummarize?: boolean;
+      summarizeThreshold?: number;
+      idleTimeout?: number;
+      shortTermRetentionDays?: number;
+      searchLimit?: number;
     };
     maxTokens?: number;
     temperature?: number;

@@ -15,11 +15,28 @@ export { HookSystem, hookSystem, type Hook } from '@microbot/runtime';
 export { Pipeline, type Middleware } from '@microbot/runtime';
 export { MessageBus } from '@microbot/runtime';
 export { AgentExecutor, type AgentExecutorConfig } from '@microbot/runtime';
+// Memory System
+export {
+  MemoryStore,
+  ConversationSummarizer,
+  OpenAIEmbedding,
+  NoEmbedding,
+  createEmbeddingService,
+} from '@microbot/runtime';
+export type {
+  MemoryEntry,
+  MemoryMetadata,
+  Summary,
+  MemoryStats,
+  SearchOptions,
+  MemoryFilter,
+  EmbeddingService,
+  SummarizerConfig,
+} from '@microbot/runtime';
 
 // ============ Storage - 存储层 ============
 export { SessionStore } from '@microbot/storage';
-export { MemoryStore } from '@microbot/storage';
-export type { SessionStoreConfig, MemoryStoreConfig } from '@microbot/storage';
+export type { SessionStoreConfig } from '@microbot/storage';
 
 // ============ Config - 配置层 ============
 export {

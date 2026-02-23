@@ -5,7 +5,7 @@
  */
 
 /** 通道类型 */
-export type ChannelType = 'feishu' | 'email' | 'system';
+export type ChannelType = 'feishu' | 'email' | 'system' | 'cli';
 
 /** 通道接口 */
 export interface Channel {
@@ -45,4 +45,6 @@ export interface App {
   getProviderStatus(): string;
   /** 获取路由状态 */
   getRouterStatus(): { chatModel: string; visionModel?: string; coderModel?: string; intentModel?: string };
+  /** 交互式对话 */
+  chat(input: string): Promise<string>;
 }

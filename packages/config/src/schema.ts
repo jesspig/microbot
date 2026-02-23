@@ -8,12 +8,52 @@ import { z } from 'zod';
 export const ModelsConfigSchema = z.object({
   /** 对话模型 */
   chat: z.string().optional(),
+  /** 工具调用模型（可选，默认使用 chat） */
+  tool: z.string().optional(),
+  /** 嵌入模型（可选，用于向量检索） */
+  embed: z.string().optional(),
   /** 视觉模型，用于图片识别任务 */
   vision: z.string().optional(),
   /** 编程模型，用于代码编写任务 */
   coder: z.string().optional(),
   /** 意图识别模型（可选，默认使用 chat，不会被路由） */
   intent: z.string().optional(),
+});
+
+/** 记忆配置 Schema */
+export const MemoryConfigSchema = z.object({
+  /** 是否启用记忆系统 */
+  enabled: z.boolean().default(true),
+  /** 记忆存储路径 */
+  storagePath: z.string().default('~/.microbot/memory'),
+  /** 是否启用自动摘要 */
+  autoSummarize: z.boolean().default(true),
+  /** 触发摘要的消息阈值 */
+  summarizeThreshold: z.number().default(20),
+  /** 空闲超时时间（毫秒） */
+  idleTimeout: z.number().default(300000),
+  /** 短期记忆保留天数 */
+  shortTermRetentionDays: z.number().default(7),
+  /** 检索结果数量限制 */
+  searchLimit: z.number().min(1).max(50).default(10),
+});
+
+/** 循环检测配置 Schema */
+export const LoopDetectionConfigSchema = z.object({
+  /** 是否启用循环检测 */
+  enabled: z.boolean().default(true),
+  /** 警告阈值 */
+  warningThreshold: z.number().default(3),
+  /** 临界阈值 */
+  criticalThreshold: z.number().default(5),
+});
+
+/** 执行器配置 Schema */
+export const ExecutorConfigSchema = z.object({
+  /** 最大迭代次数 */
+  maxIterations: z.number().default(20),
+  /** 循环检测配置 */
+  loopDetection: LoopDetectionConfigSchema.optional(),
 });
 
 /** 工作区配置 Schema */
@@ -35,6 +75,10 @@ export const AgentConfigSchema = z.object({
   workspace: z.string().default('~/.microbot/workspace'),
   /** 模型配置 */
   models: ModelsConfigSchema.optional(),
+  /** 记忆系统配置 */
+  memory: MemoryConfigSchema.optional(),
+  /** 执行器配置 */
+  executor: ExecutorConfigSchema.optional(),
   /** 生成的最大 token 数量 (1-8192) */
   maxTokens: z.number().min(1).max(8192).default(512),
   /** 控制响应的随机性 (0-1.5)，值越低越确定，值越高越随机 */
@@ -45,7 +89,7 @@ export const AgentConfigSchema = z.object({
   topP: z.number().default(0.7),
   /** 频率惩罚，控制生成内容的重复性 */
   frequencyPenalty: z.number().default(0.5),
-  /** 最大工具调用迭代次数 */
+  /** 最大工具调用迭代次数（已弃用，使用 executor.maxIterations） */
   maxToolIterations: z.number().default(20),
 });
 
@@ -112,6 +156,9 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 export type ModelsConfig = z.infer<typeof ModelsConfigSchema>;
+export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
+export type ExecutorConfig = z.infer<typeof ExecutorConfigSchema>;
+export type LoopDetectionConfig = z.infer<typeof LoopDetectionConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
 /**
