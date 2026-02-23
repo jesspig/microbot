@@ -178,16 +178,53 @@ channels:
 
 **模型格式**: `provider/model`（如 `ollama/qwen3`、`deepseek/deepseek-chat`）
 
+### Ollama（本地运行）
+
 ```yaml
 providers:
   ollama:
     baseUrl: http://localhost:11434/v1
-    models: [qwen3]
+    models: [qwen3, qwen3-vl]
 
+agents:
+  models:
+    chat: ollama/qwen3
+    vision: ollama/qwen3-vl
+```
+
+### DeepSeek（深度推理）
+
+```yaml
+providers:
   deepseek:
     baseUrl: https://api.deepseek.com/v1
     apiKey: ${DEEPSEEK_API_KEY}
-    models: [deepseek-chat]
+    models: [deepseek-chat, deepseek-reasoner]
+
+agents:
+  models:
+    chat: deepseek/deepseek-chat
+    coder: deepseek/deepseek-chat
+```
+
+### GLM 智谱 / MiniMax / Kimi
+
+```yaml
+providers:
+  glm:
+    baseUrl: https://open.bigmodel.cn/api/paas/v4
+    apiKey: ${GLM_API_KEY}
+    models: [glm-4-flash]
+  
+  minimax:
+    baseUrl: https://api.minimax.chat/v1
+    apiKey: ${MINIMAX_API_KEY}
+    models: [abab6.5s-chat]
+  
+  kimi:
+    baseUrl: https://api.moonshot.cn/v1
+    apiKey: ${MOONSHOT_API_KEY}
+    models: [moonshot-v1-128k]
 ```
 
 **Gateway 特性**:

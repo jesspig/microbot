@@ -86,26 +86,118 @@ interface LLMResponse {
 
 ### OpenAICompatibleProvider
 
-支持 OpenAI API 兼容的所有后端：
+支持 OpenAI API 兼容的所有后端。
 
-| Provider | baseUrl | 特点 |
-|----------|---------|------|
-| Ollama | `http://localhost:11434/v1` | 本地运行，无需 apiKey |
-| GLM (智谱) | `https://open.bigmodel.cn/api/paas/v4` | 国产大模型 |
-| DeepSeek | `https://api.deepseek.com/v1` | 深度推理模型 |
-| MiniMax | `https://api.minimax.chat/v1` | 海螺 AI |
-| Kimi (Moonshot) | `https://api.moonshot.cn/v1` | 长上下文 |
-| OpenAI | `https://api.openai.com/v1` | GPT 系列 |
+### 配置示例
 
-```typescript
-import { OpenAICompatibleProvider } from '@microbot/sdk/providers';
+#### Ollama（本地运行）
 
-const provider = new OpenAICompatibleProvider({
-  baseUrl: 'https://api.deepseek.com/v1',
-  apiKey: process.env.DEEPSEEK_API_KEY,
-  model: 'deepseek-chat',
-});
+```yaml
+providers:
+  ollama:
+    baseUrl: http://localhost:11434/v1
+    models:
+      - qwen3
+      - qwen3-vl
+
+agents:
+  models:
+    chat: ollama/qwen3
+    vision: ollama/qwen3-vl
 ```
+
+#### DeepSeek（深度推理）
+
+```yaml
+providers:
+  deepseek:
+    baseUrl: https://api.deepseek.com/v1
+    apiKey: ${DEEPSEEK_API_KEY}
+    models:
+      - deepseek-chat
+      - deepseek-reasoner
+
+agents:
+  models:
+    chat: deepseek/deepseek-chat
+    coder: deepseek/deepseek-chat
+```
+
+#### GLM 智谱（国产大模型）
+
+```yaml
+providers:
+  glm:
+    baseUrl: https://open.bigmodel.cn/api/paas/v4
+    apiKey: ${GLM_API_KEY}
+    models:
+      - glm-4-flash
+      - glm-4-plus
+
+agents:
+  models:
+    chat: glm/glm-4-flash
+```
+
+#### MiniMax（海螺 AI）
+
+```yaml
+providers:
+  minimax:
+    baseUrl: https://api.minimax.chat/v1
+    apiKey: ${MINIMAX_API_KEY}
+    models:
+      - abab6.5s-chat
+
+agents:
+  models:
+    chat: minimax/abab6.5s-chat
+```
+
+#### Kimi（长上下文）
+
+```yaml
+providers:
+  kimi:
+    baseUrl: https://api.moonshot.cn/v1
+    apiKey: ${MOONSHOT_API_KEY}
+    models:
+      - moonshot-v1-8k
+      - moonshot-v1-128k
+
+agents:
+  models:
+    chat: kimi/moonshot-v1-8k
+```
+
+#### OpenAI（GPT 系列）
+
+```yaml
+providers:
+  openai:
+    baseUrl: https://api.openai.com/v1
+    apiKey: ${OPENAI_API_KEY}
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+
+agents:
+  models:
+    chat: openai/gpt-4o-mini
+    vision: openai/gpt-4o
+    coder: openai/gpt-4o
+```
+
+### Provider 对比
+
+| Provider | 特点 | 推荐场景 |
+|----------|------|----------|
+| **Ollama** | 本地运行，无 API Key，隐私安全 | 开发测试、离线环境 |
+| **DeepSeek** | 深度推理，性价比高 | 复杂推理、代码生成 |
+| **GLM** | 国产模型，中文优化 | 中文对话、国内部署 |
+| **MiniMax** | 海螺 AI，多模态 | 多模态应用 |
+| **Kimi** | 128K 长上下文 | 长文档处理 |
+| **OpenAI** | GPT 系列，功能全面 | 通用场景 |
 
 ## 协议支持
 
