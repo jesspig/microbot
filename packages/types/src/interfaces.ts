@@ -48,3 +48,23 @@ export interface App {
   /** 交互式对话 */
   chat(input: string): Promise<string>;
 }
+
+/** 广播消息结构 */
+export interface BroadcastMessage {
+  /** 消息内容 */
+  content: string;
+  /** 回复消息 ID */
+  replyTo?: string;
+  /** 媒体文件 */
+  media?: string[];
+  /** 元数据 */
+  metadata?: Record<string, unknown>;
+}
+
+/** ChannelGateway 接口（单用户场景） */
+export interface ChannelGateway {
+  /** 统一会话 ID */
+  readonly sessionKey: string;
+  /** 广播消息到所有活跃 Channel */
+  broadcast(msg: BroadcastMessage): Promise<PromiseSettledResult<void>[]>;
+}

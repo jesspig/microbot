@@ -82,3 +82,6 @@ export {
   ConversationSummarizer,
   type SummarizerConfig,
 } from './memory';
+
+// Channel Gateway
+export { ChannelGatewayImpl } from './gateway';

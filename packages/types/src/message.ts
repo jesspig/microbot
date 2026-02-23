@@ -42,6 +42,8 @@ export interface OutboundMessage {
   media: string[];
   /** 元数据 */
   metadata: Record<string, unknown>;
+  /** 广播目标通道（可选） */
+  targetChannels?: Array<{ channel: ChannelType; chatId: string }>;
 }
 
 /** 会话键 */

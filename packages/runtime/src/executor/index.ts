@@ -196,7 +196,7 @@ export class AgentExecutor {
    * 处理单条消息
    */
   async processMessage(msg: InboundMessage): Promise<OutboundMessage | null> {
-    const sessionKey = `${msg.channel}:${msg.chatId}`;
+    const sessionKey = 'default';
     const sessionHistory = this.conversationHistory.get(sessionKey) ?? [];
 
     // 检索相关记忆
