@@ -9,13 +9,16 @@ export type {
   MessageContent,
   ContentPart,
   TextContentPart,
+  ImageContentPart,
+  ResourceContentPart,
+  ProviderContentPart,
   ImageUrlContentPart,
   ToolCall,
   UsageStats,
   LLMResponse,
   LLMToolDefinition,
   GenerationConfig,
-} from '@microbot/providers';
+} from '@micro-agent/providers';
 
 // ============================================================================
 // 记忆系统类型

@@ -5,13 +5,13 @@
  * 使用原生 Function Calling 而非 ReAct JSON 解析。
  */
 
-import type { InboundMessage, OutboundMessage, ToolContext } from '@microbot/types';
-import type { LLMGateway, LLMMessage, GenerationConfig, MessageContent, LLMToolDefinition, IntentPromptBuilder, UserPromptBuilder } from '@microbot/providers';
+import type { InboundMessage, OutboundMessage, ToolContext } from '@micro-agent/types';
+import type { LLMGateway, LLMMessage, GenerationConfig, MessageContent, LLMToolDefinition, IntentPromptBuilder, UserPromptBuilder } from '@micro-agent/providers';
 import type { MessageBus } from '../bus/queue';
-import type { ModelConfig, LoopDetectionConfig } from '@microbot/config';
+import type { ModelConfig, LoopDetectionConfig } from '@micro-agent/config';
 import type { AgentLoopResult, MemoryEntry } from '../types';
 import type { MemoryStore, ConversationSummarizer } from '../memory';
-import { ModelRouter, convertToPlainText, buildUserContent, type RouteResult } from '@microbot/providers';
+import { ModelRouter, convertToPlainText, buildUserContent, type RouteResult } from '@micro-agent/providers';
 import { LoopDetector } from '../loop-detection';
 import { MessageHistoryManager } from '../message-manager';
 import { getLogger } from '@logtape/logtape';
@@ -28,10 +28,6 @@ export interface ToolRegistryLike {
   getDefinitions(): Array<{ name: string; description: string; inputSchema: unknown }>;
   execute(name: string, input: unknown, ctx: ToolContext): Promise<string>;
 }
-
-/** ReAct 提示词构建函数类型（保留向后兼容） */
-export type ReActPromptBuilder = (tools: Array<{ name: string; description: string; inputSchema: unknown }>) => string;
-export type ObservationBuilder = (result: string) => string;
 
 /**
  * Agent 配置
@@ -63,10 +59,6 @@ export interface AgentExecutorConfig {
   buildIntentPrompt?: IntentPromptBuilder;
   /** 用户 Prompt 构建函数 */
   buildUserPrompt?: UserPromptBuilder;
-  /** ReAct 系统提示词构建函数（已弃用，保留向后兼容） */
-  buildReActPrompt?: ReActPromptBuilder;
-  /** Observation 消息构建函数（已弃用，保留向后兼容） */
-  buildObservation?: ObservationBuilder;
   /** 循环检测配置 */
   loopDetection?: Partial<LoopDetectionConfig>;
   /** 最大历史消息数 */

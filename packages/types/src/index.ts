@@ -1,5 +1,5 @@
 /**
- * MicroBot 核心类型定义
+ * MicroAgent 核心类型定义
  * 
  * 零依赖模块，定义所有核心接口和类型。
  * 遵循 MCP (Model Context Protocol) 兼容的 Tool/Resource/Prompt 原语规范。
@@ -16,9 +16,6 @@ export * from './tool';
 
 // 消息类型
 export * from './message';
-
-// 会话类型
-export * from './session';
 
 // Provider 类型
 export * from './provider';
