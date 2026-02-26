@@ -119,4 +119,15 @@ agents:
 | topK | - | 50 | Top-K 采样 |
 | topP | - | 0.7 | Top-P 核采样 |
 | frequencyPenalty | 0-2 | 0.5 | 频率惩罚 |
-| maxToolIterations | - | 20 | 工具调用最大迭代次数 |
+
+## 执行器配置
+
+```yaml
+agents:
+  executor:
+    maxIterations: 20  # 工具调用最大迭代次数
+```
+
+| 参数 | 范围 | 默认值 | 说明 |
+|------|------|--------|------|
+| maxIterations | - | 20 | 工具调用最大迭代次数 |

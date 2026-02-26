@@ -119,7 +119,7 @@ micro-agent/
 ├── packages/
 │   ├── types/              # 核心类型定义（MCP 兼容）
 │   ├── runtime/            # 运行时引擎（Container、EventBus、HookSystem、Gateway）
-│   ├── config/             # 四级配置系统
+│   ├── config/             # 三级配置系统
 │   ├── storage/            # 存储层（SessionStore）
 │   ├── providers/          # LLM 提供商（Gateway、OpenAI 兼容）
 │   ├── extension-system/   # 扩展发现、加载、热重载
