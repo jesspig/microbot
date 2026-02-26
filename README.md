@@ -24,6 +24,20 @@
 | 热重载 | 扩展开发时支持文件变更自动重载 |
 | 多协议支持 | ACP（IDE集成）、A2A（Agent通信）、MCP（工具接入） |
 
+## 运行环境要求
+
+> **注意**：本项目专为 [Bun](https://bun.sh/) 运行时设计，**不支持 Node.js**。
+
+| 要求 | 版本 |
+|------|------|
+| Bun | >= 1.0.0 |
+| TypeScript | >= 5.0 |
+
+**不兼容 Node.js 的原因**：
+- 使用 `Bun.serve()`、`Bun.spawn()` 等 Bun 特有 API
+- 使用 `bun:test` 测试框架
+- TypeScript 配置针对 Bun 优化（`moduleResolution: bundler`）
+
 ## 安装
 
 ### 方式一：克隆运行（推荐）

@@ -47,7 +47,9 @@ MicroAgent 是一个超轻量级的个人 AI 助手框架，使用 TypeScript �
 ### 技术栈
 
 - **语言**: TypeScript 5.9
-- **运行时**: Bun 1.3+
+- **运行时**: Bun 1.3+ (不支持 Node.js)
 - **依赖注入**: 自研轻量容器
 - **配置验证**: Zod
 - **日志**: @logtape/logtape
+
+> **注意**：本项目专为 Bun 运行时设计，不支持 Node.js。详见 [快速开始](/guide/)。

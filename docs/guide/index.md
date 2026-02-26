@@ -1,5 +1,23 @@
 # 快速开始
 
+## 运行环境要求
+
+> **注意**：MicroAgent 专为 [Bun](https://bun.sh/) 运行时设计，**不支持 Node.js**。
+
+| 要求 | 版本 |
+|------|------|
+| Bun | >= 1.0.0 |
+
+**安装 Bun**：
+
+```bash
+# Windows
+powershell -c "irm bun.sh/install.ps1 | iex"
+
+# macOS/Linux
+curl -fsSL https://bun.sh/install | bash
+```
+
 ## 安装
 
 ```bash
