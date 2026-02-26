@@ -1,6 +1,6 @@
 {
   "name": "micro-agent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "超轻量级个人 AI 助手框架 - LLM/Agent 双向网关 + 可扩展 Agent 运行时",
   "type": "module",
   "author": "jesspig",
@@ -9,8 +9,13 @@
     "type": "git",
     "url": "https://github.com/jesspig/micro-agent.git"
   },
-  "workspaces": ["packages/*", "apps/*"],
-  "trustedDependencies": ["@larksuiteoapi/node-sdk"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "trustedDependencies": [
+    "@larksuiteoapi/node-sdk"
+  ],
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org"

@@ -1,6 +1,6 @@
 # MicroAgent
 
-[![Version](https://img.shields.io/badge/Version-0.2.0-blue.svg)](https://github.com/jesspig/micro-agent)
+[![Version](https://img.shields.io/badge/Version-0.2.1-blue.svg)](https://github.com/jesspig/micro-agent)
 [![Bun](https://img.shields.io/badge/Bun-1.3.9-black?logo=bun)](https://bun.sh/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)

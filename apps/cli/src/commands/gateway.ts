@@ -52,7 +52,7 @@ export async function runGatewayCommand(config: GatewayCommandConfig): Promise<v
 
     // 健康检查
     if (url.pathname === '/health' || url.pathname === '/') {
-      return new Response(JSON.stringify({ status: 'ok', version: '0.2.0' }), {
+      return new Response(JSON.stringify({ status: 'ok', version: '0.2.1' }), {
         headers: { 'Content-Type': 'application/json' },
       });
     }

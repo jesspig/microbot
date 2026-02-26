@@ -17,7 +17,7 @@ import { createApp } from './app';
 import { loadConfig, getConfigStatus } from '@micro-agent/config';
 import type { App } from '@micro-agent/types';
 
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 
 /** 显示帮助信息 */
 function showHelp(): void {

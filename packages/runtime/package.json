@@ -1,6 +1,6 @@
 {
   "name": "@micro-agent/runtime",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "MicroAgent 运行时引擎",
   "type": "module",
   "author": "jesspig",
@@ -21,7 +21,9 @@
       "default": "./src/index.ts"
     }
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "dependencies": {
     "@micro-agent/types": "workspace:*",
     "@micro-agent/config": "workspace:*",

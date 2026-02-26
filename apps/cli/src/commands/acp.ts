@@ -56,7 +56,7 @@ export async function runACPCommand(config: ACPCommandConfig): Promise<void> {
 
   // 创建 ACP 适配器
   const adapter = createACPAdapter({
-    serverVersion: 'micro-agent-0.2.0',
+    serverVersion: 'micro-agent-0.2.1',
     protocolVersion: '0.1.0',
     connection,
     provider: config.provider,
@@ -67,7 +67,7 @@ export async function runACPCommand(config: ACPCommandConfig): Promise<void> {
   // 创建 ACP 服务器
   const server = createACPServer({
     agent: adapter,
-    serverVersion: 'micro-agent-0.2.0',
+    serverVersion: 'micro-agent-0.2.1',
   });
 
   // 启动服务器

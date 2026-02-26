@@ -58,7 +58,7 @@ export class ACPServer implements ACPConnection {
 
   constructor(config: ACPServerConfig) {
     this.agent = config.agent;
-    this.serverVersion = config.serverVersion ?? 'micro-agent-0.2.0';
+    this.serverVersion = config.serverVersion ?? 'micro-agent-0.2.1';
   }
 
   /**
