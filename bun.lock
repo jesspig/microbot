@@ -26,7 +26,7 @@
     },
     "apps/cli": {
       "name": "@micro-agent/cli",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "bin": {
         "micro-agent": "./src/cli.ts",
       },
@@ -53,7 +53,7 @@
     },
     "packages/config": {
       "name": "@micro-agent/config",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "dependencies": {
         "@logtape/logtape": "^2.0.2",
         "@logtape/pretty": "^2.0.2",
@@ -70,7 +70,7 @@
     },
     "packages/extension-system": {
       "name": "@micro-agent/extension-system",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "dependencies": {
         "@logtape/logtape": "^2.0.2",
         "@micro-agent/types": "workspace:*",
@@ -83,7 +83,7 @@
     },
     "packages/providers": {
       "name": "@micro-agent/providers",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "dependencies": {
         "@logtape/logtape": "^2.0.2",
         "@micro-agent/config": "workspace:*",
@@ -98,8 +98,9 @@
     },
     "packages/runtime": {
       "name": "@micro-agent/runtime",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "dependencies": {
+        "@logtape/file": "^2.0.4",
         "@logtape/logtape": "^2.0.2",
         "@micro-agent/config": "workspace:*",
         "@micro-agent/providers": "workspace:*",
@@ -113,7 +114,7 @@
     },
     "packages/sdk": {
       "name": "@micro-agent/sdk",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "dependencies": {
         "@logtape/logtape": "^2.0.2",
         "@micro-agent/config": "workspace:*",
@@ -132,7 +133,7 @@
     },
     "packages/server": {
       "name": "@micro-agent/server",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "dependencies": {
         "@logtape/logtape": "^2.0.2",
         "@micro-agent/providers": "workspace:*",
@@ -147,7 +148,7 @@
     },
     "packages/storage": {
       "name": "@micro-agent/storage",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "dependencies": {
         "@logtape/logtape": "^2.0.2",
         "@micro-agent/types": "workspace:*",
@@ -159,7 +160,7 @@
     },
     "packages/types": {
       "name": "@micro-agent/types",
-      "version": "0.1.0",
+      "version": "0.2.1",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.9.3",
@@ -193,6 +194,8 @@
     "@lancedb/lancedb-win32-x64-msvc": ["@lancedb/lancedb-win32-x64-msvc@0.26.2", "", { "os": "win32", "cpu": "x64" }, "sha512-GH3pfyzicgPGTb84xMXgujlWDaAnBTmUyjooYiCE2tC24BaehX4hgFhXivamzAEsF5U2eVsA/J60Ppif+skAbA=="],
 
     "@larksuiteoapi/node-sdk": ["@larksuiteoapi/node-sdk@1.59.0", "", { "dependencies": { "axios": "~1.13.3", "lodash.identity": "^3.0.0", "lodash.merge": "^4.6.2", "lodash.pickby": "^4.6.0", "protobufjs": "^7.2.6", "qs": "^6.14.2", "ws": "^8.19.0" } }, "sha512-sBpkruTvZDOxnVtoTbepWKRX0j1Y1ZElQYu0x7+v088sI9pcpbVp6ZzCGn62dhrKPatzNyCJyzYCPXPYQWccrA=="],
+
+    "@logtape/file": ["@logtape/file@2.0.4", "", { "peerDependencies": { "@logtape/logtape": "^2.0.4" } }, "sha512-T4ajSQR19kae/MLic4dLXehsB5nfMSUdNAIgQcdgToog9E8PGaYT0IINw+v4clD25AYogeCmn30V7/s2ieV3GA=="],
 
     "@logtape/logtape": ["@logtape/logtape@2.0.4", "", {}, "sha512-Z4COeAMdedcBFuFkXaPFvDPOVuHoEom1hwNnPCIkSyojyikuNguplwPoSG+kZthWrS7GiOJo1USQyjWwIFfTKA=="],
 

@@ -15,8 +15,10 @@ import { ModelRouter, convertToPlainText, buildUserContent, type RouteResult } f
 import { LoopDetector } from '../loop-detection';
 import { MessageHistoryManager } from '../message-manager';
 import { getLogger } from '@logtape/logtape';
+import { getTracer } from '../logging';
 
 const log = getLogger(['executor']);
+const tracer = getTracer();
 
 /** 最大会话数量（防止内存泄漏） */
 const MAX_SESSIONS = 1000;
@@ -188,51 +190,69 @@ export class AgentExecutor {
    * 处理单条消息
    */
   async processMessage(msg: InboundMessage): Promise<OutboundMessage | null> {
-    const sessionKey = 'default';
-    const sessionHistory = this.conversationHistory.get(sessionKey) ?? [];
-
-    // 检索相关记忆
-    log.info('🔍 开始检索记忆', { query: msg.content.slice(0, 100), sessionKey });
-    const relevantMemories = await this.retrieveMemories(msg.content);
-    if (relevantMemories.length > 0) {
-      log.info('🧠 检索到相关记忆', { 
-        count: relevantMemories.length,
-        types: relevantMemories.map(m => m.type),
-        previews: relevantMemories.map(m => m.content.slice(0, 50) + '...')
-      });
-    } else {
-      log.info('🧠 未检索到相关记忆');
-    }
-
-    const messages = this.buildMessages(sessionHistory, msg, relevantMemories);
-
-    try {
-      const result = await this.runAgentLoop(messages, msg);
-      this.updateHistory(sessionKey, messages.slice(1));
-
-      // 存储记忆
-      await this.storeMemory(msg, result, sessionKey);
-
-      // 记录活动时间并启动空闲检查
-      if (this.summarizer) {
-        this.summarizer.recordActivity();
-        this.summarizer.startIdleCheck(sessionKey, () => this.conversationHistory.get(sessionKey) ?? []);
-      }
-
-      // 检查是否需要摘要
-      await this.checkAndSummarize(sessionKey, messages);
-
-      return {
-        channel: msg.channel,
+    // 开始新的追踪会话
+    const traceId = tracer.startTrace();
+    
+    return tracer.traceAsync(
+      'executor',
+      'processMessage',
+      { 
+        channel: msg.channel, 
         chatId: msg.chatId,
-        content: result.content || '处理完成',
-        media: [],
-        metadata: msg.metadata,
-      };
-    } catch (error) {
-      log.error('❌ 处理消息异常', { error: this.safeErrorMsg(error) });
-      return this.createErrorResponse(msg);
-    }
+        contentLength: msg.content.length,
+        hasMedia: msg.media?.length ?? 0 > 0
+      },
+      async () => {
+        const sessionKey = 'default';
+        const sessionHistory = this.conversationHistory.get(sessionKey) ?? [];
+
+        // 检索相关记忆
+        log.info('🔍 开始检索记忆', { query: msg.content.slice(0, 100), sessionKey });
+        const relevantMemories = await this.retrieveMemories(msg.content);
+        if (relevantMemories.length > 0) {
+          log.info('🧠 检索到相关记忆', { 
+            count: relevantMemories.length,
+            types: relevantMemories.map(m => m.type),
+            previews: relevantMemories.map(m => m.content.slice(0, 50) + '...')
+          });
+        } else {
+          log.info('🧠 未检索到相关记忆');
+        }
+
+        const messages = this.buildMessages(sessionHistory, msg, relevantMemories);
+
+        try {
+          const result = await this.runAgentLoop(messages, msg);
+          this.updateHistory(sessionKey, messages.slice(1));
+
+          // 存储记忆
+          await this.storeMemory(msg, result, sessionKey);
+
+          // 记录活动时间并启动空闲检查
+          if (this.summarizer) {
+            this.summarizer.recordActivity();
+            this.summarizer.startIdleCheck(sessionKey, () => this.conversationHistory.get(sessionKey) ?? []);
+          }
+
+          // 检查是否需要摘要
+          await this.checkAndSummarize(sessionKey, messages);
+
+          return {
+            channel: msg.channel,
+            chatId: msg.chatId,
+            content: result.content || '处理完成',
+            media: [],
+            metadata: msg.metadata,
+          };
+        } catch (error) {
+          log.error('❌ 处理消息异常', { error: this.safeErrorMsg(error) });
+          return this.createErrorResponse(msg);
+        }
+      },
+      'AgentExecutor'
+    ).finally(() => {
+      tracer.endTrace();
+    }) as Promise<OutboundMessage | null>;
   }
 
   /**
@@ -573,17 +593,36 @@ export class AgentExecutor {
    * 执行单个工具
    */
   private async executeTool(name: string, input: unknown, msg: InboundMessage): Promise<string> {
+    const startTime = Date.now();
+    let success = true;
+    let errorMsg: string | undefined;
+    
     try {
-      const startTime = Date.now();
-      const result = await this.tools.execute(name, input, this.createContext(msg));
+      const result = await tracer.traceAsync(
+        'executor',
+        'executeTool',
+        { toolName: name, input },
+        async () => {
+          return this.tools.execute(name, input, this.createContext(msg));
+        },
+        'AgentExecutor'
+      );
+      
       const elapsed = Date.now() - startTime;
-      log.info('✅ 工具结果', { tool: name, elapsed: `${elapsed}ms` });
+      tracer.logToolCall(name, input, result, elapsed, true);
+      
       return result;
     } catch (error) {
-      log.error('❌ 工具执行失败', { tool: name, error: this.safeErrorMsg(error) });
+      success = false;
+      errorMsg = this.safeErrorMsg(error);
+      const elapsed = Date.now() - startTime;
+      
+      tracer.logToolCall(name, input, '', elapsed, false, errorMsg);
+      log.error('❌ 工具执行失败', { tool: name, error: errorMsg });
+      
       return JSON.stringify({
         error: true,
-        message: '工具执行失败: ' + this.safeErrorMsg(error),
+        message: '工具执行失败: ' + errorMsg,
         tool: name
       });
     }

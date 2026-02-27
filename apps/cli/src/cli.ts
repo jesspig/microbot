@@ -12,12 +12,22 @@
 
 import { parseArgs } from 'util';
 import { createInterface } from 'readline';
-import { initLogger } from '@micro-agent/config';
 import { createApp } from './app';
 import { loadConfig, getConfigStatus } from '@micro-agent/config';
+import { initLogging, getLogFilePath } from '@micro-agent/runtime';
 import type { App } from '@micro-agent/types';
 
 const VERSION = '0.2.1';
+
+/** 初始化日志系统 */
+async function initLoggingSystem(verbose: boolean = false): Promise<void> {
+  await initLogging({
+    console: true,
+    file: true,
+    level: verbose ? 'debug' : 'info',
+    traceEnabled: true,
+  });
+}
 
 /** 显示帮助信息 */
 function showHelp(): void {
@@ -41,8 +51,8 @@ MicroAgent - 轻量级 AI 助手框架
 
 示例:
   micro-agent chat              # 终端对话
+  micro-agent chat -v           # 终端对话（详细日志）
   micro-agent start             # 启动服务连接飞书/钉钉
-  micro-agent start -v
   micro-agent start -c ./config.yaml
   micro-agent status
   micro-agent ext list
@@ -68,7 +78,10 @@ function showStatus(app: App): void {
 }
 
 /** 交互式对话模式 */
-async function chatService(configPath?: string): Promise<void> {
+async function chatService(configPath?: string, verbose: boolean = false): Promise<void> {
+  // 初始化日志
+  await initLoggingSystem(verbose);
+
   console.log('\x1b[2J\x1b[H');
   console.log();
   console.log('\x1b[1m\x1b[36mMicroAgent Chat\x1b[0m');
@@ -97,6 +110,7 @@ async function chatService(configPath?: string): Promise<void> {
 
   const routerStatus = app.getRouterStatus();
   console.log(`  \x1b[2m对话模型:\x1b[0m ${routerStatus.chatModel}`);
+  console.log(`  \x1b[2m日志文件:\x1b[0m ${getLogFilePath()}`);
   console.log('─'.repeat(50));
   console.log();
   console.log('输入消息开始对话，输入 /exit 退出');
@@ -140,7 +154,10 @@ async function chatService(configPath?: string): Promise<void> {
 }
 
 /** 启动服务 */
-async function startService(configPath?: string): Promise<void> {
+async function startService(configPath?: string, verbose: boolean = false): Promise<void> {
+  // 初始化日志
+  await initLoggingSystem(verbose);
+
   console.log('\x1b[2J\x1b[H'); // 清屏
   console.log();
   console.log('\x1b[1m\x1b[36mMicroAgent\x1b[0m');
@@ -211,6 +228,7 @@ async function startService(configPath?: string): Promise<void> {
     if (routerStatus.coderModel) {
       console.log(`  \x1b[2m编程模型:\x1b[0m ${routerStatus.coderModel}`);
     }
+    console.log(`  \x1b[2m日志文件:\x1b[0m ${getLogFilePath()}`);
 
     // 未配置通道时显示警告
     if (!hasChannels) {
@@ -254,12 +272,9 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
 
   const helpVal = parsed.values.help as boolean | undefined;
   const versionVal = parsed.values.version as boolean | undefined;
-  const configVal = parsed.values.config as string | undefined;
   const verboseVal = parsed.values.verbose as boolean | undefined;
+  const configVal = parsed.values.config as string | undefined;
   const { positionals } = parsed;
-
-  // 初始化日志（必须在所有日志调用之前）
-  await initLogger({ verbose: verboseVal });
 
   // 全局选项
   if (helpVal && positionals.length === 0) {
@@ -274,14 +289,15 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
 
   const command = positionals[0];
   const configPath = typeof configVal === 'string' ? configVal : undefined;
+  const verbose = verboseVal ?? false;
 
   switch (command) {
     case 'start':
-      await startService(configPath);
+      await startService(configPath, verbose);
       break;
 
     case 'chat':
-      await chatService(configPath);
+      await chatService(configPath, verbose);
       break;
 
     case 'status': {
