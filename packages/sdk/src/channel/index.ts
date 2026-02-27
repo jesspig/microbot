@@ -5,4 +5,5 @@
 export type { Channel, ChannelType, OutboundMessage } from '@micro-agent/types';
 export { ChannelManager } from './manager';
 export { ChannelHelper } from './helper';
+export { createChannelType } from './base';
 export type { InboundMessageParams } from './helper';

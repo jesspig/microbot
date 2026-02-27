@@ -39,6 +39,7 @@ import type {
   Config,
   ProviderEntry,
   InboundMessage,
+  ChannelType,
 } from '@micro-agent/types';
 import type { ModelConfig } from '@micro-agent/config';
 import { resolve, dirname } from 'path';
@@ -376,7 +377,7 @@ ${skillsSummary}`);
     }
 
     const msg: InboundMessage = {
-      channel: 'cli',
+      channel: 'cli' as ChannelType,
       chatId: 'default',
       senderId: 'user',
       content: input,
