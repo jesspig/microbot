@@ -88,3 +88,30 @@ export {
 
 // Channel Gateway
 export { ChannelGatewayImpl } from './gateway';
+
+// Logging System
+export {
+  // Types
+  type LogLevel,
+  type LoggingConfig,
+  type TraceContext,
+  type MethodCallLog,
+  type LLMCallLog,
+  type ToolCallLog,
+  type EventLog,
+  type LogEntry,
+  type TracerOptions,
+  DEFAULT_LOGGING_CONFIG,
+  // Config
+  initLogging,
+  closeLogging,
+  isLoggingInitialized,
+  getLogFilePath,
+  createModuleLogger,
+  // Tracer
+  Tracer,
+  getTracer,
+  setTracer,
+  traceMethod,
+  traced,
+} from './logging';
