@@ -32,7 +32,7 @@ import {
   WebFetchTool,
   MessageTool,
 } from '../../../extensions/tool';
-import { FeishuChannel, CliChannel } from '../../../extensions/channel';
+import { FeishuChannel } from '../../../extensions/channel';
 import { buildIntentSystemPrompt, buildIntentUserPrompt } from '../../prompts';
 import type {
   App,
@@ -202,7 +202,6 @@ class AppImpl implements App {
   private skillsLoader: SkillsLoader | null = null;
   private memoryStore: MemoryStore | null = null;
   private summarizer: ConversationSummarizer | null = null;
-  private cliChannel: CliChannel | null = null;
 
   constructor(config: Config, workspace: string) {
     this.config = config;
@@ -470,43 +469,6 @@ ${skillsSummary}`);
     };
   }
 
-  /**
-   * 交互式对话
-   *
-   * CLI 输入 → ChannelGateway → LLM → 广播到所有 Channel
-   */
-  async chat(input: string): Promise<string> {
-    if (!this.channelGateway) {
-      throw new Error('ChannelGateway 未初始化');
-    }
-
-    // 设置输入状态，禁用广播输出
-    if (this.cliChannel) {
-      this.cliChannel.setInputting(true);
-    }
-
-    const msg: InboundMessage = {
-      channel: 'cli' as ChannelType,
-      chatId: 'default',
-      senderId: 'user',
-      content: input,
-      media: [],
-      metadata: {},
-      timestamp: new Date(),
-    };
-
-    // 通过 gateway 处理（会调用 LLM 并广播）
-    await this.channelGateway.process(msg);
-
-    // 恢复输入状态，显示缓存的广播消息
-    if (this.cliChannel) {
-      this.cliChannel.setInputting(false);
-      this.cliChannel.flushBroadcasts();
-    }
-
-    return '处理完成';
-  }
-
   private initProviders(): void {
     const providers = this.config.providers as Record<string, ProviderEntry | undefined>;
     const chatModel = this.config.agents.models?.chat || '';
@@ -549,10 +511,6 @@ ${skillsSummary}`);
       });
       this.channelManager.register(channel);
     }
-
-    // CLI 通道（始终注册）
-    this.cliChannel = new CliChannel(this.messageBus);
-    this.channelManager.register(this.cliChannel);
   }
 
   /**

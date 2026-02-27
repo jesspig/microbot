@@ -5,13 +5,11 @@
  *
  * 命令:
  * - start: 启动服务
- * - chat:  交互式对话
  * - status: 显示状态
  * - ext: 扩展管理
  */
 
 import { parseArgs } from 'util';
-import { createInterface } from 'readline';
 import { createApp } from './app';
 import { loadConfig, getConfigStatus } from '@micro-agent/config';
 import { initLogging, getLogFilePath } from '@micro-agent/runtime';
@@ -39,7 +37,6 @@ MicroAgent - 轻量级 AI 助手框架
 
 命令:
   start       启动服务（连接外部通道）
-  chat        交互式对话（终端直接对话）
   status      显示状态
   ext         扩展管理
 
@@ -50,8 +47,6 @@ MicroAgent - 轻量级 AI 助手框架
       --version         显示版本
 
 示例:
-  micro-agent chat              # 终端对话
-  micro-agent chat -v           # 终端对话（详细日志）
   micro-agent start             # 启动服务连接飞书/钉钉
   micro-agent start -c ./config.yaml
   micro-agent status
@@ -75,80 +70,6 @@ function showStatus(app: App): void {
   console.log(`  \x1b[2m通道:\x1b[0m ${channels.length > 0 ? channels.join(', ') : '无'}`);
   console.log(`  \x1b[2mProvider:\x1b[0m ${provider}`);
   console.log();
-}
-
-/** 交互式对话模式 */
-async function chatService(configPath?: string, verbose: boolean = false): Promise<void> {
-  // 初始化日志
-  await initLoggingSystem(verbose);
-
-  console.log('\x1b[2J\x1b[H');
-  console.log();
-  console.log('\x1b[1m\x1b[36mMicroAgent Chat\x1b[0m');
-  console.log('─'.repeat(50));
-
-  const baseConfig = loadConfig(configPath ? { configPath } : {});
-  const configStatus = getConfigStatus(baseConfig);
-
-  if (configStatus.missingRequired.length > 0) {
-    console.log();
-    console.log('\x1b[33m  ⚠ 配置不完整\x1b[0m');
-    console.log();
-    console.log('  缺少必填项：');
-    for (const item of configStatus.missingRequired) {
-      console.log(`    \x1b[31m✗\x1b[0m ${item}`);
-    }
-    console.log();
-    console.log('  请编辑 \x1b[36m~/.micro-agent/settings.yaml\x1b[0m 完成配置');
-    console.log('─'.repeat(50));
-    console.log();
-    process.exit(1);
-  }
-
-  const app = await createApp(configPath);
-  await app.start();
-
-  console.log(`  \x1b[2m日志文件:\x1b[0m ${getLogFilePath()}`);
-  console.log('─'.repeat(50));
-  console.log();
-  console.log('输入消息开始对话，输入 /exit 退出');
-  console.log();
-
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  const question = (prompt: string): Promise<string> => {
-    return new Promise(resolve => {
-      rl.question(prompt, resolve);
-    });
-  };
-
-  // 主对话循环
-  try {
-    while (true) {
-      const input = await question('\x1b[1m你:\x1b[0m ');
-
-      if (!input.trim()) continue;
-      if (input.trim().toLowerCase() === '/exit') {
-        break;
-      }
-
-      try {
-        // 发送消息到 Agent（响应已由 CliChannel 输出）
-        await app.chat(input.trim());
-      } catch (error) {
-        console.log();
-        console.log(`\x1b[31m错误: ${error instanceof Error ? error.message : String(error)}\x1b[0m`);
-        console.log();
-      }
-    }
-  } finally {
-    rl.close();
-    await app.stop();
-    console.log('再见！');
-  }
 }
 
 /** 启动服务 */
@@ -217,14 +138,9 @@ async function startService(configPath?: string, verbose: boolean = false): Prom
       console.log();
       console.log('\x1b[33m  ⚠ 未配置消息通道\x1b[0m');
       console.log();
-      console.log('  Agent 已启动但无法接收消息。请选择以下方式之一：');
+      console.log('  Agent 已启动但无法接收消息。');
       console.log();
-      console.log('  \x1b[36m1. 配置外部通道\x1b[0m');
-      console.log('     编辑 ~/.micro-agent/settings.yaml，启用飞书/钉钉等通道');
-      console.log();
-      console.log('  \x1b[36m2. 使用交互模式\x1b[0m');
-      console.log('     运行: micro-agent chat');
-      console.log();
+      console.log('  请编辑 \x1b[36m~/.micro-agent/settings.yaml\x1b[0m 启用飞书等通道');
       console.log('─'.repeat(50));
     } else {
       console.log();
@@ -276,10 +192,6 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
   switch (command) {
     case 'start':
       await startService(configPath, verbose);
-      break;
-
-    case 'chat':
-      await chatService(configPath, verbose);
       break;
 
     case 'status': {

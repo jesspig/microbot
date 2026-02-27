@@ -59,8 +59,6 @@ export interface App {
   getProviderStatus(): string;
   /** 获取路由状态 */
   getRouterStatus(): { chatModel: string; visionModel?: string; coderModel?: string; intentModel?: string };
-  /** 交互式对话 */
-  chat(input: string): Promise<string>;
 }
 
 /** 广播消息结构 */
