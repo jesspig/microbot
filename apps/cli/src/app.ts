@@ -42,13 +42,46 @@ import type {
   ChannelType,
 } from '@micro-agent/types';
 import type { ModelConfig } from '@micro-agent/config';
+import { getLogger } from '@logtape/logtape';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { readFileSync, existsSync, mkdirSync, writeFileSync, copyFileSync } from 'fs';
 
+const log = getLogger(['app']);
+
 /** 用户级配置目录 */
 const USER_CONFIG_DIR = resolve(homedir(), '.micro-agent');
+
+/** 启动状态信息收集器 */
+interface StartupInfo {
+  tools: string[];
+  skills: string[];
+  models: {
+    chat?: string;
+    vision?: string;
+    embed?: string;
+    coder?: string;
+    intent?: string;
+  };
+  memory: {
+    mode: 'vector' | 'fulltext';
+    storagePath?: string;
+    autoSummarize?: boolean;
+    summarizeThreshold?: number;
+  };
+  channels: string[];
+  warnings: string[];
+}
+
+const startupInfo: StartupInfo = {
+  tools: [],
+  skills: [],
+  models: {},
+  memory: { mode: 'fulltext' },
+  channels: [],
+  warnings: [],
+};
 
 /** 获取内置技能路径 */
 function getBuiltinSkillsPath(): string {
@@ -197,7 +230,7 @@ class AppImpl implements App {
     // 0. 确保用户级配置文件存在
     const { created } = ensureUserConfigFiles();
     if (created.length > 0) {
-      console.log(`  已创建配置文件: ${created.join(', ')}`);
+      log.info('已创建配置文件', { files: created });
     }
 
     // 1. 注册内置工具（基础工具）
@@ -210,10 +243,7 @@ class AppImpl implements App {
     this.skillsLoader = new SkillsLoader(this.workspace, getBuiltinSkillsPath());
     this.skillsLoader.load();
     if (this.skillsLoader.count > 0) {
-      const skillNames = this.skillsLoader.getAll().map(s => s.name).join(', ');
-      console.log(`  已加载 ${this.skillsLoader.count} 个技能: ${skillNames}`);
-    } else {
-      console.log('  未找到任何技能');
+      startupInfo.skills = this.skillsLoader.getAll().map(s => s.name);
     }
 
     // 4. 初始化通道
@@ -224,6 +254,7 @@ class AppImpl implements App {
 
     // 6. 启动通道
     await this.channelManager.startAll();
+    startupInfo.channels = this.channelManager.getRunningChannels();
 
     // 7. 创建 Agent 执行器
     this.executor = new AgentExecutor(
@@ -258,6 +289,84 @@ class AppImpl implements App {
     });
 
     this.startGateway();
+
+    // 9. 打印启动信息
+    this.printStartupInfo();
+  }
+
+  /** 打印启动信息 */
+  private printStartupInfo(): void {
+    const chatModel = this.config.agents.models?.chat;
+    
+    console.log('─'.repeat(50));
+    
+    // 工具
+    if (startupInfo.tools.length > 0) {
+      console.log(`  \x1b[90m工具:\x1b[0m ${startupInfo.tools.join(', ')}`);
+    }
+    
+    // 技能
+    if (startupInfo.skills.length > 0) {
+      console.log(`  \x1b[90m技能:\x1b[0m ${startupInfo.skills.join(', ')}`);
+    }
+    
+    // 模型
+    const models = startupInfo.models;
+    
+    // 对话模型
+    if (chatModel) {
+      console.log(`  \x1b[90m对话模型:\x1b[0m ${chatModel}`);
+    }
+    
+    // 视觉模型
+    if (models.vision && models.vision !== chatModel) {
+      console.log(`  \x1b[90m视觉模型:\x1b[0m ${models.vision}`);
+    } else if (chatModel) {
+      console.log(`  \x1b[90m视觉模型:\x1b[0m ${chatModel} (继承对话模型)`);
+    }
+    
+    // 嵌入模型
+    if (models.embed) {
+      console.log(`  \x1b[90m嵌入模型:\x1b[0m ${models.embed}`);
+    }
+    
+    // 代码模型
+    if (models.coder && models.coder !== chatModel) {
+      console.log(`  \x1b[90m编程模型:\x1b[0m ${models.coder}`);
+    } else if (chatModel) {
+      console.log(`  \x1b[90m编程模型:\x1b[0m ${chatModel} (继承对话模型)`);
+    }
+    
+    // 意图模型
+    if (models.intent && models.intent !== chatModel) {
+      console.log(`  \x1b[90m意图模型:\x1b[0m ${models.intent}`);
+    } else if (chatModel) {
+      console.log(`  \x1b[90m意图模型:\x1b[0m ${chatModel} (继承对话模型)`);
+    }
+    
+    // 记忆模式
+    const modeLabel = startupInfo.memory.mode === 'vector' ? '向量检索' : '全文检索';
+    console.log(`  \x1b[90m记忆:\x1b[0m ${modeLabel}`);
+    
+    // 自动摘要
+    if (startupInfo.memory.autoSummarize && startupInfo.memory.summarizeThreshold) {
+      console.log(`  \x1b[90m自动摘要:\x1b[0m ${startupInfo.memory.summarizeThreshold} 条消息`);
+    }
+    
+    // 渠道
+    if (startupInfo.channels.length > 0) {
+      console.log(`  \x1b[90m渠道:\x1b[0m ${startupInfo.channels.join(', ')}`);
+    }
+    
+    // 警告
+    if (startupInfo.warnings.length > 0) {
+      console.log();
+      for (const w of startupInfo.warnings) {
+        console.log(`  \x1b[33m⚠ ${w}\x1b[0m`);
+      }
+    }
+    
+    console.log('─'.repeat(50));
   }
 
   private loadSystemPrompt(): string {
@@ -305,7 +414,7 @@ ${skillsSummary}`);
     this.toolRegistry.register(createExecTool(this.workspace));
     this.toolRegistry.register(WebFetchTool);
     this.toolRegistry.register(MessageTool);
-    console.log(`  已注册 ${this.toolRegistry.getDefinitions().length} 个基础工具: ${this.toolRegistry.getDefinitions().map(t => t.name).join(', ')}`);
+    startupInfo.tools = this.toolRegistry.getDefinitions().map(t => t.name);
   }
 
   /**
@@ -454,7 +563,7 @@ ${skillsSummary}`);
     
     // 检查是否启用记忆系统
     if (memoryConfig?.enabled === false) {
-      console.log('  记忆系统已禁用');
+      startupInfo.warnings.push('记忆系统已禁用');
       return;
     }
 
@@ -463,42 +572,33 @@ ${skillsSummary}`);
       let embeddingService;
       const embedModel = this.config.agents.models?.embed;
       
+      // 收集模型信息
+      startupInfo.models.chat = this.config.agents.models?.chat;
+      startupInfo.models.vision = this.config.agents.models?.vision;
+      startupInfo.models.embed = embedModel;
+      startupInfo.models.coder = this.config.agents.models?.coder;
+      startupInfo.models.intent = this.config.agents.models?.intent;
+      
       if (embedModel) {
-        // 使用配置的嵌入模型，从 providers 配置中获取 API 信息
         const slashIndex = embedModel.indexOf('/');
         const providerName = slashIndex > 0 ? embedModel.slice(0, slashIndex) : Object.keys(this.config.providers)[0];
         const providerConfig = this.config.providers[providerName || ''];
         
-        // 详细诊断日志
-        console.log(`  嵌入模型配置: ${embedModel}`);
-        console.log(`  提取的 provider: ${providerName || '(未指定)'}`);
-        console.log(`  provider 配置存在: ${!!providerConfig}`);
-        if (providerConfig) {
-          console.log(`  provider.baseUrl: ${providerConfig.baseUrl ? '✓ 已配置' : '✗ 未配置'}`);
-          console.log(`  provider.apiKey: ${providerConfig.apiKey ? '✓ 已配置' : '✗ 未配置'}`);
-        }
-        
         if (providerConfig?.baseUrl) {
-          // 本地服务（如 ollama）不需要 apiKey
           embeddingService = new OpenAIEmbedding(
             embedModel,
             providerConfig.baseUrl,
-            providerConfig.apiKey || '' // 本地服务 apiKey 可为空
+            providerConfig.apiKey || ''
           );
-          console.log(`  记忆系统: 使用嵌入模型 ${embedModel}`);
-          if (!providerConfig.apiKey) {
-            console.log('  提示: 本地服务未配置 apiKey，使用无认证模式');
-          }
+          startupInfo.memory.mode = 'vector';
         } else {
           embeddingService = new NoEmbedding();
-          console.log('  记忆系统: 嵌入模型配置缺失 baseUrl，使用全文检索');
-          console.log('  提示: 请确保 providers 中对应的 provider 配置了 baseUrl');
+          startupInfo.memory.mode = 'fulltext';
+          startupInfo.warnings.push('嵌入模型配置缺少 baseUrl，使用全文检索');
         }
       } else {
-        // 无嵌入模型，使用 NoEmbedding
         embeddingService = new NoEmbedding();
-        console.log('  记忆系统: 无嵌入模型配置，使用全文检索');
-        console.log('  提示: 在 agents.models.embed 中配置嵌入模型以启用向量检索');
+        startupInfo.memory.mode = 'fulltext';
       }
 
       // 初始化 MemoryStore
@@ -514,27 +614,28 @@ ${skillsSummary}`);
       });
 
       await this.memoryStore.initialize();
-      console.log(`  记忆存储路径: ${storagePath}`);
+      
+      log.debug('记忆存储已初始化', { path: storagePath });
 
       // 初始化 Summarizer
       if (memoryConfig?.autoSummarize !== false && this.memoryStore) {
+        const threshold = memoryConfig?.summarizeThreshold ?? 20;
         this.summarizer = new ConversationSummarizer(
           this.llmGateway,
           this.memoryStore,
           {
-            minMessages: memoryConfig?.summarizeThreshold ?? 20,
+            minMessages: threshold,
             maxLength: 2000,
             idleTimeout: memoryConfig?.idleTimeout ?? 300000,
           }
         );
-        console.log(`  自动摘要: 启用 (阈值: ${memoryConfig?.summarizeThreshold ?? 20} 条消息)`);
-      } else {
-        console.log('  自动摘要: 禁用');
+        startupInfo.memory.autoSummarize = true;
+        startupInfo.memory.summarizeThreshold = threshold;
       }
 
     } catch (error) {
-      console.error('记忆系统初始化失败:', error instanceof Error ? error.message : String(error));
-      // 继续运行，但不使用记忆系统
+      log.error('记忆系统初始化失败', { error: error instanceof Error ? error.message : String(error) });
+      startupInfo.warnings.push('记忆系统初始化失败');
       this.memoryStore = null;
       this.summarizer = null;
     }

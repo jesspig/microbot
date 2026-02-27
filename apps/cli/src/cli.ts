@@ -108,8 +108,6 @@ async function chatService(configPath?: string, verbose: boolean = false): Promi
   const app = await createApp(configPath);
   await app.start();
 
-  const routerStatus = app.getRouterStatus();
-  console.log(`  \x1b[2m对话模型:\x1b[0m ${routerStatus.chatModel}`);
   console.log(`  \x1b[2m日志文件:\x1b[0m ${getLogFilePath()}`);
   console.log('─'.repeat(50));
   console.log();
@@ -208,26 +206,10 @@ async function startService(configPath?: string, verbose: boolean = false): Prom
   // 启动
   try {
     await app.start();
-    const routerStatus = app.getRouterStatus();
     const runningChannels = app.getRunningChannels();
     const hasChannels = runningChannels.length > 0;
 
-    console.log('─'.repeat(50));
-
-    // 通道状态显示
-    if (hasChannels) {
-      console.log(`  \x1b[2m通道:\x1b[0m ${runningChannels.join(', ')}`);
-    } else {
-      console.log(`  \x1b[33m通道: 未配置\x1b[0m`);
-    }
-
-    console.log(`  \x1b[2m对话模型:\x1b[0m ${routerStatus.chatModel}`);
-    if (routerStatus.visionModel) {
-      console.log(`  \x1b[2m视觉模型:\x1b[0m ${routerStatus.visionModel}`);
-    }
-    if (routerStatus.coderModel) {
-      console.log(`  \x1b[2m编程模型:\x1b[0m ${routerStatus.coderModel}`);
-    }
+    // 日志文件路径
     console.log(`  \x1b[2m日志文件:\x1b[0m ${getLogFilePath()}`);
 
     // 未配置通道时显示警告
