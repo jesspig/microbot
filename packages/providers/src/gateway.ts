@@ -18,12 +18,14 @@ interface ProviderEntry {
 
 /** Gateway 配置 */
 export interface GatewayConfig {
-  defaultProvider: string;
+  /** 默认 Provider（可选，未设置时自动选择第一个注册的 Provider） */
+  defaultProvider?: string;
+  /** 是否启用故障转移 */
   fallbackEnabled: boolean;
 }
 
 const DEFAULT_CONFIG: GatewayConfig = {
-  defaultProvider: 'ollama',
+  defaultProvider: undefined,
   fallbackEnabled: true,
 };
 
@@ -205,7 +207,8 @@ export class LLMGateway implements LLMProvider {
 
   private parseModel(model?: string): { providerName: string; modelName: string | undefined } {
     if (!model) {
-      return { providerName: this.config.defaultProvider, modelName: undefined };
+      const defaultProvider = this.getDefaultProviderName();
+      return { providerName: defaultProvider, modelName: undefined };
     }
 
     const slashIndex = model.indexOf('/');
@@ -222,13 +225,34 @@ export class LLMGateway implements LLMProvider {
       }
     }
 
-    return { providerName: this.config.defaultProvider, modelName: model };
+    const defaultProvider = this.getDefaultProviderName();
+    return { providerName: defaultProvider, modelName: model };
+  }
+
+  /**
+   * 获取默认 Provider 名称
+   * 优先使用配置的 defaultProvider，否则选择优先级最高的 Provider
+   */
+  private getDefaultProviderName(): string {
+    if (this.config.defaultProvider) {
+      return this.config.defaultProvider;
+    }
+
+    const sorted = Array.from(this.providers.entries())
+      .sort((a, b) => a[1].priority - b[1].priority);
+
+    if (sorted.length === 0) {
+      throw new Error('未注册任何 Provider，请先注册至少一个 Provider');
+    }
+
+    return sorted[0][0];
   }
 
   getDefaultModel(): string {
-    const entry = this.providers.get(this.config.defaultProvider);
-    const model = entry?.provider.getDefaultModel() ?? 'qwen3';
-    return `${this.config.defaultProvider}/${model}`;
+    const providerName = this.getDefaultProviderName();
+    const entry = this.providers.get(providerName);
+    const model = entry?.provider.getDefaultModel() ?? 'default';
+    return `${providerName}/${model}`;
   }
 
   async isAvailable(): Promise<boolean> {

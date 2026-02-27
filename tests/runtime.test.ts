@@ -62,71 +62,71 @@ describe('Runtime Package', () => {
 
     it('should register and execute hooks', async () => {
       let executed = false
-      testHookSystem.registerHook('llm:beforeRequest', () => {
+      testHookSystem.registerHook('pre:llm', () => {
         executed = true
         return {}
       })
 
-      await testHookSystem.executeHooks('llm:beforeRequest', {})
+      await testHookSystem.executeHooks('pre:llm', {})
       expect(executed).toBe(true)
     })
 
     it('should execute hooks in priority order', async () => {
       const order: number[] = []
       
-      testHookSystem.registerHook('test', () => {
+      testHookSystem.registerHook('pre:tool', () => {
         order.push(2)
         return {}
       }, 100)
       
-      testHookSystem.registerHook('test', () => {
+      testHookSystem.registerHook('pre:tool', () => {
         order.push(1)
         return {}
       }, 50)
       
-      testHookSystem.registerHook('test', () => {
+      testHookSystem.registerHook('pre:tool', () => {
         order.push(3)
         return {}
       }, 150)
 
-      await testHookSystem.executeHooks('test', {})
+      await testHookSystem.executeHooks('pre:tool', {})
       expect(order).toEqual([1, 2, 3])
     })
 
     it('should pass context through hook chain', async () => {
-      testHookSystem.registerHook('test', (ctx: { value: number }) => ({
+      testHookSystem.registerHook('post:tool', (ctx: { value: number }) => ({
         value: ctx.value + 1,
       }))
       
-      testHookSystem.registerHook('test', (ctx: { value: number }) => ({
+      testHookSystem.registerHook('post:tool', (ctx: { value: number }) => ({
         value: ctx.value * 2,
       }))
 
-      const result = await testHookSystem.executeHooks('test', { value: 5 })
+      const result = await testHookSystem.executeHooks('post:tool', { value: 5 })
       expect(result.value).toBe(12) // (5 + 1) * 2
     })
 
     it('should support async hooks', async () => {
-      testHookSystem.registerHook('test', async (ctx: { value: number }) => {
+      testHookSystem.registerHook('pre:inbound', async (ctx: { value: number }) => {
         await new Promise(resolve => setTimeout(resolve, 10))
         return { value: ctx.value + 1 }
       })
 
-      const result = await testHookSystem.executeHooks('test', { value: 10 })
+      const result = await testHookSystem.executeHooks('pre:inbound', { value: 10 })
       expect(result.value).toBe(11)
     })
 
     it('should return context unchanged when no hooks registered', async () => {
       const ctx = { value: 42 }
-      const result = await testHookSystem.executeHooks('no-hooks', ctx)
+      const result = await testHookSystem.executeHooks('pre:outbound', ctx)
       expect(result).toBe(ctx)
     })
 
     it('should clear hooks of specific type', () => {
-      testHookSystem.registerHook('test', () => ({}))
-      testHookSystem.registerHook('other', () => ({}))
+      testHookSystem.registerHook('post:inbound', () => ({}))
+      testHookSystem.registerHook('post:outbound', () => ({}))
 
-      testHookSystem.clear('test')
+      testHookSystem.clear('post:inbound')
       
       // Should not throw, but hooks should not execute
       // We can't directly check, but clear should work

@@ -20,8 +20,8 @@ class MockChannel implements Channel {
   stopCalled = false;
   lastMessage: OutboundMessage | null = null;
 
-  constructor(name: ChannelType, allowFrom: string[] = []) {
-    this.name = name;
+  constructor(name: string, allowFrom: string[] = []) {
+    this.name = name as ChannelType;
     this.helper = new ChannelHelper(new MockBus(), allowFrom);
   }
 
@@ -105,7 +105,7 @@ describe('ChannelManager', () => {
       manager.register(qqChannel);
 
       const msg: OutboundMessage = {
-        channel: 'feishu',
+        channel: 'feishu' as ChannelType,
         chatId: 'chat1',
         content: 'Hello',
         media: [],
@@ -120,7 +120,7 @@ describe('ChannelManager', () => {
 
     it('should throw for unregistered channel', async () => {
       const msg: OutboundMessage = {
-        channel: 'feishu',
+        channel: 'feishu' as ChannelType,
         chatId: 'chat1',
         content: 'Hello',
         media: [],

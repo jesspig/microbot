@@ -2,25 +2,119 @@
  * ReAct 类型定义和解析器
  */
 
-import { z, ZodError } from 'zod';
+import { z } from 'zod';
 
 /**
- * 预定义的 ReAct 动作类型
+ * 动作别名配置
  */
-export const PredefinedActions = [
-  'finish',
-  'read_file',
-  'write_file',
-  'list_dir',
-  'shell_exec',
-  'web_fetch',
-  'send_message',
-] as const;
+export interface ActionAliasConfig {
+  /** 标准动作名称 */
+  action: string;
+  /** 别名列表 */
+  aliases: string[];
+}
 
 /**
- * 预定义动作类型（用于类型安全）
+ * ReAct 动作注册表
+ *
+ * 管理动作别名和工具映射，支持动态注册
  */
-export type PredefinedAction = typeof PredefinedActions[number];
+export class ReActRegistry {
+  /** 动作别名映射（别名 -> 标准动作） */
+  private actionAliases = new Map<string, string>();
+
+  /** 工具名称到 ReAct 动作的映射 */
+  private toolToAction = new Map<string, string>();
+
+  /** ReAct 动作到工具名称的映射 */
+  private actionToTool = new Map<string, string | null>();
+
+  /**
+   * 注册动作别名
+   * @param config - 别名配置
+   */
+  registerAlias(config: ActionAliasConfig): void {
+    // 注册标准动作自身
+    this.actionAliases.set(config.action.toLowerCase(), config.action);
+    // 注册所有别名
+    for (const alias of config.aliases) {
+      this.actionAliases.set(alias.toLowerCase(), config.action);
+    }
+  }
+
+  /**
+   * 注册工具与动作的映射
+   * @param toolName - 工具名称
+   * @param action - ReAct 动作名称
+   */
+  registerToolMapping(toolName: string, action: string): void {
+    this.toolToAction.set(toolName, action);
+    this.actionToTool.set(action, toolName);
+  }
+
+  /**
+   * 注册完成动作（无对应工具）
+   * @param action - 完成动作名称
+   * @param aliases - 别名列表
+   */
+  registerFinishAction(action: string, aliases: string[] = []): void {
+    this.registerAlias({ action, aliases });
+    this.actionToTool.set(action, null);
+  }
+
+  /**
+   * 标准化动作名称
+   * @param action - 原始动作名称
+   * @returns 标准化的动作名称
+   */
+  normalizeAction(action: string): string {
+    const lowerAction = action.toLowerCase().trim();
+    return this.actionAliases.get(lowerAction) ?? action;
+  }
+
+  /**
+   * 获取工具名称
+   * @param action - ReAct 动作
+   * @returns 工具名称，完成动作返回 null，未注册动作返回原值
+   */
+  getToolName(action: string): string | null {
+    if (this.actionToTool.has(action)) {
+      return this.actionToTool.get(action)!;
+    }
+    return action;
+  }
+
+  /**
+   * 获取动作名称
+   * @param toolName - 工具名称
+   * @returns ReAct 动作名称
+   */
+  getActionName(toolName: string): string | undefined {
+    return this.toolToAction.get(toolName);
+  }
+
+  /**
+   * 检查是否为已注册的动作
+   * @param action - 动作名称
+   */
+  isRegisteredAction(action: string): boolean {
+    return this.actionAliases.has(action.toLowerCase());
+  }
+
+  /**
+   * 获取所有已注册的动作
+   */
+  getRegisteredActions(): string[] {
+    const actions = new Set(this.actionAliases.values());
+    return Array.from(actions);
+  }
+}
+
+/** 全局 ReAct 注册表实例 */
+export const reactRegistry = new ReActRegistry();
+
+/** 预定义动作类型（向后兼容） */
+export type PredefinedAction = string;
 
 /**
  * ReAct 动作类型（支持动态工具名称）
@@ -48,54 +142,6 @@ export const ReActResponseSchema = z.object({
  * ReAct 响应类型
  */
 export type ReActResponse = z.infer<typeof ReActResponseSchema>;
-
-/**
- * 动作别名映射
- * LLM 可能返回变体名称，统一映射到标准动作
- */
-const ActionAliases: Record<string, string> = {
-  // finish 别名
-  'finish': 'finish',
-  'done': 'finish',
-  'complete': 'finish',
-  'answer': 'finish',
-  'reply': 'finish',
-  // shell_exec 别名
-  'shell_exec': 'shell_exec',
-  'shell': 'shell_exec',
-  'exec': 'shell_exec',
-  'execute': 'shell_exec',
-  'run': 'shell_exec',
-  'command': 'shell_exec',
-  'bash': 'shell_exec',
-  // read_file 别名
-  'read_file': 'read_file',
-  'read': 'read_file',
-  'cat': 'read_file',
-  'file_read': 'read_file',
-  // write_file 别名
-  'write_file': 'write_file',
-  'write': 'write_file',
-  'save': 'write_file',
-  'file_write': 'write_file',
-  // list_dir 别名
-  'list_dir': 'list_dir',
-  'ls': 'list_dir',
-  'dir': 'list_dir',
-  'list': 'list_dir',
-  'list_directory': 'list_dir',
-  // web_fetch 别名
-  'web_fetch': 'web_fetch',
-  'fetch': 'web_fetch',
-  'http': 'web_fetch',
-  'get': 'web_fetch',
-  'curl': 'web_fetch',
-  // send_message 别名
-  'send_message': 'send_message',
-  'message': 'send_message',
-  'send': 'send_message',
-  'say': 'send_message',
-};
 
 /**
  * 解析 LLM 响应为 ReAct 格式
@@ -142,7 +188,7 @@ export function parseReActResponse(content: string): ReActResponse | null {
     }
     
     // 处理 action 字段异常格式
-    let normalizedAction: string;
+    let normalizedAction: string | null = null;
     const originalAction = parsed.action;
     
     // 如果 action 是对象（如 {"type": "read_file", "path": {...}}），提取 type
@@ -154,16 +200,8 @@ export function parseReActResponse(content: string): ReActResponse | null {
       if (!actionStr) {
         logDebug('action 为空，尝试从 thought 推断', parsed);
         // 简单推断：如果 thought 包含关键词
-        const thought = (parsed.thought || '').toLowerCase();
-        if (thought.includes('read') || thought.includes('读取')) {
-          normalizedAction = 'read_file';
-        } else if (thought.includes('write') || thought.includes('写入') || thought.includes('创建')) {
-          normalizedAction = 'write_file';
-        } else if (thought.includes('shell') || thought.includes('命令') || thought.includes('执行')) {
-          normalizedAction = 'shell_exec';
-        } else if (thought.includes('finish') || thought.includes('完成') || thought.includes('回复')) {
-          normalizedAction = 'finish';
-        } else {
+        normalizedAction = inferActionFromThought(parsed.thought);
+        if (!normalizedAction) {
           logDebug('无法推断 action', parsed);
           return null;
         }
@@ -175,8 +213,13 @@ export function parseReActResponse(content: string): ReActResponse | null {
       return null;
     }
     
-    // 映射到标准动作
-    const finalAction = ActionAliases[normalizedAction] ?? normalizedAction;
+    if (!normalizedAction) {
+      logDebug('normalizedAction 为空', parsed);
+      return null;
+    }
+    
+    // 使用注册表标准化动作
+    const finalAction = reactRegistry.normalizeAction(normalizedAction);
     
     // 处理 action_input 异常格式
     let normalizedInput: string | Record<string, unknown> | null = parsed.action_input ?? null;
@@ -205,6 +248,23 @@ export function parseReActResponse(content: string): ReActResponse | null {
 }
 
 /**
+ * 从 thought 推断动作
+ */
+function inferActionFromThought(thought: string): string | null {
+  const lowerThought = thought.toLowerCase();
+  if (lowerThought.includes('read') || lowerThought.includes('读取')) {
+    return 'read_file';
+  } else if (lowerThought.includes('write') || lowerThought.includes('写入') || lowerThought.includes('创建')) {
+    return 'write_file';
+  } else if (lowerThought.includes('shell') || lowerThought.includes('命令') || lowerThought.includes('执行')) {
+    return 'shell_exec';
+  } else if (lowerThought.includes('finish') || lowerThought.includes('完成') || lowerThought.includes('回复')) {
+    return 'finish';
+  }
+  return null;
+}
+
+/**
  * 调试日志（仅在开发环境输出）
  */
 function logDebug(message: string, data: unknown): void {
@@ -214,27 +274,57 @@ function logDebug(message: string, data: unknown): void {
 }
 
 /**
- * 工具名称到 ReAct 动作的映射
+ * 注册内置动作别名
  */
-export const ToolToReActAction: Record<string, string> = {
-  'read_file': 'read_file',
-  'write_file': 'write_file',
-  'list_dir': 'list_dir',
-  'exec': 'shell_exec',
-  'web_fetch': 'web_fetch',
-  'message': 'send_message',
-};
+function registerBuiltinAliases(): void {
+  // finish 动作
+  reactRegistry.registerFinishAction('finish', ['done', 'complete', 'answer', 'reply']);
+  
+  // 文件操作
+  reactRegistry.registerAlias({ action: 'read_file', aliases: ['read', 'cat', 'file_read'] });
+  reactRegistry.registerAlias({ action: 'write_file', aliases: ['write', 'save', 'file_write'] });
+  reactRegistry.registerAlias({ action: 'list_dir', aliases: ['ls', 'dir', 'list', 'list_directory'] });
+  
+  // Shell 执行
+  reactRegistry.registerAlias({ action: 'shell_exec', aliases: ['shell', 'exec', 'execute', 'run', 'command', 'bash'] });
+  
+  // 网络
+  reactRegistry.registerAlias({ action: 'web_fetch', aliases: ['fetch', 'http', 'get', 'curl'] });
+  
+  // 消息
+  reactRegistry.registerAlias({ action: 'send_message', aliases: ['message', 'send', 'say'] });
+
+  // 工具映射
+  reactRegistry.registerToolMapping('read_file', 'read_file');
+  reactRegistry.registerToolMapping('write_file', 'write_file');
+  reactRegistry.registerToolMapping('list_dir', 'list_dir');
+  reactRegistry.registerToolMapping('exec', 'shell_exec');
+  reactRegistry.registerToolMapping('web_fetch', 'web_fetch');
+  reactRegistry.registerToolMapping('message', 'send_message');
+}
+
+// 初始化内置别名
+registerBuiltinAliases();
 
 /**
- * ReAct 动作到工具名称的映射
- * 仅用于预定义动作，动态工具直接使用 action 名称
+ * 预定义动作列表（向后兼容，动态生成）
  */
-export const ReActActionToTool: Record<string, string | null> = {
-  'finish': null,
-  'read_file': 'read_file',
-  'write_file': 'write_file',
-  'list_dir': 'list_dir',
-  'shell_exec': 'exec',
-  'web_fetch': 'web_fetch',
-  'send_message': 'message',
-};
+export const PredefinedActions = reactRegistry.getRegisteredActions();
+
+/**
+ * 工具名称到 ReAct 动作的映射（向后兼容）
+ */
+export const ToolToReActAction: Record<string, string> = new Proxy({} as Record<string, string>, {
+  get(_, prop: string) {
+    return reactRegistry.getActionName(prop);
+  },
+});
+
+/**
+ * ReAct 动作到工具名称的映射（向后兼容）
+ */
+export const ReActActionToTool: Record<string, string | null> = new Proxy({} as Record<string, string | null>, {
+  get(_, prop: string) {
+    return reactRegistry.getToolName(prop);
+  },
+});

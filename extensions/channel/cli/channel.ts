@@ -21,7 +21,7 @@ export interface CliConfig {
  * CLI Channel 实现
  */
 export class CliChannel implements Channel {
-  readonly name: ChannelType = 'cli';
+  readonly name: ChannelType = 'cli' as ChannelType;
   
   private _isRunning = false;
   private rl: Interface | null = null;
@@ -119,7 +119,7 @@ export class CliChannel implements Channel {
    */
   async publishInput(content: string): Promise<void> {
     const msg: InboundMessage = {
-      channel: 'cli',
+      channel: 'cli' as ChannelType,
       chatId: 'default',
       senderId: 'user',
       content,

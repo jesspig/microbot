@@ -7,14 +7,19 @@
 import { homedir } from 'os';
 import { resolve, join } from 'path';
 import { existsSync, readdirSync, statSync } from 'fs';
+import {
+  type ExtensionType,
+  EXTENSION_TYPE_LABELS,
+  getExtensionTypeDir,
+} from '@micro-agent/types';
 
-/** 扩展类型 */
-type ExtensionType = 'tools' | 'channels' | 'skills' | 'agents' | 'workflows' | 'commands' | 'mcp';
+/** CLI 展示用的扩展类型（目录名，复数形式） */
+type CliExtensionType = 'tools' | 'channels' | 'skills' | 'agents' | 'workflows' | 'commands' | 'mcp';
 
 /** 扩展信息 */
 interface ExtensionInfo {
   name: string;
-  type: ExtensionType;
+  type: CliExtensionType;
   path: string;
   status: 'active' | 'inactive' | 'error';
 }
@@ -37,7 +42,7 @@ function scanExtensions(): ExtensionInfo[] {
 
     const types = readdirSync(baseDir, { withFileTypes: true })
       .filter(d => d.isDirectory())
-      .map(d => d.name as ExtensionType);
+      .map(d => d.name as CliExtensionType);
 
     for (const type of types) {
       const typeDir = join(baseDir, type);
@@ -77,20 +82,20 @@ function showExtensionsList(): void {
   }
 
   // 按类型分组
-  const grouped = new Map<ExtensionType, ExtensionInfo[]>();
+  const grouped = new Map<CliExtensionType, ExtensionInfo[]>();
   for (const ext of extensions) {
     const list = grouped.get(ext.type) || [];
     list.push(ext);
     grouped.set(ext.type, list);
   }
 
-  const typeLabels: Record<ExtensionType, string> = {
-    tools: '工具',
-    channels: '通道',
-    skills: '技能',
-    agents: 'Agent',
-    workflows: '工作流',
-    commands: '命令',
+  const typeLabels: Record<CliExtensionType, string> = {
+    tools: EXTENSION_TYPE_LABELS['tool'],
+    channels: EXTENSION_TYPE_LABELS['channel'],
+    skills: EXTENSION_TYPE_LABELS['skill'],
+    agents: EXTENSION_TYPE_LABELS['agent'],
+    workflows: EXTENSION_TYPE_LABELS['workflow'],
+    commands: EXTENSION_TYPE_LABELS['command'],
     mcp: 'MCP',
   };
 
