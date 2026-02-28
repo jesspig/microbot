@@ -226,7 +226,7 @@ function detailedConsoleFormatter(record: LogRecord): readonly unknown[] {
   const timestamp = new Date().toISOString().slice(11, 23);
 
   // 提取 properties（日志附加数据）
-  const properties = record.message.length > 1 ? record.message[record.message.length - 1] : null;
+  const properties = (record as unknown as { properties?: Record<string, unknown> }).properties;
   
   // 特殊处理工具调用日志
   if (properties && typeof properties === 'object' && '_type' in properties) {
@@ -247,9 +247,9 @@ function detailedConsoleFormatter(record: LogRecord): readonly unknown[] {
       
       let outputStr = '';
       if (error) {
-        outputStr = `\x1b[31m${error}\x1b[0m`;
+        outputStr = `\x1b[31m错误: ${error}\x1b[0m`;
       } else if (output) {
-        outputStr = formatToolOutput(output);
+        outputStr = formatToolOutput(output, 200); // 增加输出长度到200字符
       }
       
       const durationStr = duration > 1000 
@@ -261,7 +261,7 @@ function detailedConsoleFormatter(record: LogRecord): readonly unknown[] {
         `\x1b[36m🔧 ${toolName}\x1b[0m` +
         `${inputStr ? `(${inputStr})` : '()'}` +
         ` ${statusColor}${statusIcon}${resetColor}` +
-        `${outputStr ? ` ${outputStr}` : ''}` +
+        `${outputStr ? ` → ${outputStr}` : ''}` +
         ` \x1b[90m${durationStr}\x1b[0m`,
       ];
     }
@@ -273,6 +273,8 @@ function detailedConsoleFormatter(record: LogRecord): readonly unknown[] {
       const promptTokens = logData.promptTokens as number | undefined;
       const completionTokens = logData.completionTokens as number | undefined;
       const success = logData.success !== false;
+      const content = logData.content as string | undefined;
+      const hasToolCalls = logData.hasToolCalls as boolean | undefined;
       
       const statusIcon = success ? '✓' : '✗';
       const statusColor = success ? '\x1b[32m' : '\x1b[31m';
@@ -285,32 +287,50 @@ function detailedConsoleFormatter(record: LogRecord): readonly unknown[] {
         tokensStr = ` \x1b[90m${promptTokens}→${completionTokens} tokens\x1b[0m`;
       }
       
+      // 构建响应内容摘要
+      let contentStr = '';
+      if (content) {
+        const cleanContent = content.replace(/\n/g, ' ').trim();
+        const preview = cleanContent.length > 100 ? cleanContent.slice(0, 100) + '...' : cleanContent;
+        contentStr = ` \x1b[37m"${preview}"\x1b[0m`;
+      } else if (hasToolCalls) {
+        contentStr = ' \x1b[33m[调用工具]\x1b[0m';
+      }
+      
       return [
         `${timestamp} ${levelColor}${level}${resetColor} ` +
         `\x1b[35m🤖 ${provider}/${model}\x1b[0m` +
         ` ${statusColor}${statusIcon}${resetColor}` +
         ` \x1b[90m${durationStr}\x1b[0m` +
-        tokensStr,
+        tokensStr +
+        contentStr,
       ];
     }
   }
 
-  // 默认格式化
+  // 默认格式化 - 智能处理对象属性
   let message = '';
-  const values: unknown[] = [];
-
-  for (let i = 0; i < record.message.length; i++) {
-    if (i % 2 === 0) {
-      message += record.message[i];
-    } else {
-      message += '%o';
-      values.push(record.message[i]);
+  
+  // 第一个元素是主消息
+  if (record.message.length > 0) {
+    message += record.message[0];
+  }
+  
+  // 从 properties 获取对象属性（前面已定义）
+  if (properties && typeof properties === 'object' && Object.keys(properties).length > 0) {
+    // 如果已经被特殊处理（如 tool_call, llm_call），则不再显示
+    if (!('_type' in properties)) {
+      try {
+        const jsonStr = JSON.stringify(properties, null, 0);
+        message += ` ${jsonStr}`;
+      } catch {
+        message += ' [Object]';
+      }
     }
   }
 
   return [
     `${timestamp} ${levelColor}${level}${resetColor} \x1b[90m${category}\x1b[0m ${message}`,
-    ...values,
   ];
 }
 

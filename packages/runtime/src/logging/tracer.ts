@@ -310,7 +310,9 @@ export class Tracer {
     duration: number,
     success: boolean,
     tokens?: { prompt: number; completion: number },
-    error?: string
+    error?: string,
+    content?: string | undefined,
+    hasToolCalls?: boolean
   ): void {
     const ctx = this.createContext('llm', 'chat', provider);
     
@@ -327,6 +329,8 @@ export class Tracer {
       promptTokens: tokens?.prompt,
       completionTokens: tokens?.completion,
       error,
+      content,
+      hasToolCalls,
     };
 
     this.logger.info('🤖 LLM 调用', logEntry as unknown as Record<string, unknown>);
