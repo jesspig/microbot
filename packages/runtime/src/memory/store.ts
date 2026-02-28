@@ -403,7 +403,16 @@ export class MemoryStore {
     await this.ensureInitialized();
 
     // 获取向量（如果嵌入服务可用）
-    const vector = entry.vector ?? (await this.getEmbedding(entry.content));
+    let vector = entry.vector ?? (await this.getEmbedding(entry.content));
+    
+    // 检查向量有效性：空数组或 null 都视为无效
+    if (vector && Array.isArray(vector) && vector.length === 0) {
+      log.warn('⚠️ [MemoryStore] 检测到空向量，将按无向量处理', { 
+        id: entry.id,
+        content: entry.content.slice(0, 100)
+      });
+      vector = undefined;
+    }
 
     // 确定向量列名
     const embedModel = this.config.embedModel;
@@ -431,11 +440,12 @@ export class MemoryStore {
     // 2. 存储到 Markdown（人类可读备份）
     await this.storeMarkdown(entry);
 
-    log.debug('💾 [MemoryStore] 记忆已存储', { 
+    log.info('💾 [MemoryStore] 记忆已存储', { 
       id: entry.id, 
       type: entry.type,
       sessionId: entry.sessionId,
       hasVector: !!vector,
+      vectorLength: vector?.length ?? 0,
       vectorColumn,
       embedModel,
       mode: vector ? 'vector' : 'fulltext'
@@ -458,9 +468,20 @@ export class MemoryStore {
       : 'vector';
 
     const records: Record<string, unknown>[] = [];
+    let validVectorCount = 0;
+    let emptyVectorCount = 0;
 
     for (const entry of entries) {
-      const vector = entry.vector ?? (await this.getEmbedding(entry.content));
+      let vector = entry.vector ?? (await this.getEmbedding(entry.content));
+      
+      // 检查向量有效性
+      if (vector && Array.isArray(vector) && vector.length === 0) {
+        vector = undefined;
+        emptyVectorCount++;
+      } else if (vector && Array.isArray(vector) && vector.length > 0) {
+        validVectorCount++;
+      }
+      
       records.push({
         id: entry.id,
         sessionId: entry.sessionId,
@@ -484,7 +505,12 @@ export class MemoryStore {
       await this.storeMarkdown(entry);
     }
 
-    log.info('💾 [MemoryStore] 批量存储完成', { count: entries.length, vectorColumn });
+    log.info('💾 [MemoryStore] 批量存储完成', { 
+      count: entries.length, 
+      validVectors: validVectorCount,
+      emptyVectors: emptyVectorCount,
+      vectorColumn 
+    });
   }
 
   /**
@@ -806,7 +832,7 @@ export class MemoryStore {
   private async vectorSearch(query: string, limit: number, filter?: MemoryFilter, modelId?: string): Promise<MemoryEntry[]> {
     // 检查嵌入服务是否可用
     if (!this.config.embeddingService?.isAvailable()) {
-      log.debug('🔍 [MemoryStore] 嵌入服务不可用，跳过向量检索');
+      log.info('🔍 [MemoryStore] 嵌入服务不可用，跳过向量检索');
       return [];
     }
 
@@ -819,9 +845,11 @@ export class MemoryStore {
     // 检查表的向量维度
     const tableVectorDimension = await this.getVectorDimension(vectorColumn);
     if (tableVectorDimension === 0) {
-      log.debug('🔍 [MemoryStore] 表无向量数据，跳过向量检索', { vectorColumn });
+      log.info('🔍 [MemoryStore] 表无向量数据，跳过向量检索', { vectorColumn, targetModel });
       return [];
     }
+
+    log.info('🔍 [MemoryStore] 向量列检查通过', { vectorColumn, tableVectorDimension });
 
     try {
       const startTime = Date.now();
@@ -837,17 +865,51 @@ export class MemoryStore {
         return [];
       }
       
-      let queryBuilder = this.table!.vectorSearch(vector).column(vectorColumn).limit(limit);
+      // 构建过滤条件（仅用于 sessionId 和 type 过滤）
+      const conditions: string[] = [];
       
-      // 应用过滤条件
       if (filter?.sessionId) {
-        queryBuilder = queryBuilder.where(`sessionId = "${this.escapeValue(filter.sessionId)}"`);
+        conditions.push(`sessionId = "${this.escapeValue(filter.sessionId)}"`);
       }
       if (filter?.type) {
-        queryBuilder = queryBuilder.where(`type = "${this.escapeValue(filter.type)}"`);
+        conditions.push(`type = "${this.escapeValue(filter.type)}"`);
       }
       
-      const results = await queryBuilder.toArray();
+      // 先获取 limit * 2 条结果，以便在过滤空向量后仍有足够结果
+      const searchLimit = limit * 2;
+      
+      let queryBuilder = this.table!.vectorSearch(vector)
+        .column(vectorColumn)
+        .limit(searchLimit);
+      
+      if (conditions.length > 0) {
+        const whereClause = conditions.join(' AND ');
+        queryBuilder = queryBuilder.where(whereClause);
+      }
+      
+      log.debug('🔍 [MemoryStore] 执行向量搜索', { 
+        vectorColumn, 
+        queryDimension: vector.length,
+        filter: conditions.length > 0 ? conditions.join(' AND ') : 'none'
+      });
+      
+      const rawResults = await queryBuilder.toArray();
+      
+      // 过滤掉空向量记录（空向量无法参与相似度计算）
+      const results = rawResults.filter(r => {
+        const vec = r[vectorColumn];
+        if (!vec) return false;
+        if (Array.isArray(vec)) return vec.length > 0;
+        if (typeof vec === 'object') {
+          if ('length' in vec) return (vec as { length: number }).length > 0;
+          if ('toArray' in vec) {
+            const arr = (vec as { toArray: () => number[] }).toArray();
+            return arr.length > 0;
+          }
+        }
+        return false;
+      }).slice(0, limit);
+      
       const elapsed = Date.now() - startTime;
 
       log.info('📖 记忆检索完成', { 
@@ -858,6 +920,7 @@ export class MemoryStore {
           model: targetModel,
         },
         resultCount: results.length,
+        rawCount: rawResults.length,
         elapsed: `${elapsed}ms`
       });
 
@@ -1536,22 +1599,49 @@ export class MemoryStore {
     try {
       const schema = await this.table.schema();
       const field = schema.fields.find(f => f.name === column);
-      if (!field) return 0;
+      if (!field) {
+        log.info('📐 [MemoryStore] 向量列不存在', { column });
+        return 0;
+      }
 
       // LanceDB 向量类型是固定大小列表
       // 尝试从数据中获取实际维度
+      // 注意：空数组 [] 不是 NULL，所以需要检查数组长度
       const results = await this.table
         .query()
         .where(`${column} IS NOT NULL`)
-        .limit(1)
+        .limit(10)  // 检查多条记录，避免恰好第一条是空数组
         .toArray();
 
-      if (results.length > 0 && Array.isArray(results[0][column])) {
-        return (results[0][column] as number[]).length;
+      // 查找第一个非空数组的记录
+      // 注意：LanceDB 返回的可能是 FixedSizeList 类型，不是普通数组
+      for (const result of results) {
+        const value = result[column];
+        if (!value) continue;
+        
+        let dim = 0;
+        if (Array.isArray(value)) {
+          dim = value.length;
+        } else if (typeof value === 'object') {
+          // FixedSizeList 类型有 length 属性或 toArray 方法
+          if ('length' in value && typeof (value as { length: number }).length === 'number') {
+            dim = (value as { length: number }).length;
+          } else if ('toArray' in value && typeof (value as { toArray: () => unknown }).toArray === 'function') {
+            const arr = (value as { toArray: () => number[] }).toArray();
+            dim = arr.length;
+          }
+        }
+        
+        if (dim > 0) {
+          log.info('📐 [MemoryStore] 检测到向量维度', { column, dimension: dim, valueType: typeof value });
+          return dim;
+        }
       }
 
+      log.info('📐 [MemoryStore] 向量列无有效数据（可能都是空数组）', { column, checkedRecords: results.length });
       return 0;
-    } catch {
+    } catch (error) {
+      log.warn('📐 [MemoryStore] 获取向量维度失败', { column, error: String(error) });
       return 0;
     }
   }
