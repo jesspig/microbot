@@ -39,3 +39,12 @@ export type { AdaptiveIntervalConfig } from './migration';
 
 // Summarizer
 export { ConversationSummarizer, type SummarizerConfig } from './summarizer';
+
+// Classifier
+export {
+  classifyMemory,
+  classifyMemoriesBatch,
+  getMemoryTypeDescription,
+  getMemoryTypeIcon,
+} from './classifier';
+export type { ClassificationResult } from './classifier';
