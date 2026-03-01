@@ -5,12 +5,13 @@
  * 使用原生 Function Calling 而非 ReAct JSON 解析。
  */
 
-import type { InboundMessage, OutboundMessage, ToolContext } from '@micro-agent/types';
+import type { InboundMessage, OutboundMessage, ToolContext, SessionKey } from '@micro-agent/types';
 import type { LLMGateway, LLMMessage, GenerationConfig, MessageContent, LLMToolDefinition, IntentPromptBuilder, UserPromptBuilder } from '@micro-agent/providers';
 import type { MessageBus } from '../bus/queue';
 import type { ModelConfig, LoopDetectionConfig } from '@micro-agent/config';
 import type { AgentLoopResult, MemoryEntry, Citation, CitedResponse } from '../types';
 import type { MemoryStore, ConversationSummarizer } from '../memory';
+import type { SessionStore } from '@micro-agent/storage';
 import { classifyMemory } from '../memory';
 import { ModelRouter, convertToPlainText, buildUserContent, type RouteResult } from '@micro-agent/providers';
 import { LoopDetector } from '../loop-detection';
@@ -98,7 +99,8 @@ const DEFAULT_CONFIG: AgentExecutorConfig = {
  */
 export class AgentExecutor {
   private running = false;
-  private conversationHistory = new Map<string, LLMMessage[]>();
+  private sessionStore?: SessionStore;
+  private conversationHistory = new Map<string, LLMMessage[]>(); // 兼容模式：内存存储
   private router: ModelRouter;
   private cachedToolDefinitions: Array<{ name: string; description: string; inputSchema: unknown }> | null = null;
   private cachedLLMTools: LLMToolDefinition[] | null = null;
@@ -116,7 +118,8 @@ export class AgentExecutor {
     private config: AgentExecutorConfig = DEFAULT_CONFIG,
     memoryStore?: MemoryStore,
     summarizer?: ConversationSummarizer,
-    knowledgeBaseManager?: KnowledgeBaseManager
+    knowledgeBaseManager?: KnowledgeBaseManager,
+    sessionStore?: SessionStore
   ) {
     this.router = new ModelRouter({
       chatModel: config.chatModel || '',
@@ -149,12 +152,16 @@ export class AgentExecutor {
     this.memoryStore = memoryStore;
     this.summarizer = summarizer;
     this.knowledgeBaseManager = knowledgeBaseManager;
+    this.sessionStore = sessionStore;
 
     if (memoryStore) {
       log.info('记忆系统已启用');
     }
     if (knowledgeBaseManager && config.knowledgeEnabled !== false) {
       log.info('知识库系统已启用');
+    }
+    if (sessionStore) {
+      log.info('会话持久化已启用');
     }
 
     // 初始化引用生成器（可选）
@@ -223,13 +230,26 @@ export class AgentExecutor {
     const startTime = Date.now();
     
     // 使用 channel:chatId 作为会话标识，实现会话隔离
-    const sessionKey = `${msg.channel}:${msg.chatId}`;
-    const sessionHistory = this.conversationHistory.get(sessionKey) ?? [];
+    const sessionKey = `${msg.channel}:${msg.chatId}` as SessionKey;
+    
+    // 获取会话历史（优先使用 SessionStore，否则使用内存）
+    let sessionHistory: LLMMessage[];
+    if (this.sessionStore) {
+      const session = this.sessionStore.getOrCreate(sessionKey);
+      sessionHistory = session.messages.map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+      }));
+    } else {
+      sessionHistory = this.conversationHistory.get(sessionKey) ?? [];
+    }
 
     log.info('📝 开始处理消息', { 
       channel: msg.channel, 
       chatId: msg.chatId,
-      contentLength: msg.content.length 
+      contentLength: msg.content.length,
+      historyLength: sessionHistory.length,
+      persistent: !!this.sessionStore,
     });
 
     // 检索相关记忆
@@ -281,6 +301,9 @@ export class AgentExecutor {
       log.error('❌ 处理消息异常', { error: this.safeErrorMsg(error) });
       return this.createErrorResponse(msg);
     }
+
+    // 添加 assistant 响应到消息历史
+    messages.push({ role: 'assistant', content: result.content });
 
     // 更新历史记录
     this.updateHistory(sessionKey, messages.slice(1));
@@ -843,14 +866,29 @@ export class AgentExecutor {
   /**
    * 更新会话历史
    */
-  private updateHistory(sessionKey: string, history: LLMMessage[]): void {
+  private updateHistory(sessionKey: SessionKey, history: LLMMessage[]): void {
     const trimmed = this.messageManager.truncate(history);
-    this.conversationHistory.set(sessionKey, trimmed);
-    this.trimSessions();
+    
+    // 优先使用 SessionStore 持久化
+    if (this.sessionStore) {
+      // 清空现有消息并追加新消息
+      this.sessionStore.clear(sessionKey);
+      for (const msg of trimmed) {
+        this.sessionStore.appendMessage(sessionKey, {
+          role: msg.role as 'user' | 'assistant' | 'system',
+          content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+          timestamp: Date.now(),
+        });
+      }
+    } else {
+      // 回退到内存存储
+      this.conversationHistory.set(sessionKey, trimmed);
+      this.trimSessions();
+    }
   }
 
   /**
-   * 清理过期会话
+   * 清理过期会话（仅内存模式）
    */
   private trimSessions(): void {
     if (this.conversationHistory.size <= MAX_SESSIONS) return;
@@ -895,8 +933,14 @@ export class AgentExecutor {
    * 清除会话历史
    */
   clearSession(channel: string, chatId: string): void {
-    const sessionKey = `${channel}:${chatId}`;
-    this.conversationHistory.delete(sessionKey);
+    const sessionKey = `${channel}:${chatId}` as SessionKey;
+    
+    if (this.sessionStore) {
+      this.sessionStore.delete(sessionKey);
+    } else {
+      this.conversationHistory.delete(sessionKey);
+    }
+    
     log.debug('会话已清除', { sessionKey });
   }
 

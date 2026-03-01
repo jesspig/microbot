@@ -212,7 +212,7 @@ class AppImpl implements App {
     this.channelManager = new ChannelManager();
     this.messageBus = new MessageBus();
     this.sessionStore = new SessionStore({
-      sessionsDir: `${homedir()}/.micro-agent/sessions`,
+      sessionsDir: `${homedir()}/.micro-agent/data`,
       sessionTimeout: 30 * 60 * 1000,
     });
     this.toolRegistry = new ToolRegistry();
@@ -284,7 +284,8 @@ class AppImpl implements App {
       },
       this.memoryStore ?? undefined,
       this.summarizer ?? undefined,
-      this.knowledgeBaseManager ?? undefined
+      this.knowledgeBaseManager ?? undefined,
+      this.sessionStore
     );
 
     // 8. 创建并启动 ChannelGateway（消息处理中心）
