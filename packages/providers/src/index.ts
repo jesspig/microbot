@@ -38,7 +38,21 @@ export { ModelRouter, type ModelRouterConfig, type RouteResult } from './router'
 export { hasImageMedia } from './complexity';
 
 // 提示词类型
-export { type TaskTypeResult, type TaskType, type ModelInfo, type IntentPromptBuilder, type UserPromptBuilder } from './prompts';
+export {
+  type TaskTypeResult,
+  type TaskType,
+  type ModelInfo,
+  type IntentPromptBuilder,
+  type UserPromptBuilder,
+  // 新增：分阶段意图识别类型
+  type PreflightResult,
+  type RoutingResult,
+  type IntentResult,
+  type PreflightPromptBuilder,
+} from './prompts';
+
+// 意图识别管道
+export { IntentPipeline, type IntentPipelineConfig } from './intent-pipeline';
 
 // ACP (Agent Client Protocol)
 export {
