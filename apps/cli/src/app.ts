@@ -22,6 +22,7 @@ import {
   ConversationSummarizer,
   OpenAIEmbedding,
   NoEmbedding,
+  KnowledgeBaseManager,
 } from '@micro-agent/sdk';
 import { ChannelGatewayImpl } from '@micro-agent/runtime';
 import {
@@ -203,6 +204,7 @@ class AppImpl implements App {
   private skillsLoader: SkillsLoader | null = null;
   private memoryStore: MemoryStore | null = null;
   private summarizer: ConversationSummarizer | null = null;
+  private knowledgeBaseManager: KnowledgeBaseManager | null = null;
 
   constructor(config: Config, workspace: string) {
     this.config = config;
@@ -277,9 +279,12 @@ class AppImpl implements App {
         memoryEnabled: this.config.agents.memory?.enabled,
         summarizeThreshold: this.config.agents.memory?.summarizeThreshold,
         idleTimeout: this.config.agents.memory?.idleTimeout,
+        knowledgeEnabled: true,
+        knowledgeLimit: 3,
       },
       this.memoryStore ?? undefined,
-      this.summarizer ?? undefined
+      this.summarizer ?? undefined,
+      this.knowledgeBaseManager ?? undefined
     );
 
     // 8. 创建并启动 ChannelGateway（消息处理中心）
@@ -635,11 +640,30 @@ ${skillsSummary}`);
         startupInfo.memory.summarizeThreshold = threshold;
       }
 
+      // 初始化知识库
+      try {
+        const knowledgePath = resolve(homedir(), '.micro-agent/knowledge');
+        this.knowledgeBaseManager = new KnowledgeBaseManager(
+          {
+            basePath: knowledgePath,
+            embedModel: embedModel || undefined,
+          },
+          this.memoryStore // 注入 MemoryStore
+        );
+        await this.knowledgeBaseManager.initialize();
+        startupInfo.warnings.push('知识库系统已启用');
+        log.info('📚 知识库系统已初始化', { path: knowledgePath });
+      } catch (error) {
+        log.warn('知识库初始化失败', { error: error instanceof Error ? error.message : String(error) });
+        this.knowledgeBaseManager = null;
+      }
+
     } catch (error) {
       log.error('记忆系统初始化失败', { error: error instanceof Error ? error.message : String(error) });
       startupInfo.warnings.push('记忆系统初始化失败');
       this.memoryStore = null;
       this.summarizer = null;
+      this.knowledgeBaseManager = null;
     }
   }
 }
