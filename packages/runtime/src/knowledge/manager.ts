@@ -7,12 +7,14 @@
  * 3. 文件变更监控
  * 
  * 注意：向量检索已迁移到 MemoryStore，使用 dualLayerSearch() 方法
+ * 索引存储使用 SQLite（Bun 内置），位于 ~/.micro-agent/data/knowledge.db
  */
 
-import { mkdir, readdir, readFile, stat, writeFile, watch } from 'fs/promises';
+import { mkdir, readdir, readFile, stat, watch } from 'fs/promises';
 import { join, basename, extname, relative } from 'path';
 import { createHash } from 'crypto';
 import { homedir } from 'os';
+import { Database } from 'bun:sqlite';
 import type { WatchEventType } from 'fs';
 import type {
   KnowledgeBaseConfig,
@@ -181,8 +183,10 @@ const DEFAULT_CONFIG: KnowledgeBaseConfig = {
   },
 };
 
-/** 知识库索引文件 */
-const INDEX_FILE = 'index.json';
+/** 数据目录路径 */
+const DATA_DIR = () => join(homedir(), '.micro-agent', 'data');
+/** SQLite 数据库文件名 */
+const DB_FILE = 'knowledge.db';
 
 /**
  * 知识库管理器
@@ -192,6 +196,7 @@ export class KnowledgeBaseManager {
   private memoryStore?: MemoryStore;
   private documents: Map<string, KnowledgeDocument> = new Map();
   private isInitialized = false;
+  private db?: Database;
   
   // 后台构建相关
   private buildStatus: BackgroundBuildStatus = {
@@ -225,9 +230,9 @@ export class KnowledgeBaseManager {
 
     // 创建知识库目录
     await mkdir(this.config.basePath, { recursive: true });
-    
-    // 创建文档目录
-    await mkdir(join(this.config.basePath, 'documents'), { recursive: true });
+
+    // 创建数据目录并初始化 SQLite 数据库
+    await this.initDatabase();
 
     // 加载已有索引
     await this.loadIndex();
@@ -256,7 +261,7 @@ export class KnowledgeBaseManager {
   async shutdown(): Promise<void> {
     this.stopWatching();
     this.stopBackgroundBuild();
-    await this.saveIndex();
+    this.closeDatabase();
     this.isInitialized = false;
     console.log('[KnowledgeBase] 知识库已关闭');
   }
@@ -269,7 +274,7 @@ export class KnowledgeBaseManager {
    * 扫描文档目录，检测新增、修改和删除的文件
    */
   async scanDocuments(): Promise<void> {
-    const docsDir = join(this.config.basePath, 'documents');
+    const docsDir = this.config.basePath;
     
     try {
       // 获取当前所有文件
@@ -340,6 +345,9 @@ export class KnowledgeBaseManager {
     this.documents.set(relativePath, doc);
     this.buildStatus.queueLength++;
     
+    // 保存到 SQLite
+    this.saveDocumentIndex(doc);
+    
     console.log(`[KnowledgeBase] 新增文档: ${relativePath}`);
     return doc;
   }
@@ -364,6 +372,7 @@ export class KnowledgeBaseManager {
       // 仅更新时间戳
       existingDoc.metadata.modifiedAt = fileStat.mtimeMs;
       existingDoc.updatedAt = Date.now();
+      this.saveDocumentIndex(existingDoc);
       return;
     }
 
@@ -379,6 +388,10 @@ export class KnowledgeBaseManager {
     existingDoc.indexedAt = undefined;
 
     this.buildStatus.queueLength++;
+    
+    // 更新 SQLite
+    this.saveDocumentIndex(existingDoc);
+    
     console.log(`[KnowledgeBase] 更新文档: ${relativePath}`);
   }
 
@@ -390,6 +403,9 @@ export class KnowledgeBaseManager {
     if (!doc) return;
 
     this.documents.delete(relativePath);
+    
+    // 从 SQLite 删除
+    this.deleteDocumentIndex(relativePath);
     
     // 从 MemoryStore 删除文档块
     if (this.memoryStore) {
@@ -486,11 +502,13 @@ export class KnowledgeBaseManager {
     if (!this.memoryStore) {
       doc.status = 'error';
       doc.error = 'MemoryStore 未注入';
+      this.saveDocumentIndex(doc);
       log.error('📄 [KnowledgeBase] MemoryStore 未注入，无法构建索引');
       return;
     }
 
     doc.status = 'processing';
+    this.saveDocumentIndex(doc);
 
     try {
       // 分块
@@ -507,6 +525,9 @@ export class KnowledgeBaseManager {
       doc.status = 'indexed';
       doc.indexedAt = Date.now();
 
+      // 更新 SQLite
+      this.saveDocumentIndex(doc);
+
       log.info('📄 [KnowledgeBase] 文档索引完成', { 
         path: doc.path, 
         chunkCount: chunks.length,
@@ -515,6 +536,7 @@ export class KnowledgeBaseManager {
     } catch (error) {
       doc.status = 'error';
       doc.error = String(error);
+      this.saveDocumentIndex(doc);
       log.error('📄 [KnowledgeBase] 文档索引失败', { 
         path: doc.path, 
         error: String(error),
@@ -568,7 +590,7 @@ export class KnowledgeBaseManager {
    * 启动文件监测
    */
   private async startWatching(): Promise<void> {
-    const docsDir = join(this.config.basePath, 'documents');
+    const docsDir = this.config.basePath;
     
     try {
       // 确保目录存在
@@ -625,7 +647,7 @@ export class KnowledgeBaseManager {
     const changeType = eventType === 'rename' ? 'add' : 'change';
     
     // 检查文件是否实际存在
-    const fullPath = join(this.config.basePath, 'documents', filename);
+    const fullPath = join(this.config.basePath, filename);
     
     // 使用 stat 检查文件是否存在
     stat(fullPath)
@@ -669,7 +691,7 @@ export class KnowledgeBaseManager {
     console.log(`[KnowledgeBase] 检测到 ${changes.size} 个文件变更`);
 
     for (const [filename, changeType] of changes) {
-      const docsDir = join(this.config.basePath, 'documents');
+      const docsDir = this.config.basePath;
       const filePath = join(docsDir, filename);
       const relativePath = filename;
 
@@ -690,9 +712,6 @@ export class KnowledgeBaseManager {
       }
     }
 
-    // 保存索引并触发后台构建
-    await this.saveIndex();
-    
     // 如果有待处理的文档，立即触发构建
     const hasPending = Array.from(this.documents.values()).some(d => d.status === 'pending');
     if (hasPending) {
@@ -744,9 +763,6 @@ export class KnowledgeBaseManager {
 
     this.buildStatus.isRunning = false;
     this.buildStatus.currentDocId = undefined;
-
-    // 保存索引
-    await this.saveIndex();
   }
 
   // ============================================================================
@@ -754,48 +770,149 @@ export class KnowledgeBaseManager {
   // ============================================================================
 
   // ============================================================================
+  // 数据库管理
+  // ============================================================================
+
+  /**
+   * 初始化 SQLite 数据库
+   */
+  private async initDatabase(): Promise<void> {
+    try {
+      // 创建数据目录
+      const dataDir = DATA_DIR();
+      await mkdir(dataDir, { recursive: true });
+
+      // 打开/创建数据库
+      const dbPath = join(dataDir, DB_FILE);
+      this.db = new Database(dbPath);
+
+      // 创建文档索引表（metadata 存储为 JSON）
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS documents (
+          id TEXT PRIMARY KEY,
+          path TEXT UNIQUE NOT NULL,
+          content_preview TEXT,
+          metadata_json TEXT NOT NULL,
+          status TEXT NOT NULL,
+          error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          indexed_at INTEGER
+        )
+      `);
+
+      // 创建路径索引
+      this.db.run(`
+        CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(path)
+      `);
+
+      // 创建状态索引
+      this.db.run(`
+        CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)
+      `);
+
+      log.info('[KnowledgeBase] SQLite 数据库已初始化', { path: dbPath });
+    } catch (error) {
+      log.error('[KnowledgeBase] 初始化数据库失败', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * 关闭数据库连接
+   */
+  private closeDatabase(): void {
+    if (this.db) {
+      this.db.close();
+      this.db = undefined;
+    }
+  }
+
+  // ============================================================================
   // 索引管理
   // ============================================================================
 
   /**
-   * 加载索引
+   * 加载索引（从 SQLite）
    */
   private async loadIndex(): Promise<void> {
+    if (!this.db) return;
+
     try {
-      const indexPath = join(this.config.basePath, INDEX_FILE);
-      const data = JSON.parse(await readFile(indexPath, 'utf-8'));
-      
-      for (const doc of data.documents) {
-        this.documents.set(doc.path, doc);
+      const rows = this.db.query<{
+        id: string;
+        path: string;
+        content_preview: string | null;
+        metadata_json: string;
+        status: string;
+        error: string | null;
+        created_at: number;
+        updated_at: number;
+        indexed_at: number | null;
+      }, []>(`
+        SELECT * FROM documents
+      `).all();
+
+      for (const row of rows) {
+        const metadata = JSON.parse(row.metadata_json) as KnowledgeDocMetadata;
+        this.documents.set(row.path, {
+          id: row.id,
+          path: row.path,
+          content: row.content_preview ?? '',
+          metadata,
+          status: row.status as KnowledgeDocStatus,
+          error: row.error ?? undefined,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          indexedAt: row.indexed_at ?? undefined,
+        });
       }
-      
-      console.log(`[KnowledgeBase] 已加载 ${this.documents.size} 个文档索引`);
-    } catch {
-      // 索引文件不存在，忽略
+
+      log.info('[KnowledgeBase] 已加载文档索引', { count: this.documents.size });
+    } catch (error) {
+      log.error('[KnowledgeBase] 加载索引失败', { error });
       this.documents.clear();
     }
   }
 
   /**
-   * 保存索引
+   * 保存单个文档索引（upsert）
    */
-  private async saveIndex(): Promise<void> {
+  private saveDocumentIndex(doc: KnowledgeDocument): void {
+    if (!this.db) return;
+
     try {
-      const indexPath = join(this.config.basePath, INDEX_FILE);
-      const data = {
-        version: 1,
-        updatedAt: Date.now(),
-        documents: Array.from(this.documents.values()).map(doc => ({
-          ...doc,
-          // 不保存完整内容和向量到索引文件
-          content: doc.content.slice(0, 500), // 只保存前500字符作为预览
-          chunks: undefined, // 向量单独存储
-        })),
-      };
-      
-      await writeFile(indexPath, JSON.stringify(data, null, 2));
+      this.db.run(`
+        INSERT OR REPLACE INTO documents (
+          id, path, content_preview, metadata_json, status, error,
+          created_at, updated_at, indexed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        doc.id,
+        doc.path,
+        doc.content.slice(0, 500),
+        JSON.stringify(doc.metadata),
+        doc.status,
+        doc.error ?? null,
+        doc.createdAt,
+        doc.updatedAt,
+        doc.indexedAt ?? null,
+      ]);
     } catch (error) {
-      console.error('[KnowledgeBase] 保存索引失败:', error);
+      log.error('[KnowledgeBase] 保存文档索引失败', { path: doc.path, error });
+    }
+  }
+
+  /**
+   * 删除文档索引
+   */
+  private deleteDocumentIndex(path: string): void {
+    if (!this.db) return;
+
+    try {
+      this.db.run(`DELETE FROM documents WHERE path = ?`, [path]);
+    } catch (error) {
+      log.error('[KnowledgeBase] 删除文档索引失败', { path, error });
     }
   }
 

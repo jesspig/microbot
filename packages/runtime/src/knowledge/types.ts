@@ -246,8 +246,21 @@ export function getKnowledgeDocType(filename: string): KnowledgeDocType {
   return KNOWLEDGE_FILE_EXTENSIONS[ext] || 'text';
 }
 
+/** 知识库内部文件（不处理为文档） */
+const KNOWLEDGE_INTERNAL_FILES = new Set([
+  'index.json',      // 知识库索引
+  '.gitignore',      // Git 忽略文件
+  '.gitkeep',        // Git 保持文件
+]);
+
 /** 检查文件是否受支持 */
 export function isKnowledgeFileSupported(filename: string): boolean {
+  // 排除知识库内部文件
+  const basename = filename.split('/').pop()?.toLowerCase() ?? filename.toLowerCase();
+  if (KNOWLEDGE_INTERNAL_FILES.has(basename)) {
+    return false;
+  }
+  
   const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'));
   return ext in KNOWLEDGE_FILE_EXTENSIONS;
 }
