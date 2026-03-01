@@ -9,13 +9,16 @@ import type { InboundMessage, OutboundMessage, ToolContext } from '@micro-agent/
 import type { LLMGateway, LLMMessage, GenerationConfig, MessageContent, LLMToolDefinition, IntentPromptBuilder, UserPromptBuilder } from '@micro-agent/providers';
 import type { MessageBus } from '../bus/queue';
 import type { ModelConfig, LoopDetectionConfig } from '@micro-agent/config';
-import type { AgentLoopResult, MemoryEntry } from '../types';
+import type { AgentLoopResult, MemoryEntry, Citation, CitedResponse } from '../types';
 import type { MemoryStore, ConversationSummarizer } from '../memory';
+import { classifyMemory } from '../memory';
 import { ModelRouter, convertToPlainText, buildUserContent, type RouteResult } from '@micro-agent/providers';
 import { LoopDetector } from '../loop-detection';
 import { MessageHistoryManager } from '../message-manager';
+import { CitationGenerator } from '../citation';
 import { getLogger } from '@logtape/logtape';
 import { getTracer } from '../logging';
+import type { KnowledgeBaseManager } from '../knowledge';
 
 const log = getLogger(['executor']);
 const tracer = getTracer();
@@ -71,6 +74,16 @@ export interface AgentExecutorConfig {
   summarizeThreshold?: number;
   /** 空闲超时时间 */
   idleTimeout?: number;
+  /** 知识库是否启用 */
+  knowledgeEnabled?: boolean;
+  /** 知识库检索结果数量 */
+  knowledgeLimit?: number;
+  /** 是否启用引用溯源 */
+  citationEnabled?: boolean;
+  /** 引用最小置信度 */
+  citationMinConfidence?: number;
+  /** 最大引用数 */
+  citationMaxCount?: number;
 }
 
 const DEFAULT_CONFIG: AgentExecutorConfig = {
@@ -93,6 +106,8 @@ export class AgentExecutor {
   private messageManager: MessageHistoryManager;
   private memoryStore?: MemoryStore;
   private summarizer?: ConversationSummarizer;
+  private knowledgeBaseManager?: KnowledgeBaseManager;
+  private citationGenerator?: CitationGenerator;
 
   constructor(
     private bus: MessageBus,
@@ -100,7 +115,8 @@ export class AgentExecutor {
     private tools: ToolRegistryLike,
     private config: AgentExecutorConfig = DEFAULT_CONFIG,
     memoryStore?: MemoryStore,
-    summarizer?: ConversationSummarizer
+    summarizer?: ConversationSummarizer,
+    knowledgeBaseManager?: KnowledgeBaseManager
   ) {
     this.router = new ModelRouter({
       chatModel: config.chatModel || '',
@@ -132,9 +148,23 @@ export class AgentExecutor {
     // 注入记忆系统（可选）
     this.memoryStore = memoryStore;
     this.summarizer = summarizer;
+    this.knowledgeBaseManager = knowledgeBaseManager;
 
     if (memoryStore) {
       log.info('记忆系统已启用');
+    }
+    if (knowledgeBaseManager && config.knowledgeEnabled !== false) {
+      log.info('知识库系统已启用');
+    }
+
+    // 初始化引用生成器（可选）
+    if (config.citationEnabled !== false) {
+      this.citationGenerator = new CitationGenerator({
+        minConfidence: config.citationMinConfidence ?? 0.5,
+        maxCitations: config.citationMaxCount ?? 5,
+        maxSnippetLength: 200,
+        format: 'numbered',
+      });
     }
   }
 
@@ -206,9 +236,32 @@ export class AgentExecutor {
     log.info('🔍 开始检索记忆', { query: msg.content.slice(0, 100), sessionKey });
     const relevantMemories = await this.retrieveMemories(msg.content);
     if (relevantMemories.length > 0) {
+      // 统计各类型记忆数量
+      const typeStats = relevantMemories.reduce((acc, m) => {
+        acc[m.type] = (acc[m.type] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      
+      // 构建类型分布说明
+      const typeDistribution = Object.entries(typeStats)
+        .map(([type, count]) => {
+          const icons: Record<string, string> = {
+            preference: '❤️',
+            fact: '📋',
+            decision: '✅',
+            entity: '👤',
+            conversation: '💬',
+            summary: '📝',
+            other: '📦',
+          };
+          return `${icons[type] || '📄'} ${type}:${count}`;
+        })
+        .join(', ');
+      
       log.info('🧠 检索到相关记忆', { 
         count: relevantMemories.length,
         searchMode: this.memoryStore?.getLastSearchMode?.() ?? 'unknown',
+        typeDistribution,
         types: relevantMemories.map(m => m.type),
         previews: relevantMemories.map(m => m.content.slice(0, 50) + '...')
       });
@@ -259,32 +312,47 @@ export class AgentExecutor {
       contentLength: result.content?.length ?? 0 
     });
 
+    // 生成带引用的响应
+    const citedResponse = this.generateCitedResponse(
+      result.content || '处理完成',
+      relevantMemories
+    );
+
     return {
       channel: msg.channel,
       chatId: msg.chatId,
-      content: result.content || '处理完成',
+      content: citedResponse.content,
       media: [],
-      metadata: msg.metadata,
+      metadata: {
+        ...msg.metadata,
+        citations: citedResponse.citations.length > 0 ? citedResponse.citations : undefined,
+      },
     };
   }
 
   /**
-   * 检索相关记忆
+   * 检索相关记忆（包含知识库）
+   * 
+   * 使用双层检索架构统一检索对话记忆和知识库内容
    */
   private async retrieveMemories(query: string): Promise<MemoryEntry[]> {
-    if (!this.memoryStore) {
-      log.debug('记忆系统未启用，跳过检索');
-      return [];
+    const results: MemoryEntry[] = [];
+
+    // 使用 MemoryStore 的双层检索（统一检索记忆和知识库）
+    if (this.memoryStore) {
+      try {
+        // 使用 dualLayerSearch 统一检索所有类型内容
+        const memories = await this.memoryStore.dualLayerSearch(query, 8, 200);
+        results.push(...memories);
+        log.debug('记忆检索完成', { count: memories.length });
+      } catch (error) {
+        log.warn('记忆检索失败', { error: this.safeErrorMsg(error) });
+      }
+    } else {
+      log.debug('MemoryStore 为空，跳过检索');
     }
 
-    try {
-      const results = await this.memoryStore.search(query, { limit: 5 });
-      // 详细日志由 MemoryStore.search() 打印，包含 source 信息
-      return results;
-    } catch (error) {
-      log.warn('记忆检索失败', { error: this.safeErrorMsg(error) });
-      return [];
-    }
+    return results;
   }
 
   /**
@@ -294,8 +362,9 @@ export class AgentExecutor {
 
   /**
    * 存储记忆
-   * 
+   *
    * 包含最多 2 次重试机制，存储失败时会向上传递错误状态。
+   * 使用分类器自动识别记忆类型。
    */
   private async storeMemory(msg: InboundMessage, result: AgentLoopResult, sessionKey: string): Promise<void> {
     if (!this.memoryStore) {
@@ -303,14 +372,25 @@ export class AgentExecutor {
       return;
     }
 
+    // 使用分类器自动分类用户输入
+    const classification = await classifyMemory(msg.content);
+    const memoryType = classification.type;
+
+    // 构建记忆内容
+    const content = `用户: ${msg.content}\n助手: ${result.content}`;
+
     const entry: MemoryEntry = {
       id: crypto.randomUUID(),
       sessionId: sessionKey,
-      type: 'conversation',
-      content: `用户: ${msg.content}\n助手: ${result.content}`,
+      type: memoryType,
+      content: content,
       metadata: {
         channel: msg.channel,
-        tags: ['conversation'],
+        classification: {
+          confidence: classification.confidence,
+          matchedPatterns: classification.matchedPatterns,
+        },
+        tags: [memoryType, 'conversation'],
       },
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -324,10 +404,12 @@ export class AgentExecutor {
       try {
         await this.memoryStore.store(entry);
         
-        log.info('💾 记忆已存储', { 
-          id: entry.id, 
+        log.info('💾 记忆已存储', {
+          id: entry.id,
           sessionKey,
           type: entry.type,
+          confidence: classification.confidence.toFixed(2),
+          matched: classification.matchedPatterns.length > 0 ? classification.matchedPatterns.slice(0, 2) : undefined,
           attempt: attempt > 1 ? attempt : undefined,
           userMsg: msg.content.slice(0, 50) + '...',
           assistantMsg: result.content?.slice(0, 50) + '...'
@@ -468,6 +550,45 @@ export class AgentExecutor {
     });
     
     return lines.join('\n');
+  }
+
+  /**
+   * 生成带引用的响应
+   * @param content 响应内容
+   * @param memories 检索结果
+   * @returns 带引用的响应
+   */
+  private generateCitedResponse(content: string, memories: MemoryEntry[]): CitedResponse {
+    if (!this.citationGenerator) {
+      return { content, citations: [] };
+    }
+
+    // 过滤出文档类型的记忆
+    const docMemories = memories.filter(m => m.type === 'document' && m.metadata.documentId);
+    
+    if (docMemories.length === 0) {
+      return { content, citations: [] };
+    }
+
+    const citations = this.citationGenerator.generateCitations(docMemories);
+    
+    if (citations.length === 0) {
+      return { content, citations: [] };
+    }
+
+    // 在响应末尾添加引用
+    const formattedCitations = this.citationGenerator.formatCitations(citations);
+    const citedContent = `${content}\n\n---\n${formattedCitations}`;
+
+    log.debug('📄 生成引用响应', {
+      citationCount: citations.length,
+      documents: citations.map(c => c.documentTitle ?? c.documentPath),
+    });
+
+    return {
+      content: citedContent,
+      citations,
+    };
   }
 
   /**

@@ -11,6 +11,7 @@ import { mkdir, writeFile, readFile, readdir, unlink, stat, appendFile } from 'f
 import { join, basename } from 'path';
 import type { MemoryEntry, Summary, MemoryStats, SearchOptions, MemoryFilter } from '../types';
 import type { MemoryStoreConfig, CleanupResult, EmbeddingService, VectorColumnName, EmbedModelInfo } from './types';
+import type { KnowledgeChunk, KnowledgeDocMetadata } from '../knowledge/types';
 import { getLogger } from '@logtape/logtape';
 
 const log = getLogger(['memory', 'store']);
@@ -513,8 +514,272 @@ export class MemoryStore {
     });
   }
 
+  // ============================================================================
+  // 文档记忆管理
+  // ============================================================================
+
   /**
-   * 搜索记忆（智能检索）
+   * 存储文档分块
+   * 
+   * 将文档分块转换为记忆条目并存储到 MemoryStore。
+   * 每个分块作为 type: 'document' 的 MemoryEntry 存储。
+   * 
+   * @param docId 文档 ID
+   * @param chunks 分块列表
+   * @param metadata 文档元数据
+   */
+  async storeDocumentChunks(
+    docId: string,
+    chunks: KnowledgeChunk[],
+    metadata: KnowledgeDocMetadata
+  ): Promise<void> {
+    await this.ensureInitialized();
+
+    if (chunks.length === 0) {
+      log.warn('📄 [MemoryStore] 文档无分块，跳过存储', { docId });
+      return;
+    }
+
+    // 先删除旧的分块
+    await this.deleteDocumentChunks(docId);
+
+    // 转换为 MemoryEntry
+    const entries: MemoryEntry[] = chunks.map((chunk, index) => ({
+      id: chunk.id,
+      sessionId: 'knowledge_base',
+      type: 'document' as const,
+      content: chunk.content,
+      vector: chunk.vector,
+      metadata: {
+        documentId: docId,
+        documentPath: metadata.originalName,
+        fileType: metadata.fileType,
+        documentTitle: metadata.title,
+        chunkIndex: index,
+        chunkStart: chunk.startPos,
+        chunkEnd: chunk.endPos,
+        tags: ['knowledge_base', metadata.fileType, ...(metadata.tags || [])],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
+
+    // 批量存储
+    await this.storeBatch(entries);
+
+    log.info('📄 [MemoryStore] 文档分块已存储', {
+      docId,
+      chunkCount: chunks.length,
+      title: metadata.title || metadata.originalName,
+    });
+  }
+
+  /**
+   * 删除文档的所有分块
+   * 
+   * @param docId 文档 ID
+   */
+  async deleteDocumentChunks(docId: string): Promise<void> {
+    await this.ensureInitialized();
+
+    try {
+      // 使用 LanceDB 的 delete 方法
+      await this.table?.delete(`metadata LIKE '%"${docId}"%' OR metadata LIKE '%"documentId":"${docId}"%'`);
+      
+      log.info('📄 [MemoryStore] 文档分块已删除', { docId });
+    } catch (error) {
+      // 忽略删除错误（可能不存在）
+      log.debug('📄 [MemoryStore] 删除文档分块时无匹配记录', { docId });
+    }
+  }
+
+  /**
+   * 获取文档的所有分块
+   * 
+   * @param docId 文档 ID
+   * @returns 文档分块列表（作为 MemoryEntry）
+   */
+  async getDocumentChunks(docId: string): Promise<MemoryEntry[]> {
+    await this.ensureInitialized();
+
+    try {
+      const records = await this.table
+        ?.query()
+        .where(`type = 'document' AND metadata LIKE '%"documentId":"${docId}"%'`)
+        .toArray() ?? [];
+
+      return records.map(record => this.recordToEntry(record));
+    } catch (error) {
+      log.warn('📄 [MemoryStore] 获取文档分块失败', { docId, error: String(error) });
+      return [];
+    }
+  }
+
+  /**
+   * 按类型统计记忆数量
+   */
+  async getStatsByType(): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+
+    const stats: Record<string, number> = {};
+    
+    try {
+      const records = await this.table?.query().toArray() ?? [];
+      
+      for (const record of records) {
+        const type = String(record.type || 'other');
+        stats[type] = (stats[type] || 0) + 1;
+      }
+    } catch (error) {
+      log.warn('📊 [MemoryStore] 统计记忆类型失败', { error: String(error) });
+    }
+
+    return stats;
+  }
+
+  /**
+   * 双层检索
+   * 
+   * 架构：
+   * 1. 第一层：向量检索返回 Top-200 候选（O(log n) 复杂度）
+   * 2. 第二层：候选内 n-gram 关键词匹配（O(200) 固定复杂度）
+   * 3. 第三层：综合分数重排序（向量 0.7 + 关键词 0.3）
+   * 
+   * 优势：
+   * - 向量检索承载主要过滤负载（百万级 <20ms）
+   * - 候选内关键词匹配复杂度固定
+   * - 支持中英文混合检索
+   * 
+   * @param query 查询文本
+   * @param limit 返回结果数量（默认 10）
+   * @param candidates 向量检索候选数量（默认 200）
+   * @param filter 过滤条件
+   * @param modelId 嵌入模型 ID
+   */
+  async dualLayerSearch(
+    query: string,
+    limit: number = 10,
+    candidates: number = 200,
+    filter?: MemoryFilter,
+    modelId?: string
+  ): Promise<MemoryEntry[]> {
+    await this.ensureInitialized();
+
+    const startTime = Date.now();
+    const targetModel = modelId ?? this.config.embedModel;
+    const hasEmbedding = this.config.embeddingService?.isAvailable();
+    const hasVectorColumn = targetModel ? await this.hasVectorColumn(targetModel) : false;
+
+    // 第一层：向量检索
+    let vectorCandidates: MemoryEntry[] = [];
+    let vectorScores: Map<string, number> = new Map();
+
+    if (hasEmbedding && hasVectorColumn) {
+      try {
+        vectorCandidates = await this.vectorSearch(query, candidates, filter, targetModel);
+        
+        // 计算向量相似度分数（归一化）
+        // LanceDB 返回的结果按相似度排序，第一名分数最高
+        for (let i = 0; i < vectorCandidates.length; i++) {
+          const entry = vectorCandidates[i];
+          // 使用倒数排名作为分数（第一名 1.0，最后一名接近 0）
+          const score = 1 - (i / vectorCandidates.length);
+          vectorScores.set(entry.id, score);
+        }
+      } catch (error) {
+        log.warn('🔍 [MemoryStore] 双层检索向量层失败', { error: String(error) });
+      }
+    }
+
+    // 如果向量检索无结果，回退到全文检索
+    if (vectorCandidates.length === 0) {
+      log.info('🔍 [MemoryStore] 双层检索回退到全文检索', { query: query.slice(0, 50) });
+      this.lastSearchMode = 'fulltext';
+      return this.fulltextSearch(query, limit, filter);
+    }
+
+    // 第二层：候选内关键词匹配
+    const keywords = this.extractKeywords(query);
+    const scoredCandidates: Array<{ entry: MemoryEntry; vectorScore: number; keywordScore: number; finalScore: number }> = [];
+
+    for (const entry of vectorCandidates) {
+      const vectorScore = vectorScores.get(entry.id) ?? 0;
+      const keywordScore = this.calculateKeywordScore(entry.content, keywords);
+      // 第三层：综合分数重排序
+      const finalScore = vectorScore * 0.7 + keywordScore * 0.3;
+
+      scoredCandidates.push({
+        entry,
+        vectorScore,
+        keywordScore,
+        finalScore,
+      });
+    }
+
+    // 按综合分数排序
+    scoredCandidates.sort((a, b) => b.finalScore - a.finalScore);
+
+    const elapsed = Date.now() - startTime;
+    this.lastSearchMode = 'hybrid';
+
+    log.info('📖 记忆检索完成', {
+      query: query.slice(0, 50),
+      source: 'dual-layer',
+      sourceDetail: {
+        vectorCandidates: vectorCandidates.length,
+        keywords: keywords.slice(0, 5),
+      },
+      resultCount: Math.min(scoredCandidates.length, limit),
+      elapsed: `${elapsed}ms`,
+    });
+
+    // 返回 Top-K 结果，并附加分数到 metadata
+    return scoredCandidates.slice(0, limit).map(item => ({
+      ...item.entry,
+      metadata: {
+        ...item.entry.metadata,
+        score: item.finalScore,
+      },
+    }));
+  }
+
+  /**
+   * 计算关键词匹配分数
+   * 
+   * @param content 内容文本
+   * @param keywords 关键词列表
+   * @returns 归一化分数 (0-1)
+   */
+  private calculateKeywordScore(content: string, keywords: string[]): number {
+    if (keywords.length === 0) return 0;
+
+    const lowerContent = content.toLowerCase();
+    let matchCount = 0;
+    let totalWeight = 0;
+
+    for (const keyword of keywords) {
+      const weight = keyword.length / keywords.reduce((sum, k) => sum + k.length, 0);
+      totalWeight += weight;
+
+      // 计算关键词出现次数
+      const regex = new RegExp(this.escapeRegex(keyword), 'gi');
+      const matches = lowerContent.match(regex);
+      if (matches && matches.length > 0) {
+        // 匹配次数越多，分数越高，但有上限
+        matchCount += weight * Math.min(matches.length, 3);
+      }
+    }
+
+    // 归一化到 0-1 范围
+    return totalWeight > 0 ? Math.min(matchCount / totalWeight, 1) : 0;
+  }
+
+  // ============================================================================
+  // 搜索
+  // ============================================================================
+
+  /**
+   * 搜索记忆
    * 
    * 策略：
    * 1. 优先使用向量检索（如果嵌入服务可用）
