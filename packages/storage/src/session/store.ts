@@ -278,6 +278,45 @@ export class SessionStore {
     this.save(session);
   }
 
+  /**
+   * 裁剪旧消息（保留最近的 N 条）
+   * @param key 会话键
+   * @param deleteCount 要删除的旧消息数量
+   */
+  trimOldMessages(key: SessionKey, deleteCount: number): void {
+    if (!this.db || deleteCount <= 0) return;
+
+    // 删除最旧的 N 条消息
+    this.db.run(`
+      DELETE FROM messages 
+      WHERE session_key = ? 
+      AND id IN (
+        SELECT id FROM messages 
+        WHERE session_key = ? 
+        ORDER BY seq_num ASC 
+        LIMIT ?
+      )
+    `, [key, key, deleteCount]);
+
+    // 重新编号 seq_num（保持连续）
+    this.db.run(`
+      UPDATE messages SET seq_num = (
+        SELECT COUNT(*) FROM messages m2 
+        WHERE m2.session_key = messages.session_key 
+        AND m2.id <= messages.id
+      ) - 1
+      WHERE session_key = ?
+    `, [key]);
+
+    // 更新缓存
+    const session = this.cache.get(key);
+    if (session) {
+      session.messages = session.messages.slice(deleteCount);
+    }
+
+    log.debug('裁剪旧消息', { key, deleteCount });
+  }
+
   /** 删除会话 */
   delete(key: SessionKey): void {
     if (!this.db) return;

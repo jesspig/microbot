@@ -250,6 +250,9 @@ export class AgentExecutor {
       sessionHistory = session.messages.map(m => ({
         role: m.role,
         content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        // 保留工具调用相关字段（映射字段名）
+        toolCallId: m.tool_call_id,
+        toolCalls: m.tool_calls as LLMMessage['toolCalls'],
       }));
     } else {
       sessionHistory = this.conversationHistory.get(sessionKey) ?? [];
@@ -929,24 +932,40 @@ export class AgentExecutor {
   }
 
   /**
-   * 更新会话历史
+   * 更新会话历史（增量追加）
    */
   private updateHistory(sessionKey: SessionKey, history: LLMMessage[]): void {
-    const trimmed = this.messageManager.truncate(history);
-    
     // 优先使用 SessionStore 持久化
     if (this.sessionStore) {
-      // 清空现有消息并追加新消息
-      this.sessionStore.clear(sessionKey);
-      for (const msg of trimmed) {
+      // 获取当前会话的消息数量
+      const session = this.sessionStore.getOrCreate(sessionKey);
+      const existingCount = session.messages.length;
+
+      // 计算需要追加的新消息（基于现有数量计算新增数量）
+      const newMessages = history.slice(existingCount);
+
+      // 只追加新消息（保留 toolCallId 和 toolCalls 字段）
+      for (const msg of newMessages) {
         this.sessionStore.appendMessage(sessionKey, {
           role: msg.role as 'user' | 'assistant' | 'system',
           content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
           timestamp: Date.now(),
+          // 保留工具调用相关字段
+          tool_call_id: msg.toolCallId,
+          tool_calls: msg.toolCalls,
         });
+      }
+
+      // 如果超过最大消息数，裁剪旧消息（保留最近的）
+      const maxMessages = 500;
+      const totalMessages = existingCount + newMessages.length;
+      if (totalMessages > maxMessages) {
+        const deleteCount = totalMessages - maxMessages;
+        this.sessionStore.trimOldMessages(sessionKey, deleteCount);
       }
     } else {
       // 回退到内存存储
+      const trimmed = this.messageManager.truncate(history);
       this.conversationHistory.set(sessionKey, trimmed);
       this.trimSessions();
     }
