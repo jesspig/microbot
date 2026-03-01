@@ -26,11 +26,13 @@
   ],
   "dependencies": {
     "@logtape/file": "^2.0.4",
-    "@logtape/logtape": "^2.0.2",
+    "@logtape/logtape": "^2.0.4",
     "@micro-agent/config": "workspace:*",
     "@micro-agent/providers": "workspace:*",
     "@micro-agent/types": "workspace:*",
-    "mitt": "^3.0.1"
+    "mammoth": "^1.11.0",
+    "mitt": "^3.0.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bun": "latest",

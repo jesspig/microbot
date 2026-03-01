@@ -84,7 +84,45 @@ export {
   // Summarizer
   ConversationSummarizer,
   type SummarizerConfig,
+  // Classifier
+  classifyMemory,
+  classifyMemoriesBatch,
+  getMemoryTypeDescription,
+  getMemoryTypeIcon,
 } from './memory';
+
+// Citation System (RAG 级别溯源)
+export {
+  type Citation,
+  type CitedResponse,
+  type CitationGeneratorConfig,
+} from './types';
+export {
+  CitationGenerator,
+  createCitationGenerator,
+} from './citation';
+
+// Knowledge Base System
+export {
+  // Types
+  type KnowledgeBaseConfig,
+  type KnowledgeDocument,
+  type KnowledgeDocMetadata,
+  type KnowledgeDocStatus,
+  type KnowledgeDocType,
+  type KnowledgeChunk,
+  type KnowledgeSearchResult,
+  type KnowledgeBaseStats,
+  type BackgroundBuildStatus,
+  // Manager
+  KnowledgeBaseManager,
+  getKnowledgeBase,
+  setKnowledgeBase,
+  // Utils
+  getKnowledgeDocType,
+  isKnowledgeFileSupported,
+  KNOWLEDGE_FILE_EXTENSIONS,
+} from './knowledge';
 
 // Channel Gateway
 export { ChannelGatewayImpl } from './gateway';
