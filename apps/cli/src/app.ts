@@ -73,7 +73,8 @@ interface StartupInfo {
     summarizeThreshold?: number;
   };
   channels: string[];
-  warnings: string[];
+  infos: string[];  // 状态信息（蓝色）
+  warnings: string[];  // 警告信息（黄色）
 }
 
 const startupInfo: StartupInfo = {
@@ -82,6 +83,7 @@ const startupInfo: StartupInfo = {
   models: {},
   memory: { mode: 'fulltext' },
   channels: [],
+  infos: [],
   warnings: [],
 };
 
@@ -371,7 +373,15 @@ class AppImpl implements App {
       console.log(`  \x1b[90m渠道:\x1b[0m ${startupInfo.channels.join(', ')}`);
     }
     
-    // 警告
+    // 状态信息（蓝色）
+    if (startupInfo.infos.length > 0) {
+      console.log();
+      for (const info of startupInfo.infos) {
+        console.log(`  \x1b[36mℹ ${info}\x1b[0m`);
+      }
+    }
+    
+    // 警告（黄色）
     if (startupInfo.warnings.length > 0) {
       console.log();
       for (const w of startupInfo.warnings) {
@@ -387,6 +397,31 @@ class AppImpl implements App {
     const basePrompt = loadSystemPromptFromUserConfig(this.workspace);
 
     const parts: string[] = [];
+
+    // 0. 系统路径说明（告知 LLM 各路径的用途和访问权限）
+    parts.push(`# 系统路径说明
+
+## 可访问目录（使用文件工具读写）
+
+| 路径 | 用途 | 说明 |
+|------|------|------|
+| \`${this.workspace}\` | 工作区 | 用户项目文件，主要工作目录 |
+| \`~/.micro-agent/workspace\` | 默认工作区 | 未指定时的默认工作目录 |
+| \`~/.micro-agent/knowledge/\` | 知识库 | 上传的文档存储位置 |
+| \`~/.micro-agent/SOUL.md\` | 身份定义 | 定义你的角色和人格 |
+| \`~/.micro-agent/USER.md\` | 用户信息 | 关于用户的重要信息 |
+| \`~/.micro-agent/AGENTS.md\` | 行为准则 | 你的行为规范和原则 |
+| \`~/.micro-agent/settings.yaml\` | 系统配置 | 模型、通道等配置 |
+
+## 文件工具使用规则
+
+1. 路径相对于工作区：\`read_file("file.txt")\` 或 \`list_dir(".")\`
+2. 子目录使用相对路径：\`read_file("src/index.ts")\`
+3. 访问系统目录使用绝对路径或 ~ 开头：\`read_file("~/.micro-agent/USER.md")\`
+
+## 知识库查询
+
+用户询问知识库内容时，系统会自动检索相关文档并注入上下文，无需手动读取文件。`);
 
     // 1. Always 技能（Level 2 直接注入）
     if (this.skillsLoader && this.skillsLoader.count > 0) {
@@ -540,7 +575,7 @@ ${skillsSummary}`);
     
     // 检查是否启用记忆系统
     if (memoryConfig?.enabled === false) {
-      startupInfo.warnings.push('记忆系统已禁用');
+      startupInfo.infos.push('记忆系统已禁用');
       return;
     }
 
@@ -607,7 +642,7 @@ ${skillsSummary}`);
         try {
           const result = await this.memoryStore.migrateToModel(modelChange.newModel, { autoStart: true });
           if (result.success) {
-            startupInfo.warnings.push(`嵌入模型迁移已启动：${modelChange.oldModel || '未知'} → ${modelChange.newModel}`);
+            startupInfo.infos.push(`嵌入模型迁移已启动：${modelChange.oldModel || '未知'} → ${modelChange.newModel}`);
           } else {
             startupInfo.warnings.push(`嵌入模型迁移启动失败：${result.error}`);
           }
@@ -652,7 +687,7 @@ ${skillsSummary}`);
           this.memoryStore // 注入 MemoryStore
         );
         await this.knowledgeBaseManager.initialize();
-        startupInfo.warnings.push('知识库系统已启用');
+        startupInfo.infos.push('知识库系统已启用');
         log.info('📚 知识库系统已初始化', { path: knowledgePath });
       } catch (error) {
         log.warn('知识库初始化失败', { error: error instanceof Error ? error.message : String(error) });

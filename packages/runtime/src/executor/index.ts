@@ -258,6 +258,9 @@ export class AgentExecutor {
       sessionHistory = this.conversationHistory.get(sessionKey) ?? [];
     }
 
+    // 清理孤立的 tool 消息（没有对应的 assistant+tool_calls）
+    sessionHistory = this.fixToolMessageDependencies(sessionHistory);
+
     log.info('📝 开始处理消息', { 
       channel: msg.channel, 
       chatId: msg.chatId,
@@ -1121,5 +1124,41 @@ export class AgentExecutor {
       return `\x1b[90m${cleanResult.slice(0, maxLength)}...\x1b[0m`;
     }
     return `\x1b[90m${cleanResult}\x1b[0m`;
+  }
+
+  /**
+   * 修复 tool 消息依赖关系
+   * 
+   * 确保每个 tool 消息都有对应的 assistant+tool_calls 消息
+   * 移除孤立的 tool 消息，避免 API 错误
+   */
+  private fixToolMessageDependencies(messages: LLMMessage[]): LLMMessage[] {
+    const result: LLMMessage[] = [];
+    
+    // 收集所有有效的 tool_call_id
+    const validToolCallIds = new Set<string>();
+    for (const msg of messages) {
+      if (msg.role === 'assistant' && msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          if (tc.id) validToolCallIds.add(tc.id);
+        }
+      }
+    }
+    
+    // 过滤消息，保留有效的 tool 消息
+    for (const msg of messages) {
+      if (msg.role === 'tool') {
+        // tool 消息必须有对应的 tool_call_id
+        if (msg.toolCallId && validToolCallIds.has(msg.toolCallId)) {
+          result.push(msg);
+        } else {
+          log.debug('丢弃孤立的 tool 消息', { toolCallId: msg.toolCallId });
+        }
+      } else {
+        result.push(msg);
+      }
+    }
+    
+    return result;
   }
 }
