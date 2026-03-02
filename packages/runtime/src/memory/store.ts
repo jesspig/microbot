@@ -11,6 +11,7 @@ import { mkdir, writeFile, readFile, readdir, unlink, stat, appendFile } from 'f
 import { join, basename } from 'path';
 import type { MemoryEntry, Summary, MemoryStats, SearchOptions, MemoryFilter } from '../types';
 import type { MemoryStoreConfig, CleanupResult, EmbeddingService, VectorColumnName, EmbedModelInfo } from './types';
+import type { KnowledgeChunk, KnowledgeDocMetadata } from '../knowledge/types';
 import { getLogger } from '@logtape/logtape';
 
 const log = getLogger(['memory', 'store']);
@@ -84,6 +85,9 @@ export class MemoryStore {
       // 检测并迁移旧数据结构
       await this.migrateLegacySchema();
 
+      // 确保 documentId 列存在（用于文档分块精确删除）
+      await this.ensureDocumentIdColumn();
+
       // 检查当前嵌入模型的向量列是否存在，不存在则扩展 schema
       await this.ensureVectorColumn();
     } else {
@@ -111,11 +115,12 @@ export class MemoryStore {
         metadata: '{}',
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        // 多嵌入模型支持字段
-        active_embed: embedModel ?? null,
-        embed_versions: embedModel ? JSON.stringify({ [embedModel]: Date.now() }) : null,
-      };
-      this.table = await this.db.createTable(tableName, [sampleRecord]);
+              // 多嵌入模型支持字段
+              active_embed: embedModel ?? null,
+              embed_versions: embedModel ? JSON.stringify({ [embedModel]: Date.now() }) : null,
+              // 文档分块 ID（用于精确删除）
+              documentId: '',
+              };      this.table = await this.db.createTable(tableName, [sampleRecord]);
       // 删除占位符
       await this.table.delete('id = "placeholder"');
       
@@ -168,10 +173,7 @@ export class MemoryStore {
   /**
    * 迁移旧数据结构
    * 
-   * 检测旧版 `vector` 列并迁移到多向量结构：
-   * - 重命名 `vector` → `vector_<current_model>`
-   * - 添加 `active_embed` 字段
-   * - 添加 `embed_versions` 字段
+   * 迁移策略：批量删除 + 批量添加，避免逐条操作
    */
   private async migrateLegacySchema(): Promise<void> {
     if (!this.table) return;
@@ -214,28 +216,37 @@ export class MemoryStore {
       // 读取所有旧记录
       const records = await this.table.query().toArray();
 
-      // 迁移每个记录
-      let migratedCount = 0;
+      // 准备迁移的记录
+      const toMigrate: Record<string, unknown>[] = [];
+      const idsToDelete: string[] = [];
+
       for (const record of records) {
         const oldVector = record.vector as number[] | undefined;
         if (!oldVector || oldVector.length === 0) continue;
 
-        // 创建新记录
-        const updated = {
+        toMigrate.push({
           ...record,
           [newVectorColumn]: oldVector,
           active_embed: embedModel,
           embed_versions: JSON.stringify({ [embedModel]: Date.now() }),
-        };
-
-        // 删除旧记录并添加新记录
-        await this.table.delete(`id = "${this.escapeValue(String(record.id))}"`);
-        await this.table.add([updated]);
-        migratedCount++;
+        });
+        idsToDelete.push(String(record.id));
       }
 
+      if (toMigrate.length === 0) {
+        log.debug('📐 [MemoryStore] 无需迁移的记录');
+        return;
+      }
+
+      // 批量删除旧记录
+      const deleteIds = idsToDelete.map(id => `"${this.escapeValue(id)}"`).join(', ');
+      await this.table.delete(`id IN (${deleteIds})`);
+
+      // 批量添加新记录
+      await this.table.add(toMigrate);
+
       log.info('✅ [MemoryStore] 旧数据结构迁移完成', { 
-        migratedCount,
+        migratedCount: toMigrate.length,
         newVectorColumn,
         embedModel,
       });
@@ -244,6 +255,118 @@ export class MemoryStore {
       log.error('🚨 [MemoryStore] 迁移旧数据结构失败', { error: String(error) });
       // 不抛出错误，允许继续使用
     }
+  }
+
+  /**
+   * 确保 documentId 列存在
+   * 
+   * documentId 列用于文档分块的精确删除，避免 LIKE 查询。
+   * 如果列不存在，需要重建表。
+   */
+  private async ensureDocumentIdColumn(): Promise<void> {
+    if (!this.table) return;
+
+    // 检查列是否已存在
+    const schema = await this.table.schema();
+    const columnExists = schema.fields.some(f => f.name === 'documentId');
+
+    if (columnExists) {
+      log.debug('📐 [MemoryStore] documentId 列已存在');
+      return;
+    }
+
+    log.info('📐 [MemoryStore] documentId 列不存在，需要重建表');
+
+    // 确保 db 已初始化
+    if (!this.db) {
+      throw new Error('Database not initialized');
+    }
+
+    // 保存现有数据
+    const existingRecords = await this.table.query().toArray();
+    const existingCount = existingRecords.length;
+
+    log.info('📐 [MemoryStore] 备份现有数据', { recordCount: existingCount });
+
+    // 收集所有现有向量列及其维度
+    const existingVectorColumns: { name: string; dimension: number }[] = [];
+    for (const field of schema.fields) {
+      if (field.name.startsWith('vector_')) {
+        const dim = await this.getVectorDimensionWithoutInit(field.name);
+        if (dim > 0) {
+          existingVectorColumns.push({ name: field.name, dimension: dim });
+        }
+      }
+    }
+
+    // 从实际数据中检测向量列
+    if (existingCount > 0 && existingRecords.length > 0) {
+      const firstRecord = existingRecords[0];
+      for (const [key, value] of Object.entries(firstRecord)) {
+        if (key.startsWith('vector_') && !existingVectorColumns.some(c => c.name === key)) {
+          let dim = 0;
+          if (Array.isArray(value)) {
+            dim = (value as number[]).length;
+          } else if (value && typeof value === 'object' && 'toArray' in value) {
+            const arr = (value as { toArray: () => number[] }).toArray();
+            dim = arr.length;
+          } else if (value && typeof value === 'object' && 'length' in value) {
+            dim = (value as { length: number }).length;
+          }
+          if (dim > 0) {
+            existingVectorColumns.push({ name: key, dimension: dim });
+          }
+        }
+      }
+    }
+
+    // 删除旧表
+    const tableName = 'memories';
+    await this.db.dropTable(tableName);
+
+    // 创建包含所有向量列和 documentId 的占位记录
+    const placeholderRecord: Record<string, unknown> = {
+      id: `__schema_placeholder__`,
+      sessionId: '__schema__',
+      type: '__schema__',
+      content: '__schema__',
+      // 保留所有现有向量列
+      ...Object.fromEntries(
+        existingVectorColumns.map(col => [col.name, new Array(col.dimension).fill(0)])
+      ),
+      metadata: '{}',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      active_embed: '',
+      embed_versions: '{}',
+      // 添加 documentId 列
+      documentId: '',
+    };
+
+    // 创建新表
+    this.table = await this.db.createTable(tableName, [placeholderRecord]);
+    
+    // 删除占位记录
+    await this.table.delete(`id = "__schema_placeholder__"`);
+
+    // 恢复旧数据（添加 documentId 字段）
+    if (existingCount > 0) {
+      const normalizedRecords = existingRecords.map(record => ({
+        ...record,
+        documentId: '',  // 添加空的 documentId
+        // 确保 active_embed 和 embed_versions 不为 null（LanceDB 类型推断要求）
+        active_embed: record.active_embed ?? '',
+        embed_versions: record.embed_versions ?? '{}',
+      }));
+      // 标准化向量列
+      const finalRecords = this.normalizeVectorColumns(normalizedRecords, existingVectorColumns);
+      await this.table.add(finalRecords);
+    }
+
+    log.info('✅ [MemoryStore] 表已重建，documentId 列已添加', { 
+      restoredRecords: existingCount,
+      preservedVectorColumns: existingVectorColumns.length,
+    });
   }
 
   /**
@@ -372,6 +495,8 @@ export class MemoryStore {
       updatedAt: Date.now(),
       active_embed: embedModel,
       embed_versions: JSON.stringify({ [embedModel]: Date.now() }),
+      // 文档分块 ID（用于精确删除）
+      documentId: '',
     };
 
     // 创建新表
@@ -384,7 +509,14 @@ export class MemoryStore {
     // 关键修复：将 FixedSizeList 向量转换为普通数组，避免 LanceDB 的 isValid 字段问题
     // 参考：https://github.com/lancedb/lancedb/issues/2134
     if (existingCount > 0) {
-      const normalizedRecords = this.normalizeVectorColumns(existingRecords, existingVectorColumns);
+      const normalizedRecords = this.normalizeVectorColumns(existingRecords, existingVectorColumns).map(record => ({
+        ...record,
+        // 确保 documentId 存在
+        documentId: record.documentId ?? '',
+        // 确保 active_embed 和 embed_versions 不为 null
+        active_embed: record.active_embed ?? '',
+        embed_versions: record.embed_versions ?? '{}',
+      }));
       await this.table.add(normalizedRecords);
     }
 
@@ -403,13 +535,25 @@ export class MemoryStore {
     await this.ensureInitialized();
 
     // 获取向量（如果嵌入服务可用）
-    const vector = entry.vector ?? (await this.getEmbedding(entry.content));
+    let vector = entry.vector ?? (await this.getEmbedding(entry.content));
+    
+    // 检查向量有效性：空数组或 null 都视为无效
+    if (vector && Array.isArray(vector) && vector.length === 0) {
+      log.warn('⚠️ [MemoryStore] 检测到空向量，将按无向量处理', { 
+        id: entry.id,
+        content: entry.content.slice(0, 100)
+      });
+      vector = undefined;
+    }
 
     // 确定向量列名
     const embedModel = this.config.embedModel;
     const vectorColumn = embedModel 
       ? MemoryStore.modelIdToVectorColumn(embedModel) 
       : 'vector';
+
+    // 提取 documentId（用于文档分块的精确删除）
+    const documentId = entry.metadata?.documentId ?? '';
 
     // 1. 存储到 LanceDB（主存储）
     const record: Record<string, unknown> = {
@@ -424,6 +568,8 @@ export class MemoryStore {
       // 多嵌入模型支持
       active_embed: embedModel ?? null,
       embed_versions: embedModel ? JSON.stringify({ [embedModel]: Date.now() }) : null,
+      // 独立 documentId 列（用于精确删除文档分块）
+      documentId,
     };
 
     await this.table?.add([record]);
@@ -431,11 +577,12 @@ export class MemoryStore {
     // 2. 存储到 Markdown（人类可读备份）
     await this.storeMarkdown(entry);
 
-    log.debug('💾 [MemoryStore] 记忆已存储', { 
+    log.info('💾 [MemoryStore] 记忆已存储', { 
       id: entry.id, 
       type: entry.type,
       sessionId: entry.sessionId,
       hasVector: !!vector,
+      vectorLength: vector?.length ?? 0,
       vectorColumn,
       embedModel,
       mode: vector ? 'vector' : 'fulltext'
@@ -458,9 +605,23 @@ export class MemoryStore {
       : 'vector';
 
     const records: Record<string, unknown>[] = [];
+    let validVectorCount = 0;
+    let emptyVectorCount = 0;
 
     for (const entry of entries) {
-      const vector = entry.vector ?? (await this.getEmbedding(entry.content));
+      let vector = entry.vector ?? (await this.getEmbedding(entry.content));
+      
+      // 检查向量有效性
+      if (vector && Array.isArray(vector) && vector.length === 0) {
+        vector = undefined;
+        emptyVectorCount++;
+      } else if (vector && Array.isArray(vector) && vector.length > 0) {
+        validVectorCount++;
+      }
+      
+      // 提取 documentId（用于文档分块的精确删除）
+      const documentId = entry.metadata?.documentId ?? '';
+
       records.push({
         id: entry.id,
         sessionId: entry.sessionId,
@@ -473,6 +634,8 @@ export class MemoryStore {
         // 多嵌入模型支持
         active_embed: embedModel ?? null,
         embed_versions: embedModel ? JSON.stringify({ [embedModel]: Date.now() }) : null,
+        // 独立 documentId 列（用于精确删除文档分块）
+        documentId,
       });
     }
 
@@ -484,11 +647,325 @@ export class MemoryStore {
       await this.storeMarkdown(entry);
     }
 
-    log.info('💾 [MemoryStore] 批量存储完成', { count: entries.length, vectorColumn });
+    log.info('💾 [MemoryStore] 批量存储完成', { 
+      count: entries.length, 
+      validVectors: validVectorCount,
+      emptyVectors: emptyVectorCount,
+      vectorColumn 
+    });
+  }
+
+  // ============================================================================
+  // 文档记忆管理
+  // ============================================================================
+
+  /**
+   * 存储文档分块
+   * 
+   * 将文档分块转换为记忆条目并存储到 MemoryStore。
+   * 每个分块作为 type: 'document' 的 MemoryEntry 存储。
+   * 
+   * @param docId 文档 ID
+   * @param chunks 分块列表
+   * @param metadata 文档元数据
+   */
+  /**
+   * 存储文档分块（增量更新）
+   * 
+   * 使用增量更新策略：
+   * 1. 获取现有分块
+   * 2. 计算差异（基于分块 ID）
+   * 3. 只删除不再需要的分块
+   * 4. 只添加新增或变化的分块
+   */
+  async storeDocumentChunks(
+    docId: string,
+    chunks: KnowledgeChunk[],
+    metadata: KnowledgeDocMetadata
+  ): Promise<void> {
+    await this.ensureInitialized();
+
+    if (chunks.length === 0) {
+      // 新分块为空，删除所有旧分块
+      await this.deleteDocumentChunks(docId);
+      log.info('📄 [MemoryStore] 文档分块已清空', { docId });
+      return;
+    }
+
+    // 获取现有分块
+    const existingChunks = await this.getDocumentChunks(docId);
+    const existingIds = new Set(existingChunks.map(c => c.id));
+    const newIds = new Set(chunks.map(c => c.id));
+
+    // 计算需要删除的分块
+    const toDelete = existingChunks.filter(c => !newIds.has(c.id));
+    
+    // 计算需要添加的分块（新增或变化）
+    const toAdd = chunks.filter(c => !existingIds.has(c.id));
+
+    // 删除不再需要的分块
+    if (toDelete.length > 0) {
+      const deleteIds = toDelete.map(c => `"${c.id}"`).join(', ');
+      await this.table?.delete(`id IN (${deleteIds})`);
+      log.debug('📄 [MemoryStore] 删除旧分块', { docId, count: toDelete.length });
+    }
+
+    // 添加新分块
+    if (toAdd.length > 0) {
+      const entries: MemoryEntry[] = toAdd.map((chunk, index) => ({
+        id: chunk.id,
+        sessionId: 'knowledge_base',
+        type: 'document' as const,
+        content: chunk.content,
+        vector: chunk.vector,
+        metadata: {
+          documentId: docId,
+          documentPath: metadata.originalName,
+          fileType: metadata.fileType,
+          documentTitle: metadata.title,
+          chunkIndex: chunks.indexOf(chunk), // 使用原始索引
+          chunkStart: chunk.startPos,
+          chunkEnd: chunk.endPos,
+          tags: ['knowledge_base', metadata.fileType, ...(metadata.tags || [])],
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }));
+
+      await this.storeBatch(entries);
+    }
+
+    log.info('📄 [MemoryStore] 文档分块已更新', {
+      docId,
+      total: chunks.length,
+      added: toAdd.length,
+      deleted: toDelete.length,
+      unchanged: chunks.length - toAdd.length,
+      title: metadata.title || metadata.originalName,
+    });
   }
 
   /**
-   * 搜索记忆（智能检索）
+   * 删除文档的所有分块
+   * 
+   * 使用独立的 documentId 列进行精确匹配，避免 LIKE 查询。
+   */
+  async deleteDocumentChunks(docId: string): Promise<void> {
+    await this.ensureInitialized();
+
+    try {
+      // 使用 documentId 列精确匹配
+      await this.table?.delete(`documentId = "${docId}"`);
+      
+      log.info('📄 [MemoryStore] 文档分块已删除', { docId });
+    } catch (error) {
+      // 兼容旧数据：documentId 列不存在时回退到 LIKE 查询
+      try {
+        await this.table?.delete(`type = 'document' AND metadata LIKE '%"documentId":"${docId}"%'`);
+        log.info('📄 [MemoryStore] 文档分块已删除（兼容模式）', { docId });
+      } catch {
+        log.debug('📄 [MemoryStore] 删除文档分块时无匹配记录', { docId });
+      }
+    }
+  }
+
+  /**
+   * 获取文档的所有分块
+   * 
+   * 使用独立的 documentId 列进行精确匹配。
+   */
+  async getDocumentChunks(docId: string): Promise<MemoryEntry[]> {
+    await this.ensureInitialized();
+
+    try {
+      // 使用 documentId 列精确匹配
+      const records = await this.table
+        ?.query()
+        .where(`documentId = "${docId}"`)
+        .toArray() ?? [];
+
+      return records.map(record => this.recordToEntry(record));
+    } catch {
+      // 兼容旧数据：documentId 列不存在时回退到 LIKE 查询
+      try {
+        const records = await this.table
+          ?.query()
+          .where(`type = 'document' AND metadata LIKE '%"documentId":"${docId}"%'`)
+          .toArray() ?? [];
+
+        return records.map(record => this.recordToEntry(record));
+      } catch (error) {
+        log.warn('📄 [MemoryStore] 获取文档分块失败', { docId, error: String(error) });
+        return [];
+      }
+    }
+  }
+
+  /**
+   * 按类型统计记忆数量
+   */
+  async getStatsByType(): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+
+    const stats: Record<string, number> = {};
+    
+    try {
+      const records = await this.table?.query().toArray() ?? [];
+      
+      for (const record of records) {
+        const type = String(record.type || 'other');
+        stats[type] = (stats[type] || 0) + 1;
+      }
+    } catch (error) {
+      log.warn('📊 [MemoryStore] 统计记忆类型失败', { error: String(error) });
+    }
+
+    return stats;
+  }
+
+  /**
+   * 双层检索
+   * 
+   * 架构：
+   * 1. 第一层：向量检索返回 Top-200 候选（O(log n) 复杂度）
+   * 2. 第二层：候选内 n-gram 关键词匹配（O(200) 固定复杂度）
+   * 3. 第三层：综合分数重排序（向量 0.7 + 关键词 0.3）
+   * 
+   * 优势：
+   * - 向量检索承载主要过滤负载（百万级 <20ms）
+   * - 候选内关键词匹配复杂度固定
+   * - 支持中英文混合检索
+   * 
+   * @param query 查询文本
+   * @param limit 返回结果数量（默认 10）
+   * @param candidates 向量检索候选数量（默认 200）
+   * @param filter 过滤条件
+   * @param modelId 嵌入模型 ID
+   */
+  async dualLayerSearch(
+    query: string,
+    limit: number = 10,
+    candidates: number = 200,
+    filter?: MemoryFilter,
+    modelId?: string
+  ): Promise<MemoryEntry[]> {
+    await this.ensureInitialized();
+
+    const startTime = Date.now();
+    const targetModel = modelId ?? this.config.embedModel;
+    const hasEmbedding = this.config.embeddingService?.isAvailable();
+    const hasVectorColumn = targetModel ? await this.hasVectorColumn(targetModel) : false;
+
+    // 第一层：向量检索
+    let vectorCandidates: MemoryEntry[] = [];
+    let vectorScores: Map<string, number> = new Map();
+
+    if (hasEmbedding && hasVectorColumn) {
+      try {
+        vectorCandidates = await this.vectorSearch(query, candidates, filter, targetModel);
+        
+        // 计算向量相似度分数（归一化）
+        // LanceDB 返回的结果按相似度排序，第一名分数最高
+        for (let i = 0; i < vectorCandidates.length; i++) {
+          const entry = vectorCandidates[i];
+          // 使用倒数排名作为分数（第一名 1.0，最后一名接近 0）
+          const score = 1 - (i / vectorCandidates.length);
+          vectorScores.set(entry.id, score);
+        }
+      } catch (error) {
+        log.warn('🔍 [MemoryStore] 双层检索向量层失败', { error: String(error) });
+      }
+    }
+
+    // 如果向量检索无结果，回退到全文检索
+    if (vectorCandidates.length === 0) {
+      log.info('🔍 [MemoryStore] 双层检索回退到全文检索', { query: query.slice(0, 50) });
+      this.lastSearchMode = 'fulltext';
+      return this.fulltextSearch(query, limit, filter);
+    }
+
+    // 第二层：候选内关键词匹配
+    const keywords = this.extractKeywords(query);
+    const scoredCandidates: Array<{ entry: MemoryEntry; vectorScore: number; keywordScore: number; finalScore: number }> = [];
+
+    for (const entry of vectorCandidates) {
+      const vectorScore = vectorScores.get(entry.id) ?? 0;
+      const keywordScore = this.calculateKeywordScore(entry.content, keywords);
+      // 第三层：综合分数重排序
+      const finalScore = vectorScore * 0.7 + keywordScore * 0.3;
+
+      scoredCandidates.push({
+        entry,
+        vectorScore,
+        keywordScore,
+        finalScore,
+      });
+    }
+
+    // 按综合分数排序
+    scoredCandidates.sort((a, b) => b.finalScore - a.finalScore);
+
+    const elapsed = Date.now() - startTime;
+    this.lastSearchMode = 'hybrid';
+
+    log.info('📖 记忆检索完成', {
+      query: query.slice(0, 50),
+      source: 'dual-layer',
+      sourceDetail: {
+        vectorCandidates: vectorCandidates.length,
+        keywords: keywords.slice(0, 5),
+      },
+      resultCount: Math.min(scoredCandidates.length, limit),
+      elapsed: `${elapsed}ms`,
+    });
+
+    // 返回 Top-K 结果，并附加分数到 metadata
+    return scoredCandidates.slice(0, limit).map(item => ({
+      ...item.entry,
+      metadata: {
+        ...item.entry.metadata,
+        score: item.finalScore,
+      },
+    }));
+  }
+
+  /**
+   * 计算关键词匹配分数
+   * 
+   * @param content 内容文本
+   * @param keywords 关键词列表
+   * @returns 归一化分数 (0-1)
+   */
+  private calculateKeywordScore(content: string, keywords: string[]): number {
+    if (keywords.length === 0) return 0;
+
+    const lowerContent = content.toLowerCase();
+    let matchCount = 0;
+    let totalWeight = 0;
+
+    for (const keyword of keywords) {
+      const weight = keyword.length / keywords.reduce((sum, k) => sum + k.length, 0);
+      totalWeight += weight;
+
+      // 计算关键词出现次数
+      const regex = new RegExp(this.escapeRegex(keyword), 'gi');
+      const matches = lowerContent.match(regex);
+      if (matches && matches.length > 0) {
+        // 匹配次数越多，分数越高，但有上限
+        matchCount += weight * Math.min(matches.length, 3);
+      }
+    }
+
+    // 归一化到 0-1 范围
+    return totalWeight > 0 ? Math.min(matchCount / totalWeight, 1) : 0;
+  }
+
+  // ============================================================================
+  // 搜索
+  // ============================================================================
+
+  /**
+   * 搜索记忆
    * 
    * 策略：
    * 1. 优先使用向量检索（如果嵌入服务可用）
@@ -758,7 +1235,10 @@ export class MemoryStore {
         conditions.push(`sessionId = "${filter.sessionId}"`);
       }
       if (filter?.type) {
-        conditions.push(`type = "${filter.type}"`);
+        // 支持单个类型或多个类型
+        const types = Array.isArray(filter.type) ? filter.type : [filter.type];
+        const typeConditions = types.map(t => `type = "${t}"`).join(' OR ');
+        conditions.push(`(${typeConditions})`);
       }
       
       if (conditions.length > 0) {
@@ -806,7 +1286,7 @@ export class MemoryStore {
   private async vectorSearch(query: string, limit: number, filter?: MemoryFilter, modelId?: string): Promise<MemoryEntry[]> {
     // 检查嵌入服务是否可用
     if (!this.config.embeddingService?.isAvailable()) {
-      log.debug('🔍 [MemoryStore] 嵌入服务不可用，跳过向量检索');
+      log.info('🔍 [MemoryStore] 嵌入服务不可用，跳过向量检索');
       return [];
     }
 
@@ -819,9 +1299,11 @@ export class MemoryStore {
     // 检查表的向量维度
     const tableVectorDimension = await this.getVectorDimension(vectorColumn);
     if (tableVectorDimension === 0) {
-      log.debug('🔍 [MemoryStore] 表无向量数据，跳过向量检索', { vectorColumn });
+      log.info('🔍 [MemoryStore] 表无向量数据，跳过向量检索', { vectorColumn, targetModel });
       return [];
     }
+
+    log.info('🔍 [MemoryStore] 向量列检查通过', { vectorColumn, tableVectorDimension });
 
     try {
       const startTime = Date.now();
@@ -837,17 +1319,54 @@ export class MemoryStore {
         return [];
       }
       
-      let queryBuilder = this.table!.vectorSearch(vector).column(vectorColumn).limit(limit);
+      // 构建过滤条件（仅用于 sessionId 和 type 过滤）
+      const conditions: string[] = [];
       
-      // 应用过滤条件
       if (filter?.sessionId) {
-        queryBuilder = queryBuilder.where(`sessionId = "${this.escapeValue(filter.sessionId)}"`);
+        conditions.push(`sessionId = "${this.escapeValue(filter.sessionId)}"`);
       }
       if (filter?.type) {
-        queryBuilder = queryBuilder.where(`type = "${this.escapeValue(filter.type)}"`);
+        // 支持单个类型或多个类型
+        const types = Array.isArray(filter.type) ? filter.type : [filter.type];
+        const typeConditions = types.map(t => `type = "${this.escapeValue(t)}"`).join(' OR ');
+        conditions.push(`(${typeConditions})`);
       }
       
-      const results = await queryBuilder.toArray();
+      // 先获取 limit * 2 条结果，以便在过滤空向量后仍有足够结果
+      const searchLimit = limit * 2;
+      
+      let queryBuilder = this.table!.vectorSearch(vector)
+        .column(vectorColumn)
+        .limit(searchLimit);
+      
+      if (conditions.length > 0) {
+        const whereClause = conditions.join(' AND ');
+        queryBuilder = queryBuilder.where(whereClause);
+      }
+      
+      log.debug('🔍 [MemoryStore] 执行向量搜索', { 
+        vectorColumn, 
+        queryDimension: vector.length,
+        filter: conditions.length > 0 ? conditions.join(' AND ') : 'none'
+      });
+      
+      const rawResults = await queryBuilder.toArray();
+      
+      // 过滤掉空向量记录（空向量无法参与相似度计算）
+      const results = rawResults.filter(r => {
+        const vec = r[vectorColumn];
+        if (!vec) return false;
+        if (Array.isArray(vec)) return vec.length > 0;
+        if (typeof vec === 'object') {
+          if ('length' in vec) return (vec as { length: number }).length > 0;
+          if ('toArray' in vec) {
+            const arr = (vec as { toArray: () => number[] }).toArray();
+            return arr.length > 0;
+          }
+        }
+        return false;
+      }).slice(0, limit);
+      
       const elapsed = Date.now() - startTime;
 
       log.info('📖 记忆检索完成', { 
@@ -858,6 +1377,7 @@ export class MemoryStore {
           model: targetModel,
         },
         resultCount: results.length,
+        rawCount: rawResults.length,
         elapsed: `${elapsed}ms`
       });
 
@@ -1536,22 +2056,49 @@ export class MemoryStore {
     try {
       const schema = await this.table.schema();
       const field = schema.fields.find(f => f.name === column);
-      if (!field) return 0;
+      if (!field) {
+        log.info('📐 [MemoryStore] 向量列不存在', { column });
+        return 0;
+      }
 
       // LanceDB 向量类型是固定大小列表
       // 尝试从数据中获取实际维度
+      // 注意：空数组 [] 不是 NULL，所以需要检查数组长度
       const results = await this.table
         .query()
         .where(`${column} IS NOT NULL`)
-        .limit(1)
+        .limit(10)  // 检查多条记录，避免恰好第一条是空数组
         .toArray();
 
-      if (results.length > 0 && Array.isArray(results[0][column])) {
-        return (results[0][column] as number[]).length;
+      // 查找第一个非空数组的记录
+      // 注意：LanceDB 返回的可能是 FixedSizeList 类型，不是普通数组
+      for (const result of results) {
+        const value = result[column];
+        if (!value) continue;
+        
+        let dim = 0;
+        if (Array.isArray(value)) {
+          dim = value.length;
+        } else if (typeof value === 'object') {
+          // FixedSizeList 类型有 length 属性或 toArray 方法
+          if ('length' in value && typeof (value as { length: number }).length === 'number') {
+            dim = (value as { length: number }).length;
+          } else if ('toArray' in value && typeof (value as { toArray: () => unknown }).toArray === 'function') {
+            const arr = (value as { toArray: () => number[] }).toArray();
+            dim = arr.length;
+          }
+        }
+        
+        if (dim > 0) {
+          log.info('📐 [MemoryStore] 检测到向量维度', { column, dimension: dim, valueType: typeof value });
+          return dim;
+        }
       }
 
+      log.info('📐 [MemoryStore] 向量列无有效数据（可能都是空数组）', { column, checkedRecords: results.length });
       return 0;
-    } catch {
+    } catch (error) {
+      log.warn('📐 [MemoryStore] 获取向量维度失败', { column, error: String(error) });
       return 0;
     }
   }

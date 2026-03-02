@@ -5,17 +5,21 @@
  * 使用原生 Function Calling 而非 ReAct JSON 解析。
  */
 
-import type { InboundMessage, OutboundMessage, ToolContext } from '@micro-agent/types';
-import type { LLMGateway, LLMMessage, GenerationConfig, MessageContent, LLMToolDefinition, IntentPromptBuilder, UserPromptBuilder } from '@micro-agent/providers';
+import type { InboundMessage, OutboundMessage, ToolContext, SessionKey } from '@micro-agent/types';
+import type { LLMGateway, LLMMessage, GenerationConfig, MessageContent, LLMToolDefinition, IntentPipeline, IntentResult, PreflightPromptBuilder, HistoryEntry } from '@micro-agent/providers';
 import type { MessageBus } from '../bus/queue';
 import type { ModelConfig, LoopDetectionConfig } from '@micro-agent/config';
-import type { AgentLoopResult, MemoryEntry } from '../types';
+import type { AgentLoopResult, MemoryEntry, Citation, CitedResponse, MemoryEntryType } from '../types';
 import type { MemoryStore, ConversationSummarizer } from '../memory';
+import type { SessionStore } from '@micro-agent/storage';
+import { classifyMemory } from '../memory';
 import { ModelRouter, convertToPlainText, buildUserContent, type RouteResult } from '@micro-agent/providers';
 import { LoopDetector } from '../loop-detection';
 import { MessageHistoryManager } from '../message-manager';
+import { CitationGenerator } from '../citation';
 import { getLogger } from '@logtape/logtape';
 import { getTracer } from '../logging';
+import type { KnowledgeBaseManager } from '../knowledge';
 
 const log = getLogger(['executor']);
 const tracer = getTracer();
@@ -57,10 +61,10 @@ export interface AgentExecutorConfig {
   intentModel?: string;
   /** 可用模型列表 */
   availableModels?: Map<string, ModelConfig[]>;
-  /** 意图识别 System Prompt 构建函数 */
-  buildIntentPrompt?: IntentPromptBuilder;
-  /** 用户 Prompt 构建函数 */
-  buildUserPrompt?: UserPromptBuilder;
+  /** 预处理阶段提示词构建函数 */
+  buildPreflightPrompt?: PreflightPromptBuilder;
+  /** 模型选择阶段提示词构建函数 */
+  buildRoutingPrompt?: PreflightPromptBuilder;
   /** 循环检测配置 */
   loopDetection?: Partial<LoopDetectionConfig>;
   /** 最大历史消息数 */
@@ -71,6 +75,16 @@ export interface AgentExecutorConfig {
   summarizeThreshold?: number;
   /** 空闲超时时间 */
   idleTimeout?: number;
+  /** 知识库是否启用 */
+  knowledgeEnabled?: boolean;
+  /** 知识库检索结果数量 */
+  knowledgeLimit?: number;
+  /** 是否启用引用溯源 */
+  citationEnabled?: boolean;
+  /** 引用最小置信度 */
+  citationMinConfidence?: number;
+  /** 最大引用数 */
+  citationMaxCount?: number;
 }
 
 const DEFAULT_CONFIG: AgentExecutorConfig = {
@@ -85,14 +99,18 @@ const DEFAULT_CONFIG: AgentExecutorConfig = {
  */
 export class AgentExecutor {
   private running = false;
-  private conversationHistory = new Map<string, LLMMessage[]>();
+  private sessionStore?: SessionStore;
+  private conversationHistory = new Map<string, LLMMessage[]>(); // 兼容模式：内存存储
   private router: ModelRouter;
+  private intentPipeline?: IntentPipeline;
   private cachedToolDefinitions: Array<{ name: string; description: string; inputSchema: unknown }> | null = null;
   private cachedLLMTools: LLMToolDefinition[] | null = null;
   private loopDetector: LoopDetector;
   private messageManager: MessageHistoryManager;
   private memoryStore?: MemoryStore;
   private summarizer?: ConversationSummarizer;
+  private knowledgeBaseManager?: KnowledgeBaseManager;
+  private citationGenerator?: CitationGenerator;
 
   constructor(
     private bus: MessageBus,
@@ -100,7 +118,9 @@ export class AgentExecutor {
     private tools: ToolRegistryLike,
     private config: AgentExecutorConfig = DEFAULT_CONFIG,
     memoryStore?: MemoryStore,
-    summarizer?: ConversationSummarizer
+    summarizer?: ConversationSummarizer,
+    knowledgeBaseManager?: KnowledgeBaseManager,
+    sessionStore?: SessionStore
   ) {
     this.router = new ModelRouter({
       chatModel: config.chatModel || '',
@@ -108,10 +128,20 @@ export class AgentExecutor {
       coderModel: config.coderModel,
       intentModel: config.intentModel,
       models: config.availableModels ?? new Map(),
-      buildIntentPrompt: config.buildIntentPrompt,
-      buildUserPrompt: config.buildUserPrompt,
     });
     this.router.setProvider(gateway);
+
+    // 初始化意图识别管道
+    if (config.buildPreflightPrompt && config.buildRoutingPrompt) {
+      const { IntentPipeline } = require('@micro-agent/providers');
+      this.intentPipeline = new IntentPipeline({
+        provider: gateway,
+        intentModel: config.intentModel ?? config.chatModel ?? '',
+        buildPreflightPrompt: config.buildPreflightPrompt,
+        buildRoutingPrompt: config.buildRoutingPrompt,
+      });
+      log.info('分阶段意图识别已启用');
+    }
 
     // 初始化循环检测器
     this.loopDetector = new LoopDetector({
@@ -132,9 +162,27 @@ export class AgentExecutor {
     // 注入记忆系统（可选）
     this.memoryStore = memoryStore;
     this.summarizer = summarizer;
+    this.knowledgeBaseManager = knowledgeBaseManager;
+    this.sessionStore = sessionStore;
 
     if (memoryStore) {
       log.info('记忆系统已启用');
+    }
+    if (knowledgeBaseManager && config.knowledgeEnabled !== false) {
+      log.info('知识库系统已启用');
+    }
+    if (sessionStore) {
+      log.info('会话持久化已启用');
+    }
+
+    // 初始化引用生成器（可选）
+    if (config.citationEnabled !== false) {
+      this.citationGenerator = new CitationGenerator({
+        minConfidence: config.citationMinConfidence ?? 0.5,
+        maxCitations: config.citationMaxCount ?? 5,
+        maxSnippetLength: 200,
+        format: 'numbered',
+      });
     }
   }
 
@@ -193,29 +241,108 @@ export class AgentExecutor {
     const startTime = Date.now();
     
     // 使用 channel:chatId 作为会话标识，实现会话隔离
-    const sessionKey = `${msg.channel}:${msg.chatId}`;
-    const sessionHistory = this.conversationHistory.get(sessionKey) ?? [];
+    const sessionKey = `${msg.channel}:${msg.chatId}` as SessionKey;
+    
+    // 获取会话历史（优先使用 SessionStore，否则使用内存）
+    let sessionHistory: LLMMessage[];
+    if (this.sessionStore) {
+      const session = this.sessionStore.getOrCreate(sessionKey);
+      sessionHistory = session.messages.map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        // 保留工具调用相关字段（映射字段名）
+        toolCallId: m.tool_call_id,
+        toolCalls: m.tool_calls as LLMMessage['toolCalls'],
+      }));
+    } else {
+      sessionHistory = this.conversationHistory.get(sessionKey) ?? [];
+    }
+
+    // 清理孤立的 tool 消息（没有对应的 assistant+tool_calls）
+    sessionHistory = this.fixToolMessageDependencies(sessionHistory);
 
     log.info('📝 开始处理消息', { 
       channel: msg.channel, 
       chatId: msg.chatId,
-      contentLength: msg.content.length 
+      contentLength: msg.content.length,
+      historyLength: sessionHistory.length,
+      persistent: !!this.sessionStore,
     });
 
-    // 检索相关记忆
-    log.info('🔍 开始检索记忆', { query: msg.content.slice(0, 100), sessionKey });
-    const relevantMemories = await this.retrieveMemories(msg.content);
-    if (relevantMemories.length > 0) {
-      log.info('🧠 检索到相关记忆', { 
-        count: relevantMemories.length,
-        searchMode: this.memoryStore?.getLastSearchMode?.() ?? 'unknown',
-        types: relevantMemories.map(m => m.type),
-        previews: relevantMemories.map(m => m.content.slice(0, 50) + '...')
+    // 意图识别（分阶段或旧版）
+    let intentResult: IntentResult | null = null;
+    let needMemory = true;
+    let memoryTypes: MemoryEntryType[] = [];
+
+    if (this.intentPipeline) {
+      // 使用新的分阶段意图识别
+      const hasImage = msg.media && msg.media.length > 0;
+      
+      // 构建简化的对话历史（最近 5 条，用于上下文重试）
+      const recentHistory: HistoryEntry[] = sessionHistory
+        .slice(-5)
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({
+          role: m.role as 'user' | 'assistant',
+          content: typeof m.content === 'string' ? m.content : '',
+        }));
+      
+      intentResult = await this.intentPipeline.analyze(msg.content, hasImage, recentHistory);
+      
+      needMemory = intentResult.preflight.needMemory;
+      memoryTypes = intentResult.preflight.memoryTypes as MemoryEntryType[];
+      
+      log.info('🎯 意图识别结果', {
+        needMemory,
+        memoryTypes,
+        modelType: intentResult.routing.type,
+        reason: intentResult.preflight.reason,
       });
+    }
+
+    // 根据意图决定是否检索记忆
+    let relevantMemories: MemoryEntry[] = [];
+    if (needMemory) {
+      log.info('🔍 开始检索记忆', { query: msg.content.slice(0, 100), memoryTypes });
+      relevantMemories = await this.retrieveMemories(msg.content, memoryTypes.length > 0 ? memoryTypes : undefined);
+      
+      if (relevantMemories.length > 0) {
+        // 统计各类型记忆数量
+        const typeStats = relevantMemories.reduce((acc, m) => {
+          acc[m.type] = (acc[m.type] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>);
+        
+        // 构建类型分布说明
+        const typeDistribution = Object.entries(typeStats)
+          .map(([type, count]) => {
+            const icons: Record<string, string> = {
+              preference: '❤️',
+              fact: '📋',
+              decision: '✅',
+              entity: '👤',
+              conversation: '💬',
+              summary: '📝',
+              other: '📦',
+            };
+            return `${icons[type] || '📄'} ${type}:${count}`;
+          })
+          .join(', ');
+        
+        log.info('🧠 检索到相关记忆', { 
+          count: relevantMemories.length,
+          searchMode: this.memoryStore?.getLastSearchMode?.() ?? 'unknown',
+          typeDistribution,
+          types: relevantMemories.map(m => m.type),
+          previews: relevantMemories.map(m => m.content.slice(0, 50) + '...')
+        });
+      } else {
+        log.info('🧠 未检索到相关记忆', {
+          searchMode: this.memoryStore?.getLastSearchMode?.() ?? 'unknown'
+        });
+      }
     } else {
-      log.info('🧠 未检索到相关记忆', {
-        searchMode: this.memoryStore?.getLastSearchMode?.() ?? 'unknown'
-      });
+      log.info('⏭️ 跳过记忆检索', { reason: intentResult?.preflight.reason ?? '意图识别决定' });
     }
 
     const messages = this.buildMessages(sessionHistory, msg, relevantMemories);
@@ -223,11 +350,14 @@ export class AgentExecutor {
     // 先执行主流程
     let result: AgentLoopResult;
     try {
-      result = await this.runAgentLoop(messages, msg);
+      result = await this.runAgentLoop(messages, msg, intentResult);
     } catch (error) {
       log.error('❌ 处理消息异常', { error: this.safeErrorMsg(error) });
       return this.createErrorResponse(msg);
     }
+
+    // 添加 assistant 响应到消息历史
+    messages.push({ role: 'assistant', content: result.content });
 
     // 更新历史记录
     this.updateHistory(sessionKey, messages.slice(1));
@@ -259,32 +389,59 @@ export class AgentExecutor {
       contentLength: result.content?.length ?? 0 
     });
 
+    // 生成带引用的响应（仅当有高置信度文档时）
+    const docMemories = relevantMemories.filter(m => 
+      m.type === 'document' && 
+      m.metadata.documentId &&
+      (m.metadata.score ?? 0) >= 0.7  // 只保留高置信度文档
+    );
+    
+    const citedResponse = docMemories.length > 0
+      ? this.generateCitedResponse(result.content || '处理完成', docMemories)
+      : { content: result.content || '处理完成', citations: [] };
+
     return {
       channel: msg.channel,
       chatId: msg.chatId,
-      content: result.content || '处理完成',
+      content: citedResponse.content,
       media: [],
-      metadata: msg.metadata,
+      metadata: {
+        ...msg.metadata,
+        citations: citedResponse.citations.length > 0 ? citedResponse.citations : undefined,
+      },
     };
   }
 
   /**
-   * 检索相关记忆
+   * 检索相关记忆（包含知识库）
+   * 
+   * 使用双层检索架构统一检索对话记忆和知识库内容
+   * @param query 查询文本
+   * @param memoryTypes 可选的记忆类型过滤
    */
-  private async retrieveMemories(query: string): Promise<MemoryEntry[]> {
-    if (!this.memoryStore) {
-      log.debug('记忆系统未启用，跳过检索');
-      return [];
+  private async retrieveMemories(query: string, memoryTypes?: MemoryEntryType[]): Promise<MemoryEntry[]> {
+    const results: MemoryEntry[] = [];
+
+    // 使用 MemoryStore 的双层检索（统一检索记忆和知识库）
+    if (this.memoryStore) {
+      try {
+        // 构建过滤条件
+        const filter = memoryTypes && memoryTypes.length > 0
+          ? { type: memoryTypes }
+          : undefined;
+
+        // 使用 dualLayerSearch 统一检索
+        const memories = await this.memoryStore.dualLayerSearch(query, 8, 200, filter);
+        results.push(...memories);
+        log.debug('记忆检索完成', { count: memories.length, filter });
+      } catch (error) {
+        log.warn('记忆检索失败', { error: this.safeErrorMsg(error) });
+      }
+    } else {
+      log.debug('MemoryStore 为空，跳过检索');
     }
 
-    try {
-      const results = await this.memoryStore.search(query, { limit: 5 });
-      // 详细日志由 MemoryStore.search() 打印，包含 source 信息
-      return results;
-    } catch (error) {
-      log.warn('记忆检索失败', { error: this.safeErrorMsg(error) });
-      return [];
-    }
+    return results;
   }
 
   /**
@@ -294,8 +451,9 @@ export class AgentExecutor {
 
   /**
    * 存储记忆
-   * 
+   *
    * 包含最多 2 次重试机制，存储失败时会向上传递错误状态。
+   * 使用分类器自动识别记忆类型。
    */
   private async storeMemory(msg: InboundMessage, result: AgentLoopResult, sessionKey: string): Promise<void> {
     if (!this.memoryStore) {
@@ -303,14 +461,25 @@ export class AgentExecutor {
       return;
     }
 
+    // 使用分类器自动分类用户输入
+    const classification = await classifyMemory(msg.content);
+    const memoryType = classification.type;
+
+    // 构建记忆内容
+    const content = `用户: ${msg.content}\n助手: ${result.content}`;
+
     const entry: MemoryEntry = {
       id: crypto.randomUUID(),
       sessionId: sessionKey,
-      type: 'conversation',
-      content: `用户: ${msg.content}\n助手: ${result.content}`,
+      type: memoryType,
+      content: content,
       metadata: {
         channel: msg.channel,
-        tags: ['conversation'],
+        classification: {
+          confidence: classification.confidence,
+          matchedPatterns: classification.matchedPatterns,
+        },
+        tags: [memoryType, 'conversation'],
       },
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -324,10 +493,12 @@ export class AgentExecutor {
       try {
         await this.memoryStore.store(entry);
         
-        log.info('💾 记忆已存储', { 
-          id: entry.id, 
+        log.info('💾 记忆已存储', {
+          id: entry.id,
           sessionKey,
           type: entry.type,
+          confidence: classification.confidence.toFixed(2),
+          matched: classification.matchedPatterns.length > 0 ? classification.matchedPatterns.slice(0, 2) : undefined,
           attempt: attempt > 1 ? attempt : undefined,
           userMsg: msg.content.slice(0, 50) + '...',
           assistantMsg: result.content?.slice(0, 50) + '...'
@@ -471,15 +642,54 @@ export class AgentExecutor {
   }
 
   /**
+   * 生成带引用的响应
+   * @param content 响应内容
+   * @param memories 检索结果
+   * @returns 带引用的响应
+   */
+  private generateCitedResponse(content: string, memories: MemoryEntry[]): CitedResponse {
+    if (!this.citationGenerator) {
+      return { content, citations: [] };
+    }
+
+    // 过滤出文档类型的记忆
+    const docMemories = memories.filter(m => m.type === 'document' && m.metadata.documentId);
+    
+    if (docMemories.length === 0) {
+      return { content, citations: [] };
+    }
+
+    const citations = this.citationGenerator.generateCitations(docMemories);
+    
+    if (citations.length === 0) {
+      return { content, citations: [] };
+    }
+
+    // 在响应末尾添加引用
+    const formattedCitations = this.citationGenerator.formatCitations(citations);
+    const citedContent = `${content}\n\n---\n${formattedCitations}`;
+
+    log.debug('📄 生成引用响应', {
+      citationCount: citations.length,
+      documents: citations.map(c => c.documentTitle ?? c.documentPath),
+    });
+
+    return {
+      content: citedContent,
+      citations,
+    };
+  }
+
+  /**
    * 运行 Agent 循环 (Function Calling 模式)
    */
-  private async runAgentLoop(messages: LLMMessage[], msg: InboundMessage): Promise<AgentLoopResult> {
+  private async runAgentLoop(messages: LLMMessage[], msg: InboundMessage, intentResult: IntentResult | null): Promise<AgentLoopResult> {
     let iteration = 0;
     const llmTools = this.getLLMToolDefinitions();
-    
+
     // 重置循环检测器
     this.loopDetector.reset();
-    
+
     // 缓存第一次迭代选择的模型
     let cachedRouteResult: RouteResult | null = null;
 
@@ -489,12 +699,27 @@ export class AgentExecutor {
       // 消息历史裁剪
       const truncatedMessages = this.messageManager.truncate(messages);
 
-      const routeResult: RouteResult = cachedRouteResult ?? await this.selectModel(truncatedMessages, msg.media);
+      // 使用意图识别结果选择模型
+      let routeResult: RouteResult;
+      if (cachedRouteResult) {
+        routeResult = cachedRouteResult;
+      } else if (intentResult) {
+        // 使用分阶段意图识别结果
+        routeResult = this.router.selectByTaskType(intentResult.routing.type);
+        log.info('🎯 任务类型识别', { type: intentResult.routing.type, reason: intentResult.routing.reason });
+      } else {
+        // 兼容模式：使用图片检测
+        const hasImage = msg.media && msg.media.length > 0;
+        const taskType = hasImage ? 'vision' : 'chat';
+        routeResult = this.router.selectByTaskType(taskType);
+        log.info('🎯 任务类型识别（兼容模式）', { type: taskType });
+      }
+
       // 第一次迭代后缓存模型选择结果
       if (iteration === 1) {
         cachedRouteResult = routeResult;
       }
-      
+
       // 工具调用使用专用模型（如果配置）
       const toolModel = this.config.toolModel ?? routeResult.model;
       const generationConfig = this.mergeGenerationConfig(routeResult.config);
@@ -720,16 +945,47 @@ export class AgentExecutor {
   }
 
   /**
-   * 更新会话历史
+   * 更新会话历史（增量追加）
    */
-  private updateHistory(sessionKey: string, history: LLMMessage[]): void {
-    const trimmed = this.messageManager.truncate(history);
-    this.conversationHistory.set(sessionKey, trimmed);
-    this.trimSessions();
+  private updateHistory(sessionKey: SessionKey, history: LLMMessage[]): void {
+    // 优先使用 SessionStore 持久化
+    if (this.sessionStore) {
+      // 获取当前会话的消息数量
+      const session = this.sessionStore.getOrCreate(sessionKey);
+      const existingCount = session.messages.length;
+
+      // 计算需要追加的新消息（基于现有数量计算新增数量）
+      const newMessages = history.slice(existingCount);
+
+      // 只追加新消息（保留 toolCallId 和 toolCalls 字段）
+      for (const msg of newMessages) {
+        this.sessionStore.appendMessage(sessionKey, {
+          role: msg.role as 'user' | 'assistant' | 'system',
+          content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+          timestamp: Date.now(),
+          // 保留工具调用相关字段
+          tool_call_id: msg.toolCallId,
+          tool_calls: msg.toolCalls,
+        });
+      }
+
+      // 如果超过最大消息数，裁剪旧消息（保留最近的）
+      const maxMessages = 500;
+      const totalMessages = existingCount + newMessages.length;
+      if (totalMessages > maxMessages) {
+        const deleteCount = totalMessages - maxMessages;
+        this.sessionStore.trimOldMessages(sessionKey, deleteCount);
+      }
+    } else {
+      // 回退到内存存储
+      const trimmed = this.messageManager.truncate(history);
+      this.conversationHistory.set(sessionKey, trimmed);
+      this.trimSessions();
+    }
   }
 
   /**
-   * 清理过期会话
+   * 清理过期会话（仅内存模式）
    */
   private trimSessions(): void {
     if (this.conversationHistory.size <= MAX_SESSIONS) return;
@@ -774,22 +1030,15 @@ export class AgentExecutor {
    * 清除会话历史
    */
   clearSession(channel: string, chatId: string): void {
-    const sessionKey = `${channel}:${chatId}`;
-    this.conversationHistory.delete(sessionKey);
+    const sessionKey = `${channel}:${chatId}` as SessionKey;
+    
+    if (this.sessionStore) {
+      this.sessionStore.delete(sessionKey);
+    } else {
+      this.conversationHistory.delete(sessionKey);
+    }
+    
     log.debug('会话已清除', { sessionKey });
-  }
-
-  /**
-   * 选择模型（仅第一次迭代调用）
-   */
-  private async selectModel(
-    messages: LLMMessage[],
-    media: string[] | undefined
-  ): Promise<RouteResult> {
-    const plainMessages = convertToPlainText(messages) as Array<{ role: string; content: string }>;
-    const taskType = await this.router.analyzeTaskType(plainMessages, media);
-    log.info('🎯 任务类型识别', { type: taskType.type, reason: taskType.reason });
-    return this.router.selectByTaskType(taskType.type);
   }
 
   /**
@@ -885,5 +1134,41 @@ export class AgentExecutor {
       return `\x1b[90m${cleanResult.slice(0, maxLength)}...\x1b[0m`;
     }
     return `\x1b[90m${cleanResult}\x1b[0m`;
+  }
+
+  /**
+   * 修复 tool 消息依赖关系
+   * 
+   * 确保每个 tool 消息都有对应的 assistant+tool_calls 消息
+   * 移除孤立的 tool 消息，避免 API 错误
+   */
+  private fixToolMessageDependencies(messages: LLMMessage[]): LLMMessage[] {
+    const result: LLMMessage[] = [];
+    
+    // 收集所有有效的 tool_call_id
+    const validToolCallIds = new Set<string>();
+    for (const msg of messages) {
+      if (msg.role === 'assistant' && msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          if (tc.id) validToolCallIds.add(tc.id);
+        }
+      }
+    }
+    
+    // 过滤消息，保留有效的 tool 消息
+    for (const msg of messages) {
+      if (msg.role === 'tool') {
+        // tool 消息必须有对应的 tool_call_id
+        if (msg.toolCallId && validToolCallIds.has(msg.toolCallId)) {
+          result.push(msg);
+        } else {
+          log.debug('丢弃孤立的 tool 消息', { toolCallId: msg.toolCallId });
+        }
+      } else {
+        result.push(msg);
+      }
+    }
+    
+    return result;
   }
 }

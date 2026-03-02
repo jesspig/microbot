@@ -22,6 +22,8 @@ export {
   OpenAIEmbedding,
   NoEmbedding,
   createEmbeddingService,
+  CitationGenerator,
+  createCitationGenerator,
 } from '@micro-agent/runtime';
 export type {
   MemoryEntry,
@@ -32,6 +34,26 @@ export type {
   MemoryFilter,
   EmbeddingService,
   SummarizerConfig,
+  // Citation types
+  Citation,
+  CitedResponse,
+  CitationGeneratorConfig,
+} from '@micro-agent/runtime';
+
+// Knowledge Base System
+export {
+  KnowledgeBaseManager,
+  getKnowledgeBase,
+  setKnowledgeBase,
+} from '@micro-agent/runtime';
+export type {
+  KnowledgeDocument,
+  KnowledgeChunk,
+  KnowledgeSearchResult,
+  KnowledgeBaseConfig,
+  KnowledgeDocType,
+  KnowledgeDocStatus,
+  KnowledgeDocMetadata,
 } from '@micro-agent/runtime';
 
 // ============ Storage - 存储层 ============
@@ -80,11 +102,12 @@ export type {
   GatewayConfig,
   ModelRouterConfig,
   RouteResult,
-  TaskTypeResult,
   TaskType,
   ModelInfo,
-  IntentPromptBuilder,
-  UserPromptBuilder,
+  PreflightResult,
+  RoutingResult,
+  IntentResult,
+  PreflightPromptBuilder,
 } from '@micro-agent/providers';
 
 // ============ Extension System - 扩展系统 ============

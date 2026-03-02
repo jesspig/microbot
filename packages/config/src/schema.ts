@@ -61,6 +61,26 @@ export const LoopDetectionConfigSchema = z.object({
   criticalThreshold: z.number().default(5),
 });
 
+/** 知识库配置 Schema */
+export const KnowledgeBaseConfigSchema = z.object({
+  /** 是否启用知识库 */
+  enabled: z.boolean().default(true),
+  /** 知识库基础路径 */
+  basePath: z.string().default('~/.micro-agent/knowledge'),
+  /** 文档分块大小 */
+  chunkSize: z.number().min(100).max(8000).default(1000),
+  /** 分块重叠大小 */
+  chunkOverlap: z.number().min(0).max(1000).default(200),
+  /** 最大搜索结果数 */
+  maxSearchResults: z.number().min(1).max(50).default(5),
+  /** 最小相似度阈值 */
+  minSimilarityScore: z.number().min(0).max(1).default(0.5),
+  /** 后台构建间隔（毫秒） */
+  buildInterval: z.number().min(1000).default(5000),
+  /** 嵌入模型 ID */
+  embedModel: z.string().optional(),
+});
+
 /** 执行器配置 Schema */
 export const ExecutorConfigSchema = z.object({
   /** 最大迭代次数 */
@@ -159,6 +179,8 @@ export const ConfigSchema = z.object({
   workspaces: z.array(z.union([z.string(), WorkspaceConfigSchema])).default([]),
   providers: ProviderConfigSchema.default({}),
   channels: ChannelConfigSchema.default({}),
+  /** 知识库配置 */
+  knowledgeBase: KnowledgeBaseConfigSchema.optional(),
 });
 
 /** 配置类型 */
@@ -169,6 +191,7 @@ export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
 export type ExecutorConfig = z.infer<typeof ExecutorConfigSchema>;
 export type LoopDetectionConfig = z.infer<typeof LoopDetectionConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
+export type KnowledgeBaseConfig = z.infer<typeof KnowledgeBaseConfigSchema>;
 
 /**
  * 解析模型ID列表为配置对象

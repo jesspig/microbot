@@ -1,15 +1,14 @@
 /**
- * 会话存储 - JSONL 格式
+ * 会话存储 - SQLite 格式
  * 
- * 会话以 JSONL 格式存储在 ~/.micro-agent/sessions/ 目录
- * 每个会话一个文件，格式：
- *   第一行：元数据 {"_type":"metadata",...}
- *   后续行：消息 {"role":"user","content":"...",...}
+ * 会话存储在 ~/.micro-agent/data/sessions.db
+ * 消息以 JSON 格式存储，类似 JSONL（每条消息一行 JSON）
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { resolve, join } from 'path';
 import { homedir } from 'os';
+import { Database } from 'bun:sqlite';
 import { getLogger } from '@logtape/logtape';
 import type { SessionKey, ContentPart } from '@micro-agent/types';
 import type { SessionMessage, SessionMetadata, Session, SessionStoreConfig } from './types';
@@ -17,20 +16,18 @@ import type { SessionMessage, SessionMetadata, Session, SessionStoreConfig } fro
 const log = getLogger(['session']);
 
 const DEFAULT_CONFIG: SessionStoreConfig = {
-  sessionsDir: '~/.micro-agent/sessions',
+  sessionsDir: '~/.micro-agent/data',
   maxMessages: 500,
   sessionTimeout: 30 * 60 * 1000, // 30 分钟
 };
 
-/** 安全文件名 */
-function safeFilename(key: string): string {
-  return key.replace(/[:/\\?%*:|"<>]/g, '_');
-}
+/** 数据库文件名 */
+const DB_FILE = 'sessions.db';
 
 /**
  * 会话存储
  * 
- * 基于 JSONL 的会话管理，支持：
+ * 基于 SQLite 的会话管理，支持：
  * - 会话超时自动创建新会话
  * - 消息追加写入
  * - 元数据跟踪
@@ -38,18 +35,56 @@ function safeFilename(key: string): string {
 export class SessionStore {
   private config: SessionStoreConfig;
   private cache = new Map<string, Session>();
+  private db?: Database;
 
   constructor(config?: Partial<SessionStoreConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.ensureDir();
+    this.initDatabase();
   }
 
-  /** 确保会话目录存在 */
-  private ensureDir(): void {
+  /** 初始化数据库 */
+  private initDatabase(): void {
     const dir = this.expandPath(this.config.sessionsDir);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
+
+    const dbPath = join(dir, DB_FILE);
+    this.db = new Database(dbPath);
+
+    // 创建会话元数据表
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        key TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_consolidated INTEGER DEFAULT 0
+      )
+    `);
+
+    // 创建消息表（JSON 格式存储，类似 JSONL）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_key TEXT NOT NULL,
+        seq_num INTEGER NOT NULL,
+        message_json TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        FOREIGN KEY (session_key) REFERENCES sessions(key) ON DELETE CASCADE
+      )
+    `);
+
+    // 创建索引
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_messages_session_key ON messages(session_key)
+    `);
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_messages_seq ON messages(session_key, seq_num)
+    `);
+
+    log.info('SessionStore 数据库已初始化', { path: dbPath });
   }
 
   /** 展开路径 */
@@ -58,12 +93,6 @@ export class SessionStore {
       return resolve(homedir(), path.slice(2));
     }
     return resolve(path);
-  }
-
-  /** 获取会话文件路径 */
-  private getSessionPath(key: string): string {
-    const safeKey = safeFilename(key);
-    return join(this.expandPath(this.config.sessionsDir), `${safeKey}.jsonl`);
   }
 
   /**
@@ -102,15 +131,25 @@ export class SessionStore {
 
   /** 创建新会话 */
   private createNewSession(key: SessionKey, channel: string, chatId: string): Session {
+    const now = Date.now();
     const session: Session = {
       key, channel, chatId,
       messages: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: new Date(now),
+      updatedAt: new Date(now),
       lastConsolidated: 0,
     };
-    this.save(session);
+
+    // 保存到数据库
+    if (this.db) {
+      this.db.run(`
+        INSERT OR REPLACE INTO sessions (key, channel, chat_id, created_at, updated_at, last_consolidated)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `, [key, channel, chatId, now, now, 0]);
+    }
+
     this.cache.set(key, session);
+    log.debug('创建新会话', { key, channel, chatId });
     return session;
   }
 
@@ -123,117 +162,88 @@ export class SessionStore {
 
   /** 加载会话 */
   private load(key: SessionKey): Session | null {
-    const path = this.getSessionPath(key);
-    if (!existsSync(path)) return null;
+    if (!this.db) return null;
 
     try {
-      const content = readFileSync(path, 'utf-8');
-      const lines = content.split('\n').filter(line => line.trim());
-      
-      let metadata: SessionMetadata | null = null;
-      const messages: SessionMessage[] = [];
+      // 加载元数据
+      const metaRow = this.db.query<{
+        channel: string;
+        chat_id: string;
+        created_at: number;
+        updated_at: number;
+        last_consolidated: number;
+      }, [string]>(`
+        SELECT channel, chat_id, created_at, updated_at, last_consolidated
+        FROM sessions WHERE key = ?
+      `).get(key);
 
-      for (const line of lines) {
-        const data = JSON.parse(line);
-        if (data._type === 'metadata') {
-          metadata = data as SessionMetadata;
-        } else {
-          messages.push(data as SessionMessage);
-        }
-      }
+      if (!metaRow) return null;
 
-      if (!metadata) {
-        const [channel, chatId] = key.split(':');
-        metadata = this.createDefaultMetadata(channel, chatId);
-      }
+      // 加载消息
+      const msgRows = this.db.query<{ message_json: string }, [string]>(`
+        SELECT message_json FROM messages
+        WHERE session_key = ?
+        ORDER BY seq_num ASC
+      `).all(key);
+
+      const messages: SessionMessage[] = msgRows.map(row => 
+        JSON.parse(row.message_json) as SessionMessage
+      );
 
       return {
         key,
-        channel: metadata.channel,
-        chatId: metadata.chatId,
+        channel: metaRow.channel,
+        chatId: metaRow.chat_id,
         messages,
-        createdAt: new Date(metadata.createdAt),
-        updatedAt: new Date(metadata.updatedAt),
-        lastConsolidated: metadata.lastConsolidated,
+        createdAt: new Date(metaRow.created_at),
+        updatedAt: new Date(metaRow.updated_at),
+        lastConsolidated: metaRow.last_consolidated,
       };
     } catch (e) {
-      log.error('加载会话失败: {key}', { key, error: e });
+      log.error('加载会话失败', { key, error: e });
       return null;
     }
   }
 
-  /** 创建默认元数据 */
-  private createDefaultMetadata(channel: string, chatId: string): SessionMetadata {
-    return {
-      _type: 'metadata',
-      channel, chatId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lastConsolidated: 0,
-    };
-  }
-
-  /** 保存会话 */
+  /** 保存会话元数据 */
   save(session: Session): void {
-    const path = this.getSessionPath(session.key);
-    const now = new Date();
+    if (!this.db) return;
 
-    const metadata: SessionMetadata = {
-      _type: 'metadata',
-      channel: session.channel,
-      chatId: session.chatId,
-      createdAt: session.createdAt.toISOString(),
-      updatedAt: now.toISOString(),
-      lastConsolidated: session.lastConsolidated,
-    };
+    const now = Date.now();
 
-    const lines: string[] = [JSON.stringify(metadata)];
-    for (const msg of session.messages) {
-      lines.push(JSON.stringify(msg));
-    }
+    this.db.run(`
+      INSERT OR REPLACE INTO sessions (key, channel, chat_id, created_at, updated_at, last_consolidated)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [
+      session.key,
+      session.channel,
+      session.chatId,
+      session.createdAt.getTime(),
+      now,
+      session.lastConsolidated,
+    ]);
 
-    writeFileSync(path, lines.join('\n') + '\n', 'utf-8');
-    session.updatedAt = now;
+    session.updatedAt = new Date(now);
     this.cache.set(session.key, session);
   }
 
   /** 追加消息到会话 */
   appendMessage(key: SessionKey, message: SessionMessage): void {
+    if (!this.db) return;
+
     const session = this.getOrCreate(key);
+    const seqNum = session.messages.length;
     session.messages.push(message);
     session.updatedAt = new Date();
 
-    const path = this.getSessionPath(key);
-    if (!existsSync(path)) {
-      this.save(session);
-      return;
-    }
+    // 插入消息
+    this.db.run(`
+      INSERT INTO messages (session_key, seq_num, message_json, timestamp)
+      VALUES (?, ?, ?, ?)
+    `, [key, seqNum, JSON.stringify(message), message.timestamp]);
 
-    appendFileSync(path, JSON.stringify(message) + '\n', 'utf-8');
-    this.updateMetadata(path, session);
-  }
-
-  /** 更新元数据行 */
-  private updateMetadata(path: string, session: Session): void {
-    const content = readFileSync(path, 'utf-8');
-    const lines = content.split('\n').filter(line => line.trim());
-    
-    if (lines.length === 0) {
-      this.save(session);
-      return;
-    }
-
-    const metadata: SessionMetadata = {
-      _type: 'metadata',
-      channel: session.channel,
-      chatId: session.chatId,
-      createdAt: session.createdAt.toISOString(),
-      updatedAt: new Date().toISOString(),
-      lastConsolidated: session.lastConsolidated,
-    };
-
-    lines[0] = JSON.stringify(metadata);
-    writeFileSync(path, lines.join('\n') + '\n', 'utf-8');
+    // 更新会话时间
+    this.save(session);
   }
 
   /** 添加消息 */
@@ -252,61 +262,156 @@ export class SessionStore {
     }));
   }
 
-  /** 清除会话缓存 */
-  invalidate(key: SessionKey): void {
-    this.cache.delete(key);
+  /** 清空会话消息 */
+  clear(key: SessionKey): void {
+    if (!this.db) return;
+
+    const session = this.getOrCreate(key);
+    session.messages = [];
+    session.updatedAt = new Date();
+    session.lastConsolidated = 0;
+
+    // 删除消息
+    this.db.run(`DELETE FROM messages WHERE session_key = ?`, [key]);
+    
+    // 更新元数据
+    this.save(session);
+  }
+
+  /**
+   * 裁剪旧消息（保留最近的 N 条）
+   * @param key 会话键
+   * @param deleteCount 要删除的旧消息数量
+   */
+  trimOldMessages(key: SessionKey, deleteCount: number): void {
+    if (!this.db || deleteCount <= 0) return;
+
+    // 删除最旧的 N 条消息
+    this.db.run(`
+      DELETE FROM messages 
+      WHERE session_key = ? 
+      AND id IN (
+        SELECT id FROM messages 
+        WHERE session_key = ? 
+        ORDER BY seq_num ASC 
+        LIMIT ?
+      )
+    `, [key, key, deleteCount]);
+
+    // 重新编号 seq_num（保持连续）
+    this.db.run(`
+      UPDATE messages SET seq_num = (
+        SELECT COUNT(*) FROM messages m2 
+        WHERE m2.session_key = messages.session_key 
+        AND m2.id <= messages.id
+      ) - 1
+      WHERE session_key = ?
+    `, [key]);
+
+    // 更新缓存
+    const session = this.cache.get(key);
+    if (session) {
+      session.messages = session.messages.slice(deleteCount);
+    }
+
+    log.debug('裁剪旧消息', { key, deleteCount });
   }
 
   /** 删除会话 */
   delete(key: SessionKey): void {
-    const path = this.getSessionPath(key);
-    if (existsSync(path)) {
-      unlinkSync(path);
-    }
+    if (!this.db) return;
+
+    // 删除消息（级联删除）
+    this.db.run(`DELETE FROM messages WHERE session_key = ?`, [key]);
+    
+    // 删除会话
+    this.db.run(`DELETE FROM sessions WHERE key = ?`, [key]);
+    
     this.cache.delete(key);
   }
 
-  /** 清空会话消息 */
-  clear(key: SessionKey): void {
-    const session = this.getOrCreate(key, true);
-    session.messages = [];
-    session.lastConsolidated = 0;
-    session.createdAt = new Date();
-    session.updatedAt = new Date();
-    this.save(session);
+  /** 获取所有会话键 */
+  getAllKeys(): SessionKey[] {
+    if (!this.db) return [];
+
+    const rows = this.db.query<{ key: string }, []>(`
+      SELECT key FROM sessions ORDER BY updated_at DESC
+    `).all();
+
+    return rows.map(r => r.key as SessionKey);
   }
 
-  /** 列出所有会话 */
-  list(): Array<{ key: string; createdAt: string; updatedAt: string; messageCount: number }> {
-    const dir = this.expandPath(this.config.sessionsDir);
-    if (!existsSync(dir)) return [];
+  /** 获取最近活跃的会话 */
+  getRecentSessions(limit = 10): Session[] {
+    if (!this.db) return [];
 
-    const sessions: Array<{ key: string; createdAt: string; updatedAt: string; messageCount: number }> = [];
+    const rows = this.db.query<{
+      key: string;
+      channel: string;
+      chat_id: string;
+      created_at: number;
+      updated_at: number;
+      last_consolidated: number;
+    }, [number]>(`
+      SELECT key, channel, chat_id, created_at, updated_at, last_consolidated
+      FROM sessions
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `).all(limit);
 
-    for (const file of readdirSync(dir)) {
-      if (!file.endsWith('.jsonl')) continue;
+    return rows.map(row => ({
+      key: row.key as SessionKey,
+      channel: row.channel,
+      chatId: row.chat_id,
+      messages: [], // 不加载消息，仅元数据
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+      lastConsolidated: row.last_consolidated,
+    }));
+  }
 
-      try {
-        const path = join(dir, file);
-        const content = readFileSync(path, 'utf-8');
-        const lines = content.split('\n').filter(line => line.trim());
-        
-        if (lines.length === 0) continue;
+  /** 更新整合计数 */
+  updateConsolidated(key: SessionKey, count: number): void {
+    if (!this.db) return;
 
-        const firstLine = JSON.parse(lines[0]);
-        if (firstLine._type !== 'metadata') continue;
+    this.db.run(`
+      UPDATE sessions SET last_consolidated = ? WHERE key = ?
+    `, [count, key]);
 
-        sessions.push({
-          key: file.replace('.jsonl', '').replace(/_/g, ':'),
-          createdAt: firstLine.createdAt,
-          updatedAt: firstLine.updatedAt,
-          messageCount: lines.length - 1,
-        });
-      } catch {
-        continue;
-      }
+    const session = this.cache.get(key);
+    if (session) {
+      session.lastConsolidated = count;
+    }
+  }
+
+  /** 清理过期会话 */
+  cleanup(maxAge = 7 * 24 * 60 * 60 * 1000): number {
+    if (!this.db) return 0;
+
+    const cutoff = Date.now() - maxAge;
+    
+    // 获取过期会话键
+    const rows = this.db.query<{ key: string }, [number]>(`
+      SELECT key FROM sessions WHERE updated_at < ?
+    `).all(cutoff);
+
+    // 删除过期会话
+    for (const row of rows) {
+      this.delete(row.key as SessionKey);
     }
 
-    return sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    if (rows.length > 0) {
+      log.info('清理过期会话', { count: rows.length });
+    }
+
+    return rows.length;
+  }
+
+  /** 关闭数据库 */
+  close(): void {
+    if (this.db) {
+      this.db.close();
+      this.db = undefined;
+    }
   }
 }

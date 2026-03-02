@@ -76,17 +76,18 @@
     "@logtape/logtape": "^2.0.4",
     "@logtape/pretty": "^2.0.4",
     "@micro-agent/sdk": "workspace:*",
-    "ai": "^6.0.103",
+    "ai": "^6.0.105",
     "gray-matter": "^4.0.3",
     "js-yaml": "^4.1.1",
     "marked": "^17.0.3",
     "mitt": "^3.0.1",
+    "pdf-parse": "1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.3.2",
+    "@types/node": "^25.3.3",
     "typescript": "^5.9.3"
   }
 }
