@@ -30,11 +30,11 @@ describe('Web Tools', () => {
     });
 
     it('should handle invalid URL', async () => {
-      const result = await registry.execute('web_fetch', { 
-        url: 'not-a-valid-url' 
+      const result = await registry.execute('web_fetch', {
+        url: 'not-a-valid-url'
       }, defaultCtx);
-      
-      expect(result).toContain('获取失败');
+
+      expect(result).toContain('错误: 无效的 URL 格式');
     });
   });
 });
