@@ -45,6 +45,7 @@ export {
   type RoutingResult,
   type IntentResult,
   type PreflightPromptBuilder,
+  type HistoryEntry,
 } from './prompts';
 
 // 意图识别管道

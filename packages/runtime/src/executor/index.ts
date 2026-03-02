@@ -6,7 +6,7 @@
  */
 
 import type { InboundMessage, OutboundMessage, ToolContext, SessionKey } from '@micro-agent/types';
-import type { LLMGateway, LLMMessage, GenerationConfig, MessageContent, LLMToolDefinition, IntentPipeline, IntentResult, PreflightPromptBuilder } from '@micro-agent/providers';
+import type { LLMGateway, LLMMessage, GenerationConfig, MessageContent, LLMToolDefinition, IntentPipeline, IntentResult, PreflightPromptBuilder, HistoryEntry } from '@micro-agent/providers';
 import type { MessageBus } from '../bus/queue';
 import type { ModelConfig, LoopDetectionConfig } from '@micro-agent/config';
 import type { AgentLoopResult, MemoryEntry, Citation, CitedResponse, MemoryEntryType } from '../types';
@@ -277,7 +277,17 @@ export class AgentExecutor {
     if (this.intentPipeline) {
       // 使用新的分阶段意图识别
       const hasImage = msg.media && msg.media.length > 0;
-      intentResult = await this.intentPipeline.analyze(msg.content, hasImage);
+      
+      // 构建简化的对话历史（最近 5 条，用于上下文重试）
+      const recentHistory: HistoryEntry[] = sessionHistory
+        .slice(-5)
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({
+          role: m.role as 'user' | 'assistant',
+          content: typeof m.content === 'string' ? m.content : '',
+        }));
+      
+      intentResult = await this.intentPipeline.analyze(msg.content, hasImage, recentHistory);
       
       needMemory = intentResult.preflight.needMemory;
       memoryTypes = intentResult.preflight.memoryTypes as MemoryEntryType[];

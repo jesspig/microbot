@@ -8,6 +8,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { HistoryEntry } from '@micro-agent/providers';
 
 // 缓存 markdown 模板
 const templateCache = new Map<string, string>();
@@ -28,9 +29,35 @@ function loadTemplate(name: string): string {
 
 /**
  * 构建预处理阶段提示词
+ * @param content 用户消息内容
+ * @param hasImage 是否包含图片
+ * @param history 对话历史（可选，用于上下文重试）
  */
-export function buildPreflightPrompt(content: string, hasImage: boolean): string {
+export function buildPreflightPrompt(
+  content: string,
+  hasImage: boolean,
+  history?: HistoryEntry[],
+): string {
   const template = loadTemplate('preflight');
+
+  // 如果有历史记录，注入上下文
+  if (history && history.length > 0) {
+    const historyText = history
+      .map(h => `[${h.role === 'user' ? '用户' : '助手'}]: ${h.content}`)
+      .join('\n');
+
+    return `${template}
+
+---
+
+## 当前消息
+${hasImage ? '（包含图片）' : ''}${content}
+
+## 对话历史
+${historyText}`;
+  }
+
+  // 无历史记录，简单模式
   return `${template}
 
 ---

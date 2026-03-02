@@ -4,10 +4,12 @@
  * 分阶段意图识别：
  * 1. 预处理阶段：决定是否检索记忆
  * 2. 模型选择阶段：决定使用哪个模型
+ *
+ * 支持上下文重试：当意图识别需要上下文时，注入对话历史重新识别
  */
 
 import type { LLMProvider, LLMMessage } from './base';
-import type { PreflightResult, RoutingResult, IntentResult, PreflightPromptBuilder } from './prompts';
+import type { PreflightResult, RoutingResult, IntentResult, PreflightPromptBuilder, HistoryEntry } from './prompts';
 import { getLogger } from '@logtape/logtape';
 
 const log = getLogger(['intent-pipeline']);
@@ -42,12 +44,15 @@ export class IntentPipeline {
 
   /**
    * 执行完整的意图识别管道
+   * @param content 用户消息内容
+   * @param hasImage 是否包含图片
+   * @param history 对话历史（可选，用于上下文重试）
    */
-  async analyze(content: string, hasImage: boolean): Promise<IntentResult> {
+  async analyze(content: string, hasImage: boolean, history?: HistoryEntry[]): Promise<IntentResult> {
     const startTime = Date.now();
 
-    // 阶段 1: 预处理
-    const preflight = await this.runPreflight(content, hasImage);
+    // 阶段 1: 预处理（支持上下文重试）
+    const preflight = await this.runPreflightWithRetry(content, hasImage, history);
 
     // 阶段 2: 模型选择
     const routing = await this.runRouting(content, hasImage);
@@ -64,9 +69,40 @@ export class IntentPipeline {
   }
 
   /**
+   * 预处理（带上下文重试）
+   *
+   * 流程：
+   * 1. 第一次识别：仅使用当前消息
+   * 2. 如果 needContext=true 且有历史，注入上下文重新识别
+   */
+  private async runPreflightWithRetry(
+    content: string,
+    hasImage: boolean,
+    history?: HistoryEntry[],
+  ): Promise<PreflightResult> {
+    // 第一次识别
+    let result = await this.runPreflight(content, hasImage);
+
+    // 如果需要上下文且有历史，进行第二次识别
+    if (result.needContext && history && history.length > 0) {
+      log.debug('[IntentPipeline] 需要上下文，注入历史重新识别', {
+        historyLength: history.length,
+      });
+
+      result = await this.runPreflight(content, hasImage, history);
+    }
+
+    return result;
+  }
+
+  /**
    * 阶段 1: 预处理 - 决定是否检索记忆
    */
-  private async runPreflight(content: string, hasImage: boolean): Promise<PreflightResult> {
+  private async runPreflight(
+    content: string,
+    hasImage: boolean,
+    history?: HistoryEntry[],
+  ): Promise<PreflightResult> {
     // 有图片时跳过记忆检索
     if (hasImage) {
       log.debug('[IntentPipeline] 预处理: 有图片，跳过记忆检索');
@@ -78,7 +114,7 @@ export class IntentPipeline {
     }
 
     const messages: LLMMessage[] = [
-      { role: 'user', content: this.buildPreflightPrompt(content, hasImage) },
+      { role: 'user', content: this.buildPreflightPrompt(content, hasImage, history) },
     ];
 
     try {
@@ -148,12 +184,14 @@ export class IntentPipeline {
         needMemory?: boolean;
         memoryTypes?: string[];
         reason?: string;
+        needContext?: boolean;
       };
 
       return {
         needMemory: parsed.needMemory ?? false,
         memoryTypes: (parsed.memoryTypes ?? []) as PreflightResult['memoryTypes'],
         reason: parsed.reason ?? '未提供理由',
+        needContext: parsed.needContext,
       };
     } catch {
       return { needMemory: false, memoryTypes: [], reason: 'JSON 解析失败' };

@@ -29,10 +29,22 @@ export interface PreflightResult {
   memoryTypes: MemoryTypeString[];
   /** 预处理理由 */
   reason: string;
+  /** 是否需要上下文来进一步判断（用于重试机制） */
+  needContext?: boolean;
+}
+
+/** 对话历史条目（简化版，用于意图识别） */
+export interface HistoryEntry {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 /** 预处理提示词构建函数 */
-export type PreflightPromptBuilder = (content: string, hasImage: boolean) => string;
+export type PreflightPromptBuilder = (
+  content: string,
+  hasImage: boolean,
+  history?: HistoryEntry[],
+) => string;
 
 // ============================================================================
 // 阶段 2: 模型选择
