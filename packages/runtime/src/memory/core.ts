@@ -7,7 +7,7 @@
 import * as lancedb from '@lancedb/lancedb';
 import { mkdir, writeFile, readFile, readdir, unlink, stat, appendFile } from 'fs/promises';
 import { join } from 'path';
-import type { MemoryEntry, MemoryStats, CleanupResult } from '../types';
+import type { MemoryEntry, MemoryStats, CleanupResult } from './types';
 import type { MemoryStoreConfig, EmbeddingService } from './types';
 import { getLogger } from '@logtape/logtape';
 
@@ -37,6 +37,14 @@ export class MemoryStoreCore {
   protected initialized = false;
 
   constructor(config: MemoryStoreConfig) {
+    // 失败快速：参数校验
+    if (!config) {
+      throw new Error('MemoryStoreConfig is required');
+    }
+    if (!config.storagePath || typeof config.storagePath !== 'string') {
+      throw new Error('MemoryStoreConfig.storagePath is required and must be a string');
+    }
+    
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 

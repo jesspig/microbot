@@ -42,6 +42,20 @@ export interface LoadConfigOptions {
  * 加载配置
  */
 export function loadConfig(options: LoadConfigOptions = {}): Config {
+  // 失败快速：参数校验
+  if (options !== undefined && typeof options !== 'object') {
+    throw new Error('LoadConfigOptions must be an object');
+  }
+  if (options.configPath !== undefined && typeof options.configPath !== 'string') {
+    throw new Error('LoadConfigOptions.configPath must be a string');
+  }
+  if (options.workspace !== undefined && typeof options.workspace !== 'string') {
+    throw new Error('LoadConfigOptions.workspace must be a string');
+  }
+  if (options.currentDir !== undefined && typeof options.currentDir !== 'string') {
+    throw new Error('LoadConfigOptions.currentDir must be a string');
+  }
+
   const { configPath, workspace, currentDir } = options;
 
   // 指定配置文件路径

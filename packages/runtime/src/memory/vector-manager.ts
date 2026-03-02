@@ -125,7 +125,7 @@ export class VectorManager {
     const existingVectorColumns: { name: string; dimension: number }[] = [];
     for (const field of schema.fields) {
       if (field.name.startsWith('vector_')) {
-        const dim = await this.getVectorDimensionWithoutInit(field.name);
+        const dim = await this.getVectorDimensionWithoutInit(field.name as VectorColumnName);
         if (dim > 0) {
           existingVectorColumns.push({ name: field.name, dimension: dim });
         }
@@ -234,7 +234,7 @@ export class VectorManager {
     const existingVectorColumns: { name: string; dimension: number }[] = [];
     for (const field of schema.fields) {
       if (field.name.startsWith('vector_') && field.name !== targetColumn) {
-        const dim = await this.getVectorDimensionWithoutInit(field.name);
+        const dim = await this.getVectorDimensionWithoutInit(field.name as VectorColumnName);
         if (dim > 0) {
           existingVectorColumns.push({ name: field.name, dimension: dim });
         }
@@ -313,7 +313,7 @@ export class VectorManager {
   /**
    * 获取向量列的维度（不触发初始化）
    */
-  async getVectorDimensionWithoutInit(column: string): Promise<number> {
+  async getVectorDimensionWithoutInit(column: VectorColumnName): Promise<number> {
     const table = this.core.dbTable;
     if (!table) return 0;
 
@@ -432,7 +432,7 @@ export class VectorManager {
   /**
    * 获取向量列的维度
    */
-  async getVectorDimension(column: string): Promise<number> {
+  async getVectorDimension(column: VectorColumnName): Promise<number> {
     return this.getVectorDimensionWithoutInit(column);
   }
 
@@ -586,11 +586,11 @@ export class VectorManager {
   }
 
   // 私有辅助方法
-  private getModelVectorColumn(modelId: string): string {
+  private getModelVectorColumn(modelId: string): VectorColumnName {
     return VectorManager.modelIdToVectorColumn(modelId);
   }
 
-  private getVectorColumnModelId(column: string): string {
+  private getVectorColumnModelId(column: VectorColumnName): string {
     return VectorManager.vectorColumnToModelId(column);
   }
 }

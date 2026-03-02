@@ -121,7 +121,7 @@ export class MemoryStore extends MemoryStoreCore {
   /**
    * 辅助方法：获取模型向量列名
    */
-  private getModelVectorColumn(modelId: string): string {
+  protected getModelVectorColumn(modelId: string): string {
     const [provider, ...modelParts] = modelId.split('/');
     const model = modelParts.join('/');
     const safeModel = model
@@ -161,6 +161,18 @@ export class MemoryStore extends MemoryStoreCore {
     modelId?: string
   ): Promise<MemoryEntry[]> {
     return this.searchManager.dualLayerSearch(query, limit, candidates, filter, modelId);
+  }
+
+  /**
+   * 查询记忆（用于迁移等内部操作）
+   */
+  async query(options: {
+    filter?: MemoryFilter;
+    limit: number;
+    orderBy?: { field: string; direction: 'asc' | 'desc' };
+  }): Promise<MemoryEntry[]> {
+    // 使用空字符串查询，通过 filter 和 limit 过滤结果
+    return this.searchManager.search('', { limit: options.limit, filter: options.filter });
   }
 
   // ============================================================================
@@ -224,7 +236,7 @@ export class MemoryStore extends MemoryStoreCore {
   /**
    * 获取向量列的维度
    */
-  async getVectorDimension(column: string): Promise<number> {
+  async getVectorDimension(column: VectorColumnName): Promise<number> {
     return this.vectorManager.getVectorDimension(column);
   }
 

@@ -3,7 +3,7 @@
  */
 
 import type { MemoryEntry, MemoryFilter } from '../../types';
-import type { MemoryStoreConfig } from '../types';
+import type { MemoryStoreConfig, VectorColumnName } from '../types';
 import type { MemoryStoreCore } from '../core';
 import { getLogger } from '@logtape/logtape';
 
@@ -40,10 +40,10 @@ export class VectorSearcher {
     const targetModel = modelId ?? this.config.embedModel;
     const vectorColumn = targetModel
       ? this.core['getModelVectorColumn'](targetModel)
-      : 'vector';
+      : 'vector' as VectorColumnName;
 
     // 检查表的向量维度
-    const tableVectorDimension = await this.getVectorDimension(vectorColumn);
+    const tableVectorDimension = await this.getVectorDimension(vectorColumn as VectorColumnName);
     if (tableVectorDimension === 0) {
       log.info('🔍 [MemoryStore] 表无向量数据，跳过向量检索', { vectorColumn, targetModel });
       return [];
@@ -168,7 +168,7 @@ export class VectorSearcher {
   /**
    * 获取向量列的维度
    */
-  private async getVectorDimension(column: string): Promise<number> {
+  private async getVectorDimension(column: VectorColumnName): Promise<number> {
     const table = this.core.dbTable;
     if (!table) return 0;
 

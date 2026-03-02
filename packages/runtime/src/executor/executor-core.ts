@@ -15,10 +15,12 @@ import type {
   HistoryEntry,
 } from '@micro-agent/types';
 
-import { ModelRouter, type RouteResult, type LLMGateway, type IntentPipeline } from '@micro-agent/providers';
+import { ModelRouter, IntentPipeline, type RouteResult, type LLMGateway, type IntentPipeline as IIntentPipeline } from '@micro-agent/providers';
+import type { SessionStore } from '@micro-agent/storage';
 import type { MessageBus } from '../bus/queue';
 import type { ModelConfig } from '@micro-agent/config';
-import type { AgentLoopResult, MemoryEntry, CitedResponse } from '../types';
+import type { AgentLoopResult, MemoryEntry, CitedResponse, MemoryEntryType } from '../types';
+import type { MemoryStore, ConversationSummarizer } from '../memory';
 import { getLogger } from '@logtape/logtape';
 import { CitationGenerator } from '../citation';
 
@@ -37,10 +39,11 @@ const log = getLogger(['executor']);
  * 执行器依赖对象
  */
 interface ExecutorDependencies {
-  memoryStore?: unknown;
-  summarizer?: unknown;
+  intentPipeline?: IntentPipeline;
+  memoryStore?: MemoryStore;
+  summarizer?: ConversationSummarizer;
   knowledgeBaseManager?: unknown;
-  sessionStore?: unknown;
+  sessionStore?: SessionStore;
 }
 
 /**
@@ -49,7 +52,7 @@ interface ExecutorDependencies {
 export class AgentExecutorCore {
   private running = false;
   private router: ModelRouter;
-  private intentPipeline?: IntentPipeline;
+  private intentPipeline?: IIntentPipeline;
   private toolExecutor: ToolExecutor;
   private loopHandler: LoopHandler;
   private memoryManager: MemoryManager;
@@ -73,24 +76,27 @@ export class AgentExecutorCore {
     });
     this.router.setProvider(gateway);
 
-    // 初始化意图识别管道
-    if (config.buildPreflightPrompt && config.buildRoutingPrompt) {
-      const { IntentPipeline } = require('@micro-agent/providers');
+    // 初始化意图识别管道（优先使用依赖注入，其次尝试自动创建）
+    if (deps?.intentPipeline) {
+      this.intentPipeline = deps.intentPipeline;
+      log.info('分阶段意图识别已启用（依赖注入）');
+    } else if (config.buildPreflightPrompt && config.buildRoutingPrompt) {
+      // 兼容旧版本：自动创建 IntentPipeline（不推荐，应通过依赖注入提供）
       this.intentPipeline = new IntentPipeline({
         provider: gateway,
         intentModel: config.intentModel ?? config.chatModel ?? '',
         buildPreflightPrompt: config.buildPreflightPrompt,
         buildRoutingPrompt: config.buildRoutingPrompt,
       });
-      log.info('分阶段意图识别已启用');
+      log.info('分阶段意图识别已启用（自动创建 - 建议通过依赖注入提供）');
     }
 
     // 初始化各个子模块
     this.toolExecutor = new ToolExecutor(tools);
     this.loopHandler = new LoopHandler(config.loopDetection);
     this.memoryManager = new MemoryManager(
-      deps?.memoryStore as any,
-      deps?.summarizer as any,
+      deps?.memoryStore,
+      deps?.summarizer,
       {
         memoryEnabled: config.memoryEnabled,
         summarizeThreshold: config.summarizeThreshold,
@@ -100,7 +106,7 @@ export class AgentExecutorCore {
       maxHistoryMessages: config.maxHistoryMessages,
     });
     this.contextManager = new ContextManager(
-      deps?.sessionStore as any,
+      deps?.sessionStore,
       { maxHistoryMessages: config.maxHistoryMessages }
     );
 
@@ -199,7 +205,7 @@ export class AgentExecutorCore {
     // 意图识别（分阶段或旧版）
     let intentResult: IntentResult | null = null;
     let needMemory = true;
-    let memoryTypes: unknown[] = [];
+    let memoryTypes: string[] = [];
 
     if (this.intentPipeline) {
       // 使用新的分阶段意图识别
@@ -233,7 +239,7 @@ export class AgentExecutorCore {
     let relevantMemories: MemoryEntry[] = [];
     if (needMemory) {
       log.info('🔍 开始检索记忆', { query: msg.content.slice(0, 100), memoryTypes });
-      relevantMemories = await this.memoryManager.retrieveMemories(msg.content, memoryTypes.length > 0 ? memoryTypes as any : undefined);
+      relevantMemories = await this.memoryManager.retrieveMemories(msg.content, memoryTypes.length > 0 ? memoryTypes as MemoryEntryType[] : undefined);
       
       if (relevantMemories.length > 0) {
         // 统计各类型记忆数量

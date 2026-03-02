@@ -141,7 +141,7 @@ export class DocumentManager {
     const table = this.core.dbTable;
     if (!table) return {};
 
-    const stats: Record<string, number> = [];
+    const stats: Record<string, number> = {};
     
     try {
       const records = await table.query().toArray();

@@ -18,6 +18,7 @@ import {
   AgentExecutor,
 } from '@micro-agent/sdk';
 import { ChannelGatewayImpl } from '@micro-agent/runtime';
+import type { MemoryStore, ConversationSummarizer, KnowledgeBaseManager } from '@micro-agent/runtime';
 import {
   ReadFileTool,
   WriteFileTool,
@@ -86,9 +87,9 @@ class AppImpl implements App {
   private executor: AgentExecutor | null = null;
   private channelGateway: ChannelGatewayImpl | null = null;
   private skillsLoader: SkillsLoader | null = null;
-  private memoryStore: any = null;
-  private summarizer: any = null;
-  private knowledgeBaseManager: any = null;
+  private memoryStore: MemoryStore | null = null;
+  private summarizer: ConversationSummarizer | null = null;
+  private knowledgeBaseManager: KnowledgeBaseManager | null = null;
 
   constructor(config: Config, workspace: string) {
     this.config = config;
@@ -224,9 +225,9 @@ class AppImpl implements App {
         knowledgeLimit: 3,
       },
       {
-        memoryStore: this.memoryStore,
-        summarizer: this.summarizer,
-        knowledgeBaseManager: this.knowledgeBaseManager,
+        memoryStore: this.memoryStore ?? undefined,
+        summarizer: this.summarizer ?? undefined,
+        knowledgeBaseManager: this.knowledgeBaseManager ?? undefined,
         sessionStore: this.sessionStore,
       }
     );

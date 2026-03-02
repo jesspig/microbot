@@ -8,6 +8,7 @@ import { readFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
+import type { SkillsLoader } from '@micro-agent/sdk';
 
 /** 用户级配置目录 */
 const USER_CONFIG_DIR = resolve(homedir(), '.micro-agent');
@@ -114,7 +115,7 @@ export function loadSystemPromptFromUserConfig(workspace: string): string {
  */
 export function loadSystemPrompt(
   workspace: string,
-  skillsLoader: any
+  skillsLoader: SkillsLoader | null
 ): string {
   const basePrompt = loadSystemPromptFromUserConfig(workspace);
   const parts: string[] = [];
@@ -140,7 +141,7 @@ function buildPathExplanation(workspace: string): string {
 
 | 路径 | 用途 | 说明 |
 |------|------|------|
-| \`${workspace}\` | 工作区 | 用户项目文件，主要工作目录 |
+| \`\${workspace}\` | 工作区 | 用户项目文件，主要工作目录 |
 | \`~/.micro-agent/workspace\` | 默认工作区 | 未指定时的默认工作区 |
 | \`~/.micro-agent/knowledge/\` | 知识库 | 上传的文档存储位置 |
 | \`~/.micro-agent/SOUL.md\` | 身份定义 | 定义你的角色和人格 |
@@ -156,13 +157,19 @@ function buildPathExplanation(workspace: string): string {
 
 ## 知识库查询
 
-用户询问知识库内容时，系统会自动检索相关文档并注入上下文，无需手动读取文件。`;
+用户询问知识库内容时，系统会自动检索相关文档并注入上下文，**无需手动读取文件**。
+
+### 重要：禁止使用 web_fetch 读取本地文件
+
+- **禁止**：使用 \`web_fetch\` 工具读取本地 PDF、文档
+- **正确**：如果需要了解文档详细内容，请从检索到的记忆上下文中获取
+- 如果记忆中没有相关内容，请告知用户"知识库中没有找到相关内容"或建议用户上传文档`;
 }
 
 /**
  * 添加 Always 技能内容
  */
-function appendAlwaysSkills(parts: string[], skillsLoader: any): void {
+function appendAlwaysSkills(parts: string[], skillsLoader: SkillsLoader | null): void {
   if (!skillsLoader || skillsLoader.count === 0) return;
 
   const alwaysContent = skillsLoader.buildAlwaysSkillsContent();
@@ -174,7 +181,7 @@ function appendAlwaysSkills(parts: string[], skillsLoader: any): void {
 /**
  * 添加技能摘要内容
  */
-function appendSkillsSummary(parts: string[], skillsLoader: any): void {
+function appendSkillsSummary(parts: string[], skillsLoader: SkillsLoader | null): void {
   if (!skillsLoader || skillsLoader.count === 0) return;
 
   const skillsSummary = skillsLoader.buildSkillsSummary();
@@ -188,6 +195,6 @@ function appendSkillsSummary(parts: string[], skillsLoader: any): void {
 2. 读取 location 路径下的 SKILL.md 文件
 3. 按照 SKILL.md 中的指导执行操作，而不是直接写代码
 
-${skillsSummary}`);
+\${skillsSummary}`);
   }
 }
