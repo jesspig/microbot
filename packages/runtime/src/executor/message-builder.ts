@@ -78,23 +78,93 @@ export class MessageBuilder {
    * 格式化记忆上下文
    */
   private formatMemoryContext(memories: MemoryEntry[]): string {
-    const lines = ['<relevant-memories>', '以下是相关的历史记忆，仅供参考：'];
+    // 区分文档记忆和其他记忆
+    const documentMemories = memories.filter(m => m.type === 'document' || m.metadata.documentTitle);
+    const otherMemories = memories.filter(m => m.type !== 'document' && !m.metadata.documentTitle);
     
-    for (const m of memories) {
-      const timeLabel = m.type === 'summary' ? '[摘要]' : '[对话]';
-      const preview = m.content.length > 200 ? m.content.slice(0, 200) + '...' : m.content;
-      lines.push(`- ${timeLabel} ${preview}`);
+    const lines: string[] = [];
+    
+    // 文档记忆（知识库）- 需要引用
+    if (documentMemories.length > 0) {
+      lines.push('<knowledge-documents>');
+      lines.push('以下是知识库中检索到的相关文档内容。**回答时必须标注来源**，格式：`(来源: 文档名称, 页码X)`');
+      lines.push('');
+      
+      for (let i = 0; i < documentMemories.length; i++) {
+        const m = documentMemories[i];
+        const sourceInfo = this.buildDocumentSourceInfo(m);
+        const preview = m.content.length > 500 ? m.content.slice(0, 500) + '...' : m.content;
+        
+        lines.push(`---`);
+        lines.push(`【文档 ${i + 1}】${sourceInfo}`);
+        lines.push(preview);
+      }
+      
+      lines.push('');
+      lines.push('</knowledge-documents>');
     }
     
-    lines.push('</relevant-memories>');
+    // 其他记忆（对话历史、偏好等）- 不需要引用
+    if (otherMemories.length > 0) {
+      lines.push('<relevant-memories>');
+      lines.push('以下是相关的历史记忆：');
+      lines.push('');
+      
+      for (const m of otherMemories) {
+        const typeLabel = this.getMemoryTypeLabel(m.type);
+        const preview = m.content.length > 200 ? m.content.slice(0, 200) + '...' : m.content;
+        lines.push(`- [${typeLabel}] ${preview}`);
+      }
+      
+      lines.push('</relevant-memories>');
+    }
     
     log.debug('📝 格式化记忆上下文', { 
-      memoryCount: memories.length,
-      types: memories.map(m => m.type),
+      documentCount: documentMemories.length,
+      memoryCount: otherMemories.length,
       totalLength: lines.join('\n').length
     });
     
     return lines.join('\n');
+  }
+
+  /**
+   * 构建文档来源信息
+   */
+  private buildDocumentSourceInfo(memory: MemoryEntry): string {
+    const { metadata } = memory;
+    const parts: string[] = [];
+    
+    if (metadata.documentTitle) {
+      parts.push(`文档: ${metadata.documentTitle}`);
+    }
+    if (metadata.pageNumber) {
+      parts.push(`页码: ${metadata.pageNumber}`);
+    }
+    if (metadata.section) {
+      parts.push(`章节: ${metadata.section}`);
+    }
+    if (metadata.score) {
+      parts.push(`相似度: ${(metadata.score * 100).toFixed(1)}%`);
+    }
+    
+    return parts.length > 0 ? `(${parts.join(' | ')})` : '';
+  }
+
+  /**
+   * 获取记忆类型标签
+   */
+  private getMemoryTypeLabel(type: string): string {
+    const labels: Record<string, string> = {
+      fact: '事实',
+      preference: '偏好',
+      decision: '决策',
+      entity: '实体',
+      conversation: '对话',
+      summary: '摘要',
+      other: '其他',
+    };
+    return labels[type] || type;
   }
 
   /**

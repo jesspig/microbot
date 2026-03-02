@@ -221,6 +221,11 @@ export function createDocumentScanner(
      * 提取文档标题
      */
     extractTitle(content: string, filename: string): string {
+      // PDF 文件直接使用文件名（PDF 内容不适合提取标题）
+      if (extname(filename).toLowerCase() === '.pdf') {
+        return filename.replace(extname(filename), '');
+      }
+
       // 尝试从 Markdown 标题提取
       const titleMatch = content.match(/^#\s+(.+)$/m);
       if (titleMatch) {
