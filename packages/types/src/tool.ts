@@ -51,6 +51,9 @@ export interface ResourceContentPart {
 /** 内容部分联合类型 */
 export type ContentPart = TextContentPart | ImageContentPart | ImageUrlContentPart | ResourceContentPart;
 
+/** Provider 内容部分（ContentPart 别名，兼容旧代码） */
+export type ProviderContentPart = ContentPart;
+
 /** 工具结果（MCP 兼容） */
 export interface ToolResult {
   /** 内容部分数组 */

@@ -5,7 +5,7 @@
  * 不依赖原生的 function calling 能力。
  */
 
-import type { LLMGateway, LLMMessage, GenerationConfig } from '@micro-agent/providers';
+import type { LLMMessage, GenerationConfig, LLMProvider } from '@micro-agent/types';
 import { parseReActResponse, type ReActResponse, type ReActAction } from './react-types';
 import { getLogger } from '@logtape/logtape';
 
@@ -25,7 +25,7 @@ export interface ReActTool {
  */
 export interface ReActAgentConfig {
   /** LLM Gateway */
-  gateway: LLMGateway;
+  gateway: LLMProvider;
   /** 默认模型 */
   model: string;
   /** 系统提示词 */

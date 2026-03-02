@@ -135,10 +135,13 @@ async function extractDocumentContent(filePath: string, fileType: KnowledgeDocTy
   // PDF 文档
   if (fileType === 'pdf' || ext === '.pdf') {
     try {
-      // @ts-ignore - 可选依赖，运行时动态加载
-      const pdfParse = await import('pdf-parse');
+      // 可选依赖，运行时动态加载
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pdfParse: any = await import('pdf-parse');
       const dataBuffer = await readFile(filePath);
-      const data = await pdfParse.default(dataBuffer);
+      // 支持 ESM 和 CommonJS 两种导出格式
+      const parse = pdfParse.default || pdfParse;
+      const data = await parse(dataBuffer);
       return `[PDF 文档: ${basename(filePath)}]\n\n${data.text}`;
     } catch (error) {
       return `[PDF 文档: ${basename(filePath)}]\n\n注意: PDF 解析失败。\n错误: ${error instanceof Error ? error.message : String(error)}`;
@@ -286,7 +289,7 @@ export class KnowledgeBaseManager {
     this.stopBackgroundBuild();
     this.closeDatabase();
     this.isInitialized = false;
-    console.log('[KnowledgeBase] 知识库已关闭');
+    log.info('知识库已关闭');
   }
 
   // ============================================================================
@@ -330,9 +333,9 @@ export class KnowledgeBaseManager {
         }
       }
 
-      console.log(`[KnowledgeBase] 文档扫描完成，共 ${this.documents.size} 个文档`);
+      log.info('文档扫描完成', { documentCount: this.documents.size });
     } catch (error) {
-      console.error('[KnowledgeBase] 文档扫描失败:', error);
+      log.error('文档扫描失败', { error: String(error) });
     }
   }
 
@@ -371,7 +374,7 @@ export class KnowledgeBaseManager {
     // 保存到 SQLite
     this.saveDocumentIndex(doc);
     
-    console.log(`[KnowledgeBase] 新增文档: ${relativePath}`);
+    log.info('新增文档', { path: relativePath });
     return doc;
   }
 
@@ -415,7 +418,7 @@ export class KnowledgeBaseManager {
     // 更新 SQLite
     this.saveDocumentIndex(existingDoc);
     
-    console.log(`[KnowledgeBase] 更新文档: ${relativePath}`);
+    log.info('更新文档', { path: relativePath });
   }
 
   /**
@@ -589,7 +592,7 @@ export class KnowledgeBaseManager {
 
     // 延迟启动
     setTimeout(runBuild, this.config.backgroundBuild.idleDelay);
-    console.log('[KnowledgeBase] 后台构建已启动');
+    log.info('后台构建已启动');
   }
 
   /**
@@ -602,7 +605,7 @@ export class KnowledgeBaseManager {
     }
     this.buildAbortController?.abort();
     this.buildStatus.isRunning = false;
-    console.log('[KnowledgeBase] 后台构建已停止');
+    log.info('后台构建已停止');
   }
 
   // ============================================================================
@@ -630,9 +633,9 @@ export class KnowledgeBaseManager {
       // 启动监测循环
       this.watchLoop();
       
-      console.log('[KnowledgeBase] 文件监测已启动');
+      log.info('文件监测已启动');
     } catch (error) {
-      console.error('[KnowledgeBase] 启动文件监测失败:', error);
+      log.error('启动文件监测失败', { error: String(error) });
     }
   }
 
@@ -658,7 +661,7 @@ export class KnowledgeBaseManager {
     } catch (error) {
       // 忽略 abort 错误
       if ((error as Error).name !== 'AbortError') {
-        console.error('[KnowledgeBase] 文件监测错误:', error);
+        log.error('文件监测错误', { error: String(error) });
       }
     }
   }
@@ -711,7 +714,7 @@ export class KnowledgeBaseManager {
     const changes = new Map(this.pendingChanges);
     this.pendingChanges.clear();
 
-    console.log(`[KnowledgeBase] 检测到 ${changes.size} 个文件变更`);
+    log.info('检测到文件变更', { changeCount: changes.size });
 
     for (const [filename, changeType] of changes) {
       const docsDir = this.config.basePath;
@@ -731,7 +734,7 @@ export class KnowledgeBaseManager {
           }
         }
       } catch (error) {
-        console.error(`[KnowledgeBase] 处理文件变更失败: ${filename}`, error);
+        log.error('处理文件变更失败', { filename, error: String(error) });
       }
     }
 
@@ -739,7 +742,7 @@ export class KnowledgeBaseManager {
     const hasPending = Array.from(this.documents.values()).some(d => d.status === 'pending');
     if (hasPending) {
       this.processPendingDocuments().catch(err => {
-        console.error('[KnowledgeBase] 后台构建失败:', err);
+        log.error('后台构建失败', { error: String(err) });
       });
     }
   }
@@ -758,7 +761,7 @@ export class KnowledgeBaseManager {
     this.watcher = undefined;
     this.pendingChanges.clear();
     
-    console.log('[KnowledgeBase] 文件监测已停止');
+    log.info('文件监测已停止');
   }
 
   /**
@@ -1033,7 +1036,7 @@ export class KnowledgeBaseManager {
    * 手动触发文档索引构建
    */
   async rebuildIndex(): Promise<void> {
-    console.log('[KnowledgeBase] 开始重建索引...');
+    log.info('开始重建索引');
     
     // 重置所有文档状态
     for (const doc of this.documents.values()) {
@@ -1044,7 +1047,7 @@ export class KnowledgeBaseManager {
     }
 
     await this.processPendingDocuments();
-    console.log('[KnowledgeBase] 索引重建完成');
+    log.info('开始重建索引');
   }
 
   /**

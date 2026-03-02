@@ -17,7 +17,7 @@ export * from './tool';
 // 消息类型
 export * from './message';
 
-// Provider 类型
+// Provider 类型（包含意图识别类型）
 export * from './provider';
 
 // Agent 类型

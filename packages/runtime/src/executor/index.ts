@@ -5,21 +5,38 @@
  * 使用原生 Function Calling 而非 ReAct JSON 解析。
  */
 
-import type { InboundMessage, OutboundMessage, ToolContext, SessionKey } from '@micro-agent/types';
-import type { LLMGateway, LLMMessage, GenerationConfig, MessageContent, LLMToolDefinition, IntentPipeline, IntentResult, PreflightPromptBuilder, HistoryEntry } from '@micro-agent/providers';
+// 核心类型从 types 导入（遵循依赖倒置原则）
+import type { 
+  InboundMessage, 
+  OutboundMessage, 
+  ToolContext, 
+  SessionKey,
+  LLMMessage,
+  LLMResponse,
+  LLMToolDefinition,
+  GenerationConfig,
+  IntentResult,
+  PreflightPromptBuilder,
+  HistoryEntry,
+  MessageContent,
+} from '@micro-agent/types';
+
+// 实现类和工具函数从 providers 导入
+import { ModelRouter, convertToPlainText, buildUserContent, type RouteResult, type LLMGateway, type IntentPipeline } from '@micro-agent/providers';
+
+// 其他依赖
 import type { MessageBus } from '../bus/queue';
 import type { ModelConfig, LoopDetectionConfig } from '@micro-agent/config';
 import type { AgentLoopResult, MemoryEntry, Citation, CitedResponse, MemoryEntryType } from '../types';
 import type { MemoryStore, ConversationSummarizer } from '../memory';
 import type { SessionStore } from '@micro-agent/storage';
+import type { KnowledgeBaseManager } from '../knowledge';
 import { classifyMemory } from '../memory';
-import { ModelRouter, convertToPlainText, buildUserContent, type RouteResult } from '@micro-agent/providers';
 import { LoopDetector } from '../loop-detection';
 import { MessageHistoryManager } from '../message-manager';
 import { CitationGenerator } from '../citation';
 import { getLogger } from '@logtape/logtape';
 import { getTracer } from '../logging';
-import type { KnowledgeBaseManager } from '../knowledge';
 
 const log = getLogger(['executor']);
 const tracer = getTracer();
@@ -289,15 +306,17 @@ export class AgentExecutor {
       
       intentResult = await this.intentPipeline.analyze(msg.content, hasImage, recentHistory);
       
-      needMemory = intentResult.preflight.needMemory;
-      memoryTypes = intentResult.preflight.memoryTypes as MemoryEntryType[];
-      
-      log.info('🎯 意图识别结果', {
-        needMemory,
-        memoryTypes,
-        modelType: intentResult.routing.type,
-        reason: intentResult.preflight.reason,
-      });
+      if (intentResult) {
+        needMemory = intentResult.preflight.needMemory;
+        memoryTypes = intentResult.preflight.memoryTypes as MemoryEntryType[];
+        
+        log.info('🎯 意图识别结果', {
+          needMemory,
+          memoryTypes,
+          modelType: intentResult.routing.type,
+          reason: intentResult.preflight.reason,
+        });
+      }
     }
 
     // 根据意图决定是否检索记忆
@@ -687,176 +706,228 @@ export class AgentExecutor {
     let iteration = 0;
     const llmTools = this.getLLMToolDefinitions();
 
-    // 重置循环检测器
     this.loopDetector.reset();
 
-    // 缓存第一次迭代选择的模型
     let cachedRouteResult: RouteResult | null = null;
 
     while (iteration < this.config.maxIterations) {
       iteration++;
 
-      // 消息历史裁剪
       const truncatedMessages = this.messageManager.truncate(messages);
-
-      // 使用意图识别结果选择模型
-      let routeResult: RouteResult;
-      if (cachedRouteResult) {
-        routeResult = cachedRouteResult;
-      } else if (intentResult) {
-        // 使用分阶段意图识别结果
-        routeResult = this.router.selectByTaskType(intentResult.routing.type);
-        log.info('🎯 任务类型识别', { type: intentResult.routing.type, reason: intentResult.routing.reason });
-      } else {
-        // 兼容模式：使用图片检测
-        const hasImage = msg.media && msg.media.length > 0;
-        const taskType = hasImage ? 'vision' : 'chat';
-        routeResult = this.router.selectByTaskType(taskType);
-        log.info('🎯 任务类型识别（兼容模式）', { type: taskType });
-      }
-
-      // 第一次迭代后缓存模型选择结果
+      const routeResult = this.selectModel(truncatedMessages, msg, intentResult, cachedRouteResult, iteration);
+      
       if (iteration === 1) {
         cachedRouteResult = routeResult;
       }
 
-      // 工具调用使用专用模型（如果配置）
-      const toolModel = this.config.toolModel ?? routeResult.model;
-      const generationConfig = this.mergeGenerationConfig(routeResult.config);
+      const response = await this.callLLM(truncatedMessages, routeResult, iteration);
 
-      const processedMessages = routeResult.isVision
-        ? truncatedMessages
-        : convertToPlainText(truncatedMessages);
-
-      // 构建系统提示词
-      const messagesWithSystem = this.ensureSystemPrompt(processedMessages);
-
-      log.info('🤖 调用模型', { model: toolModel, reason: routeResult.reason });
-
-      log.debug('路由详情', {
-        provider: routeResult.config.id,
-        isVision: routeResult.isVision,
-        iteration,
-      });
-
-      const llmStartTime = Date.now();
-      const response = await this.gateway.chat(messagesWithSystem, llmTools, toolModel, generationConfig);
-      const llmElapsed = Date.now() - llmStartTime;
-
-      // 构建 LLM 响应内容摘要
-      const contentPreview = response.content
-        ? response.content.slice(0, 200).replace(/\n/g, ' ') + (response.content.length > 200 ? '...' : '')
-        : response.hasToolCalls ? '[调用工具]' : '[无内容]';
-
-      log.info('💬 LLM 响应', {
-        model: `${response.usedProvider}/${response.usedModel}`,
-        tokens: response.usage ? `${response.usage.promptTokens}→${response.usage.completionTokens}` : 'N/A',
-        elapsed: `${llmElapsed}ms`,
-        hasToolCalls: response.hasToolCalls,
-        content: contentPreview,
-      });
-
-      // 记录详细的 LLM 调用（debug 级别，避免重复显示）
-      log.debug('🤖 LLM 调用详情', {
-        model: `${response.usedProvider}/${response.usedModel}`,
-        messages: messagesWithSystem.length,
-        tools: llmTools?.length ?? 0,
-        duration: `${llmElapsed}ms`,
-        tokens: response.usage,
-        content: response.content,
-        hasToolCalls: response.hasToolCalls,
-      });
-
-      // 无工具调用，返回结果
       if (!response.hasToolCalls || !response.toolCalls?.length) {
-        log.info('✅ 任务完成', { 
-          content: response.content.slice(0, 500),
-          fullLength: response.content.length,
-        });
-        return {
-          content: response.content,
-          iterations: iteration,
-          loopDetected: false,
-        };
+        return this.buildSuccessResult(response.content, iteration);
       }
 
-      // 记录工具调用计划
-      log.info('🛠️ 工具调用计划', {
-        count: response.toolCalls.length,
-        tools: response.toolCalls.map(tc => tc.name),
-      });
-
-      // 详细记录每个工具调用的参数
-      for (const tc of response.toolCalls) {
-        const args = tc.arguments as Record<string, unknown>;
-        const argEntries = Object.entries(args || {});
-        const argStr = argEntries.length > 0
-          ? argEntries.map(([k, v]) => {
-              let valStr: string;
-              if (typeof v === 'string') {
-                valStr = v.length > 50 ? `"${v.slice(0, 50)}..."` : `"${v}"`;
-              } else {
-                valStr = JSON.stringify(v);
-              }
-              return `${k}=${valStr}`;
-            }).join(', ')
-          : '无参数';
-        
-        log.info(`📞 调用工具: ${tc.name}`, { args: argStr });
+      const toolCallResult = await this.handleToolCalls(response.toolCalls, messages, msg, iteration);
+      if (toolCallResult) {
+        return toolCallResult;
       }
 
-      // 添加 assistant 消息（包含工具调用）
-      messages.push({
-        role: 'assistant',
-        content: response.content,
-        toolCalls: response.toolCalls,
-      });
-
-      // 执行工具调用
-      for (const tc of response.toolCalls) {
-        // 记录工具调用
-        const callKey = this.loopDetector.recordCall(tc.name, tc.arguments);
-        
-        // 检测循环
-        const loopCheck = this.loopDetector.detectLoop();
-        if (loopCheck) {
-          log.warn('⚠️ 循环检测', { reason: loopCheck.reason, severity: loopCheck.severity });
-          
-          // 临界级别终止循环
-          if (loopCheck.severity === 'critical') {
-            return {
-              content: `检测到循环行为，终止执行: ${loopCheck.reason}`,
-              iterations: iteration,
-              loopDetected: true,
-              loopReason: loopCheck.reason,
-            };
-          }
-          
-          // 警告级别继续执行，记录日志
-          log.info('⚠️ 循环警告，继续执行', { reason: loopCheck.reason });
-        }
-
-        // 执行工具（工具调用的日志在 executeTool 内部统一处理）
-        const toolResult = await this.executeTool(tc.name, tc.arguments, msg);
-
-        // 添加工具结果消息
-        messages.push({
-          role: 'tool',
-          content: toolResult,
-          toolCallId: tc.id,
-        });
-      }
-
-      // 压缩工具结果
-      const compressedMessages = this.messageManager.compressToolResults(messages);
-      messages.length = 0;
-      messages.push(...compressedMessages);
+      this.compressMessages(messages);
     }
 
+    return this.buildMaxIterationsResult(iteration);
+  }
+
+  /**
+   * 选择模型（路由逻辑）
+   */
+  private selectModel(
+    messages: LLMMessage[],
+    msg: InboundMessage,
+    intentResult: IntentResult | null,
+    cachedResult: RouteResult | null,
+    iteration: number
+  ): RouteResult {
+    if (cachedResult) {
+      return cachedResult;
+    }
+
+    if (intentResult) {
+      const result = this.router.selectByTaskType(intentResult.routing.type);
+      log.info('🎯 任务类型识别', { type: intentResult.routing.type, reason: intentResult.routing.reason });
+      return result;
+    }
+
+    const hasImage = msg.media && msg.media.length > 0;
+    const taskType = hasImage ? 'vision' : 'chat';
+    const result = this.router.selectByTaskType(taskType);
+    log.info('🎯 任务类型识别（兼容模式）', { type: taskType });
+    return result;
+  }
+
+  /**
+   * 调用 LLM
+   */
+  private async callLLM(
+    messages: LLMMessage[],
+    routeResult: RouteResult,
+    iteration: number
+  ): Promise<LLMResponse> {
+    const toolModel = this.config.toolModel ?? routeResult.model;
+    const generationConfig = this.mergeGenerationConfig(routeResult.config);
+
+    const processedMessages = routeResult.isVision
+      ? messages
+      : convertToPlainText(messages);
+
+    const messagesWithSystem = this.ensureSystemPrompt(processedMessages);
+
+    log.info('🤖 调用模型', { model: toolModel, reason: routeResult.reason });
+    log.debug('路由详情', {
+      provider: routeResult.config.id,
+      isVision: routeResult.isVision,
+      iteration,
+    });
+
+    const startTime = Date.now();
+    const response = await this.gateway.chat(messagesWithSystem, this.getLLMToolDefinitions(), toolModel, generationConfig);
+    const elapsed = Date.now() - startTime;
+
+    this.logLLMResponse(response, elapsed);
+    return response;
+  }
+
+  /**
+   * 记录 LLM 响应日志
+   */
+  private logLLMResponse(response: LLMResponse, elapsed: number): void {
+    const contentPreview = response.content
+      ? response.content.slice(0, 200).replace(/\n/g, ' ') + (response.content.length > 200 ? '...' : '')
+      : response.hasToolCalls ? '[调用工具]' : '[无内容]';
+
+    log.info('💬 LLM 响应', {
+      model: `${response.usedProvider}/${response.usedModel}`,
+      tokens: response.usage ? `${response.usage.promptTokens}→${response.usage.completionTokens}` : 'N/A',
+      elapsed: `${elapsed}ms`,
+      hasToolCalls: response.hasToolCalls,
+      content: contentPreview,
+    });
+  }
+
+  /**
+   * 处理工具调用
+   * @returns 如果检测到临界循环，返回终止结果；否则返回 null
+   */
+  private async handleToolCalls(
+    toolCalls: NonNullable<LLMResponse['toolCalls']>,
+    messages: LLMMessage[],
+    msg: InboundMessage,
+    iteration: number
+  ): Promise<AgentLoopResult | null> {
+    log.info('🛠️ 工具调用计划', {
+      count: toolCalls.length,
+      tools: toolCalls.map(tc => tc.name),
+    });
+
+    this.logToolCallDetails(toolCalls);
+
+    messages.push({
+      role: 'assistant',
+      content: '',
+      toolCalls,
+    });
+
+    for (const tc of toolCalls) {
+      const loopCheck = this.checkLoopDetection(tc);
+      if (loopCheck) {
+        return loopCheck;
+      }
+
+      const toolResult = await this.executeTool(tc.name, tc.arguments, msg);
+      messages.push({
+        role: 'tool',
+        content: toolResult,
+        toolCallId: tc.id,
+      });
+    }
+
+    return null;
+  }
+
+  /**
+   * 记录工具调用详情
+   */
+  private logToolCallDetails(toolCalls: NonNullable<LLMResponse['toolCalls']>): void {
+    for (const tc of toolCalls) {
+      const args = tc.arguments as Record<string, unknown>;
+      const argEntries = Object.entries(args || {});
+      const argStr = argEntries.length > 0
+        ? argEntries.map(([k, v]) => {
+            const valStr = typeof v === 'string' && v.length > 50
+              ? `"${v.slice(0, 50)}..."`
+              : JSON.stringify(v);
+            return `${k}=${valStr}`;
+          }).join(', ')
+        : '无参数';
+      
+      log.info(`📞 调用工具: ${tc.name}`, { args: argStr });
+    }
+  }
+
+  /**
+   * 检测循环
+   * @returns 如果检测到临界循环，返回终止结果；否则返回 null
+   */
+  private checkLoopDetection(tc: NonNullable<LLMResponse['toolCalls']>[0]): AgentLoopResult | null {
+    this.loopDetector.recordCall(tc.name, tc.arguments);
+    
+    const loopCheck = this.loopDetector.detectLoop();
+    if (!loopCheck) {
+      return null;
+    }
+
+    log.warn('⚠️ 循环检测', { reason: loopCheck.reason, severity: loopCheck.severity });
+
+    if (loopCheck.severity === 'critical') {
+      return {
+        content: `检测到循环行为，终止执行: ${loopCheck.reason}`,
+        iterations: 0,
+        loopDetected: true,
+        loopReason: loopCheck.reason,
+      };
+    }
+
+    log.info('⚠️ 循环警告，继续执行', { reason: loopCheck.reason });
+    return null;
+  }
+
+  /**
+   * 压缩消息历史
+   */
+  private compressMessages(messages: LLMMessage[]): void {
+    const compressed = this.messageManager.compressToolResults(messages);
+    messages.length = 0;
+    messages.push(...compressed);
+  }
+
+  /**
+   * 构建成功结果
+   */
+  private buildSuccessResult(content: string, iterations: number): AgentLoopResult {
+    log.info('✅ 任务完成', {
+      content: content.slice(0, 500),
+      fullLength: content.length,
+    });
+    return { content, iterations, loopDetected: false };
+  }
+
+  /**
+   * 构建最大迭代结果
+   */
+  private buildMaxIterationsResult(iterations: number): AgentLoopResult {
     log.warn('⚠️ 达到最大迭代次数', { maxIterations: this.config.maxIterations });
     return {
       content: '达到最大迭代次数，任务未完成',
-      iterations: iteration,
+      iterations,
       loopDetected: false,
     };
   }

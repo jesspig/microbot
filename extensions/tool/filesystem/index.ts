@@ -53,18 +53,37 @@ function resolvePath(path: string, workspace: string): string {
  * @returns 验证结果，失败时返回错误信息
  */
 function validatePathAccess(targetPath: string, workspace: string): { allowed: boolean; error?: string } {
-  // 统一路径分隔符（Windows 上同时存在 / 和 \）
-  const toComparable = (p: string) => normalize(p).toLowerCase().replace(/\//g, '\\');
+  // 解析真实路径（处理符号链接和 .. 等）
+  let resolvedTarget: string;
+  try {
+    // 先规范化路径，再检查
+    const normalized = normalize(targetPath);
+    resolvedTarget = resolve(normalized);
+  } catch {
+    return { allowed: false, error: '无效的路径格式' };
+  }
   
-  const normalizedTarget = toComparable(targetPath);
+  // 统一路径分隔符（Windows 上同时存在 / 和 \）
+  const toComparable = (p: string) => p.toLowerCase().replace(/\//g, '\\').replace(/\\+/g, '\\');
+  
+  const normalizedTarget = toComparable(resolvedTarget);
   const microAgentHome = toComparable(getMicroAgentHome());
   const normalizedWorkspace = toComparable(workspace);
 
-  // 检查是否在 node_modules 内（全局禁止）
-  if (normalizedTarget.includes('node_modules')) {
+  // 检查是否在 node_modules 内（全局禁止）- 使用路径组件检查
+  const pathParts = normalizedTarget.split(/[/\\]/);
+  if (pathParts.includes('node_modules')) {
     return {
       allowed: false,
       error: `访问被拒绝：禁止访问 node_modules 目录`,
+    };
+  }
+
+  // 检查路径遍历攻击模式
+  if (normalizedTarget.includes('..') || targetPath.includes('..')) {
+    return {
+      allowed: false,
+      error: `访问被拒绝：检测到路径遍历尝试`,
     };
   }
 

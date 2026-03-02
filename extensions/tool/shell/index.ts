@@ -3,12 +3,94 @@
  *
  * 提供命令执行功能，支持多种运行时。
  * 自动解析可执行文件路径，解决 PATH 环境变量问题。
+ *
+ * 安全机制：
+ * - 危险命令黑名单：阻止高危系统命令
+ * - 环境变量过滤：仅传递安全的非敏感变量
+ * - 命令注入检测：检测常见的注入模式
  */
 
 import { which } from 'bun';
 import { existsSync, mkdirSync } from 'fs';
 import { defineTool } from '@micro-agent/sdk';
 import type { Tool, JSONSchema, ToolContext } from '@micro-agent/types';
+
+/** 危险命令黑名单 */
+const BLOCKED_COMMANDS = [
+  // 系统管理
+  'shutdown', 'reboot', 'halt', 'poweroff', 'init',
+  // 用户管理
+  'useradd', 'userdel', 'usermod', 'passwd', 'adduser', 'deluser',
+  // 权限提升
+  'sudo', 'su', 'doas', 'pkexec', 'gksudo', 'kdesu',
+  // 磁盘操作
+  'mkfs', 'fdisk', 'parted', 'dd', 'format',
+  // 网络配置
+  'iptables', 'ip6tables', 'ifconfig', 'ip', 'route',
+  // 进程管理
+  'killall', 'pkill',
+];
+
+/** 危险命令模式（正则表达式） */
+const DANGEROUS_PATTERNS = [
+  /\brm\s+-rf\s+\//i,                          // rm -rf /
+  /\brm\s+-rf\s+~/i,                          // rm -rf ~
+  /\brm\s+-rf\s+\*/i,                         // rm -rf *
+  />\s*\/dev\/(sda|hda|nvme|mmcblk)/i,        // 写入磁盘设备
+  /:\(\)\\s*\{\s*:\|\:&\s*\}\s*;/i,           // Fork bomb
+  /\$\(.*\)/i,                                 // 命令替换 $(...)
+  /`.*`/i,                                     // 反引号命令替换
+  /\|\s*(sh|bash|zsh|fish|cmd|powershell)/i,  // 管道到 shell
+  /;\s*(rm|dd|mkfs|shutdown|reboot)/i,        // 命令链接危险命令
+];
+
+/** 允许传递的环境变量（白名单） */
+const SAFE_ENV_VARS = [
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'LC_CTYPE',
+  'TERM', 'SHELL', 'PWD', 'OLDPWD', 'EDITOR', 'VISUAL',
+  'NODE_PATH', 'BUN_INSTALL', 'PYTHONPATH', 'PYTHONIOENCODING',
+  'TEMP', 'TMP', 'TMPDIR', 'COMSPEC', 'PATHEXT',
+];
+
+/** 最大超时时间（毫秒） */
+const MAX_TIMEOUT = 300000; // 5分钟
+
+/**
+ * 过滤环境变量，仅保留安全的变量
+ */
+function filterEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const safeEnv: Record<string, string> = {};
+  for (const key of SAFE_ENV_VARS) {
+    if (env[key] !== undefined) {
+      safeEnv[key] = env[key];
+    }
+  }
+  return safeEnv;
+}
+
+/**
+ * 检查命令是否安全
+ * @returns 安全检查结果，不安全时返回错误信息
+ */
+function validateCommand(cmd: string): { safe: boolean; error?: string } {
+  const lowerCmd = cmd.toLowerCase();
+  
+  // 检查危险命令黑名单
+  for (const blocked of BLOCKED_COMMANDS) {
+    if (lowerCmd.includes(blocked)) {
+      return { safe: false, error: `禁止执行危险命令: ${blocked}` };
+    }
+  }
+  
+  // 检查危险模式
+  for (const pattern of DANGEROUS_PATTERNS) {
+    if (pattern.test(cmd)) {
+      return { safe: false, error: `检测到危险的命令模式` };
+    }
+  }
+  
+  return { safe: true };
+}
 
 /**
  * ExecTool 工厂
@@ -19,6 +101,9 @@ import type { Tool, JSONSchema, ToolContext } from '@micro-agent/types';
  * - Python 脚本
  */
 export function createExecTool(workingDir: string, defaultTimeout: number = 30000): Tool {
+  // 限制默认超时时间
+  const safeDefaultTimeout = Math.min(defaultTimeout, MAX_TIMEOUT);
+  
   return defineTool({
     name: 'exec',
     description: `执行命令或脚本。支持:
@@ -37,7 +122,7 @@ export function createExecTool(workingDir: string, defaultTimeout: number = 3000
     execute: async (input: unknown) => {
       // 兼容多种输入格式
       let cmd: string;
-      let timeout: number = defaultTimeout;
+      let timeout: number = safeDefaultTimeout;
       
       if (typeof input === 'string') {
         cmd = input;
@@ -45,13 +130,19 @@ export function createExecTool(workingDir: string, defaultTimeout: number = 3000
         const obj = input as Record<string, unknown>;
         cmd = String(obj.command ?? obj.action_input ?? '');
         if (typeof obj.timeout === 'number') {
-          timeout = obj.timeout;
+          timeout = Math.min(obj.timeout, MAX_TIMEOUT);
         }
       } else {
         return '错误: 无效的输入格式，需要字符串或 { command: string }';
       }
       
       cmd = cmd.trim();
+
+      // 安全检查
+      const validation = validateCommand(cmd);
+      if (!validation.safe) {
+        return `错误: ${validation.error}`;
+      }
 
       try {
         if (!existsSync(workingDir)) {
@@ -68,7 +159,7 @@ export function createExecTool(workingDir: string, defaultTimeout: number = 3000
         const result = Bun.spawnSync([resolvedRunner, ...args], {
           cwd: workingDir,
           timeout: timeout,
-          env: process.env,
+          env: filterEnv(process.env),
         });
 
         const stdout = result.stdout?.toString() || '';
