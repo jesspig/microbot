@@ -25,8 +25,8 @@ const BLOCKED_COMMANDS = [
   'sudo', 'su', 'doas', 'pkexec', 'gksudo', 'kdesu',
   // 磁盘操作
   'mkfs', 'fdisk', 'parted', 'dd', 'format',
-  // 网络配置
-  'iptables', 'ip6tables', 'ifconfig', 'ip', 'route',
+  // 网络配置（仅阻止修改类命令，ip 用于查询是安全的）
+  'iptables', 'ip6tables', 'ifconfig', 'route',
   // 进程管理
   'killall', 'pkill',
 ];
@@ -42,6 +42,7 @@ const DANGEROUS_PATTERNS = [
   /`.*`/i,                                     // 反引号命令替换
   /\|\s*(sh|bash|zsh|fish|cmd|powershell)/i,  // 管道到 shell
   /;\s*(rm|dd|mkfs|shutdown|reboot)/i,        // 命令链接危险命令
+  /\bip\s+(link|addr|route|tunnel|tuntap)\s+(add|delete|set|replace|change|flush)/i,  // ip 命令的修改操作
 ];
 
 /** 允许传递的环境变量（白名单） */

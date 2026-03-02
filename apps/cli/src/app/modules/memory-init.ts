@@ -119,7 +119,7 @@ async function initEmbeddingService(
   }
 
   startupInfo.memory.mode = 'fulltext';
-  startupInfo.warnings.push('嵌入模型配置缺少 baseUrl，使用全文检索');
+  startupInfo.warningMessages.push('嵌入模型配置缺少 baseUrl，使用全文检索');
   return new NoEmbeddingImpl();
 }
 
@@ -184,13 +184,13 @@ async function startMigration(
   try {
     const result = await memoryStore.migrateToModel(modelChange.newModel!, { autoStart: true });
     if (result.success) {
-      startupInfo.infos.push(`嵌入模型迁移已启动：${modelChange.oldModel || '未知'} → ${modelChange.newModel}`);
+      startupInfo.infoMessages.push(`嵌入模型迁移已启动：${modelChange.oldModel || '未知'} → ${modelChange.newModel}`);
     } else {
-      startupInfo.warnings.push(`嵌入模型迁移启动失败：${result.error}`);
+      startupInfo.warningMessages.push(`嵌入模型迁移启动失败：${result.error}`);
     }
   } catch (error) {
     log.error('嵌入模型迁移启动异常', { error: String(error) });
-    startupInfo.warnings.push(`嵌入模型已从 ${modelChange.oldModel || '未知'} 变更为 ${modelChange.newModel}，迁移启动失败`);
+    startupInfo.warningMessages.push(`嵌入模型已从 ${modelChange.oldModel || '未知'} 变更为 ${modelChange.newModel}，迁移启动失败`);
   }
 }
 
@@ -245,7 +245,7 @@ async function initKnowledgeBase(
       memoryStore
     );
     await knowledgeBaseManager.initialize();
-    startupInfo.infos.push('知识库系统已启用');
+    startupInfo.infoMessages.push('知识库系统已启用');
     log.info('📚 知识库系统已初始化', { path: knowledgePath });
 
     return knowledgeBaseManager;
