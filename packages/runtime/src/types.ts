@@ -2,7 +2,7 @@
  * Runtime 核心类型定义
  */
 
-// 从 providers 重新导出 LLM 消息类型
+// 从 types 重新导出 LLM 消息类型（遵循依赖倒置原则）
 export type {
   LLMMessage,
   MessageRole,
@@ -18,7 +18,7 @@ export type {
   LLMResponse,
   LLMToolDefinition,
   GenerationConfig,
-} from '@micro-agent/providers';
+} from '@micro-agent/types';
 
 // ============================================================================
 // 记忆系统类型

@@ -268,7 +268,9 @@ export class MCPServer implements MCPServerLike {
         try {
           const request = JSON.parse(line)
           const response = await this.handleRequest(request)
-          console.log(JSON.stringify(response))
+          if (process.env.NODE_ENV === 'development') {
+            console.log(JSON.stringify(response))
+          }
         } catch {
           // 忽略解析错误
         }

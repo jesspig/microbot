@@ -17,6 +17,7 @@ import type {
   LLMToolDefinition,
   GenerationConfig,
   UsageStats,
+  ProviderCapabilities,
 } from '@micro-agent/types';
 
 // 从 @micro-agent/types 重新导出（保持 API 兼容）
@@ -167,7 +168,7 @@ export interface LLMProvider {
   /**
    * 获取模型能力配置
    */
-  getModelCapabilities(modelId: string): ModelConfig;
+  getModelCapabilities(modelId: string): ProviderCapabilities;
 
   /**
    * 获取提供商支持的模型列表

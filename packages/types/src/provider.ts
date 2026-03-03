@@ -95,3 +95,60 @@ export interface A2AProvider extends Provider {
 export interface MCPProvider extends Provider {
   readonly type: 'mcp';
 }
+
+// ============================================================================
+// 意图识别类型（从 providers 提升，遵循依赖倒置原则）
+// ============================================================================
+
+/** 记忆类型（字符串形式） */
+export type MemoryTypeString =
+  | 'preference'
+  | 'fact'
+  | 'decision'
+  | 'entity'
+  | 'conversation'
+  | 'summary'
+  | 'document'
+  | 'other';
+
+/** 预处理结果 */
+export interface PreflightResult {
+  /** 是否需要检索记忆 */
+  needMemory: boolean;
+  /** 需要检索的记忆类型 */
+  memoryTypes: MemoryTypeString[];
+  /** 预处理理由 */
+  reason: string;
+  /** 是否需要上下文来进一步判断 */
+  needContext?: boolean;
+}
+
+/** 对话历史条目（简化版，用于意图识别） */
+export interface HistoryEntry {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** 预处理提示词构建函数 */
+export type PreflightPromptBuilder = (
+  content: string,
+  hasImage: boolean,
+  history?: HistoryEntry[],
+) => string;
+
+/** 任务类型 */
+export type TaskType = 'vision' | 'coder' | 'chat';
+
+/** 模型选择结果 */
+export interface RoutingResult {
+  type: TaskType;
+  reason: string;
+}
+
+/** 完整意图识别结果 */
+export interface IntentResult {
+  /** 预处理结果 */
+  preflight: PreflightResult;
+  /** 模型选择结果 */
+  routing: RoutingResult;
+}

@@ -1,6 +1,6 @@
 {
   "name": "@micro-agent/core",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "超轻量级个人 AI 助手框架 - LLM/Agent 双向网关 + 可扩展 Agent 运行时",
   "type": "module",
   "author": "jesspig",
@@ -76,12 +76,12 @@
     "@logtape/logtape": "^2.0.4",
     "@logtape/pretty": "^2.0.4",
     "@micro-agent/sdk": "workspace:*",
-    "ai": "^6.0.105",
+    "ai": "^6.0.106",
     "gray-matter": "^4.0.3",
     "js-yaml": "^4.1.1",
     "marked": "^17.0.3",
     "mitt": "^3.0.1",
-    "pdf-parse": "1",
+    "pdf-parse": "2",
     "zod": "^4.3.6"
   },
   "devDependencies": {

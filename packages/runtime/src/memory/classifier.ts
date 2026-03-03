@@ -15,7 +15,10 @@
  */
 
 import type { MemoryEntryType } from '../types';
-import type { LLMGateway } from '@micro-agent/providers';
+import type { LLMProvider } from '@micro-agent/types';
+import { getLogger } from '@logtape/logtape';
+
+const log = getLogger(['memory', 'classifier']);
 
 /** 分类规则定义 */
 interface ClassificationRule {
@@ -41,8 +44,8 @@ export interface ClassifyOptions {
   llmThreshold?: number;
   /** 上下文信息，用于辅助分类 */
   context?: string;
-  /** LLM Gateway 实例（useLLM 为 true 时必填） */
-  llmGateway?: LLMGateway;
+  /** LLM Provider 实例（useLLM 为 true 时必填） */
+  llmGateway?: LLMProvider;
 }
 
 /** 分类规则库 */
@@ -203,7 +206,7 @@ async function classifyWithLLM(
     }
   } catch (error) {
     // LLM 分类失败，返回默认值
-    console.warn('[Classifier] LLM 分类失败:', error);
+    log.warn('LLM 分类失败', { error: String(error) });
   }
 
   return { type: 'other', confidence: 0.5, matchedPatterns: [], source: 'llm' };

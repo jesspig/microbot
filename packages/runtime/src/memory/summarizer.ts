@@ -2,7 +2,7 @@
  * 对话摘要器
  */
 
-import type { LLMMessage, LLMGateway } from '@micro-agent/providers';
+import type { LLMMessage, LLMProvider } from '@micro-agent/types';
 import type { Summary, MemoryEntry } from '../types';
 import type { MemoryStore } from './store';
 import { getLogger } from '@logtape/logtape';
@@ -40,7 +40,7 @@ export class ConversationSummarizer {
   private pendingMessages: LLMMessage[] = [];
 
   constructor(
-    private gateway: LLMGateway,
+    private gateway: LLMProvider,
     private memoryStore: MemoryStore,
     private config: SummarizerConfig = DEFAULT_CONFIG
   ) {}

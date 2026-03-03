@@ -3,6 +3,7 @@
  */
 
 import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, GenerationConfig } from './base';
+import type { ProviderCapabilities } from '@micro-agent/types';
 import type { ModelConfig } from '@micro-agent/config';
 import { getLogger } from '@logtape/logtape';
 
@@ -34,6 +35,7 @@ const DEFAULT_CONFIG: GatewayConfig = {
  */
 export class LLMGateway implements LLMProvider {
   readonly name = 'gateway';
+  readonly type = 'llm' as const;
   private providers = new Map<string, ProviderEntry>();
 
   constructor(private config: GatewayConfig = DEFAULT_CONFIG) {}
@@ -262,12 +264,12 @@ export class LLMGateway implements LLMProvider {
     return false;
   }
 
-  getModelCapabilities(modelId: string): ModelConfig {
+  getModelCapabilities(modelId: string): ProviderCapabilities {
     const { providerName, modelName } = this.parseModel(modelId);
     const entry = this.providers.get(providerName);
 
     if (!entry) {
-      return { id: modelName ?? modelId };
+      return { vision: false, think: false, tool: true };
     }
 
     return entry.provider.getModelCapabilities(modelName ?? modelId);

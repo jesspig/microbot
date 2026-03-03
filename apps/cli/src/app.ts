@@ -7,24 +7,18 @@
 import {
   loadConfig,
   expandPath,
-  parseModelConfigs,
 } from '@micro-agent/config';
 import {
   ToolRegistry,
   ChannelManager,
   SkillsLoader,
   LLMGateway,
-  OpenAICompatibleProvider,
   MessageBus,
   SessionStore,
   AgentExecutor,
-  MemoryStore,
-  ConversationSummarizer,
-  OpenAIEmbedding,
-  NoEmbedding,
-  KnowledgeBaseManager,
 } from '@micro-agent/sdk';
 import { ChannelGatewayImpl } from '@micro-agent/runtime';
+import type { MemoryStore, ConversationSummarizer, KnowledgeBaseManager } from '@micro-agent/runtime';
 import {
   ReadFileTool,
   WriteFileTool,
@@ -38,154 +32,43 @@ import { buildPreflightPrompt, buildRoutingPrompt } from '../../prompts';
 import type {
   App,
   Config,
-  ProviderEntry,
-  InboundMessage,
-  ChannelType,
 } from '@micro-agent/types';
-import type { ModelConfig } from '@micro-agent/config';
 import { getLogger } from '@logtape/logtape';
 import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { homedir } from 'os';
-import { readFileSync, existsSync, mkdirSync, writeFileSync, copyFileSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
+import { fileURLToPath } from 'url';
+
+// 导入应用模块
+import {
+  initMemorySystem,
+  type MemorySystemInitResult,
+} from './app/modules/memory-init';
+import {
+  createDefaultStartupInfo,
+  printStartupInfo,
+  type StartupInfo,
+} from './app/modules/startup-info';
+import {
+  ensureUserConfigFiles,
+  loadSystemPrompt,
+} from './app/modules/system-prompt';
+import {
+  initProviders,
+} from './app/modules/providers-init';
+import {
+  initChannels,
+} from './app/modules/channels-init';
 
 const log = getLogger(['app']);
 
-/** 用户级配置目录 */
-const USER_CONFIG_DIR = resolve(homedir(), '.micro-agent');
-
-/** 启动状态信息收集器 */
-interface StartupInfo {
-  tools: string[];
-  skills: string[];
-  models: {
-    chat?: string;
-    vision?: string;
-    embed?: string;
-    coder?: string;
-    intent?: string;
-  };
-  memory: {
-    mode: 'vector' | 'fulltext' | 'hybrid';
-    embedModel?: string;
-    storagePath?: string;
-    autoSummarize?: boolean;
-    summarizeThreshold?: number;
-  };
-  channels: string[];
-  infos: string[];  // 状态信息（蓝色）
-  warnings: string[];  // 警告信息（黄色）
-}
-
-const startupInfo: StartupInfo = {
-  tools: [],
-  skills: [],
-  models: {},
-  memory: { mode: 'fulltext' },
-  channels: [],
-  infos: [],
-  warnings: [],
-};
+/** 启动信息 */
+const startupInfo = createDefaultStartupInfo();
 
 /** 获取内置技能路径 */
 function getBuiltinSkillsPath(): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
   return resolve(currentDir, '../../../extensions/skills');
-}
-
-/** 获取模板路径 */
-function getTemplatesPath(): string {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  return resolve(currentDir, '../../../templates/prompts/agent');
-}
-
-/**
- * 确保用户级配置文件存在
- *
- * 首次启动时创建默认的 SOUL.md、USER.md、AGENTS.md
- */
-function ensureUserConfigFiles(): { created: string[] } {
-  const created: string[] = [];
-
-  // 确保用户配置目录存在
-  if (!existsSync(USER_CONFIG_DIR)) {
-    mkdirSync(USER_CONFIG_DIR, { recursive: true });
-  }
-
-  const templatesPath = getTemplatesPath();
-  const files = [
-    { name: 'SOUL.md', template: 'soul.md' },
-    { name: 'USER.md', template: 'user.md' },
-    { name: 'AGENTS.md', template: 'agents.md' },
-  ];
-
-  for (const file of files) {
-    const targetPath = resolve(USER_CONFIG_DIR, file.name);
-    const templatePath = resolve(templatesPath, file.template);
-
-    // 文件不存在且模板存在时创建
-    if (!existsSync(targetPath) && existsSync(templatePath)) {
-      copyFileSync(templatePath, targetPath);
-      created.push(file.name);
-    }
-  }
-
-  return { created };
-}
-
-/**
- * 加载系统提示词
- *
- * 优先级：用户级 ~/.micro-agent/ > workspace/
- */
-function loadSystemPromptFromUserConfig(workspace: string): string {
-  const parts: string[] = [];
-
-  // 1. 加载 SOUL.md（身份）
-  const soulPaths = [
-    resolve(USER_CONFIG_DIR, 'SOUL.md'),
-    resolve(workspace, 'SOUL.md'),
-  ];
-
-  for (const soulPath of soulPaths) {
-    if (existsSync(soulPath)) {
-      parts.push(readFileSync(soulPath, 'utf-8'));
-      break;
-    }
-  }
-
-  // 2. 加载 USER.md（用户信息）
-  const userPaths = [
-    resolve(USER_CONFIG_DIR, 'USER.md'),
-    resolve(workspace, 'USER.md'),
-  ];
-
-  for (const userPath of userPaths) {
-    if (existsSync(userPath)) {
-      parts.push('\n\n---\n\n' + readFileSync(userPath, 'utf-8'));
-      break;
-    }
-  }
-
-  // 3. 加载 AGENTS.md（行为指南）
-  const agentsPaths = [
-    resolve(USER_CONFIG_DIR, 'AGENTS.md'),
-    resolve(workspace, 'AGENTS.md'),
-  ];
-
-  for (const agentsPath of agentsPaths) {
-    if (existsSync(agentsPath)) {
-      parts.push('\n\n---\n\n' + readFileSync(agentsPath, 'utf-8'));
-      break;
-    }
-  }
-
-  if (parts.length > 0) {
-    return parts.join('');
-  }
-
-  // 默认提示词
-  return '你是一个有帮助的 AI 助手。';
 }
 
 /**
@@ -195,7 +78,7 @@ class AppImpl implements App {
   private running = false;
   private channelManager: ChannelManager;
   private llmGateway: LLMGateway;
-  private availableModels = new Map<string, ModelConfig[]>();
+  private availableModels = new Map<string, any[]>();
   private config: Config;
   private workspace: string;
   private messageBus: MessageBus;
@@ -228,39 +111,96 @@ class AppImpl implements App {
   }
 
   async start(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
+    if (this.running) {
+      log.warn('应用已在运行中');
+      return;
+    }
 
-    // 0. 确保用户级配置文件存在
+    try {
+      this.running = true;
+      await this.initializeComponents();
+      await this.startServices();
+      this.printStartupInfo();
+      log.info('应用启动完成');
+    } catch (error) {
+      this.handleStartupError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * 初始化组件
+   */
+  private async initializeComponents(): Promise<void> {
+    await this.ensureUserConfigFiles();
+    this.registerBuiltinTools();
+    this.initProviders();
+    await this.initSkills();
+    this.initChannels();
+  }
+
+  /**
+   * 启动服务
+   */
+  private async startServices(): Promise<void> {
+    await this.initMemorySystem();
+    await this.startChannels();
+    this.createExecutor();
+    this.startGateway();
+  }
+
+  /**
+   * 处理启动错误
+   */
+  private handleStartupError(error: unknown): void {
+    this.running = false;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    log.error('应用启动失败', { error: errorMessage });
+  }
+
+  /** 确保用户级配置文件存在 */
+  private async ensureUserConfigFiles(): Promise<void> {
     const { created } = ensureUserConfigFiles();
     if (created.length > 0) {
       log.info('已创建配置文件', { files: created });
     }
+  }
 
-    // 1. 注册内置工具（基础工具）
-    this.registerBuiltinTools();
-
-    // 2. 初始化 Provider Gateway
-    this.initProviders();
-
-    // 3. 初始化技能加载器
+  /** 初始化技能加载器 */
+  private async initSkills(): Promise<void> {
     this.skillsLoader = new SkillsLoader(this.workspace, getBuiltinSkillsPath());
     this.skillsLoader.load();
     if (this.skillsLoader.count > 0) {
       startupInfo.skills = this.skillsLoader.getAll().map(s => s.name);
     }
+  }
 
-    // 4. 初始化通道
-    this.initChannels();
-
-    // 5. 初始化记忆系统
-    await this.initMemorySystem();
-
-    // 6. 启动通道
+  /** 启动通道 */
+  private async startChannels(): Promise<void> {
     await this.channelManager.startAll();
     startupInfo.channels = this.channelManager.getRunningChannels();
+  }
 
-    // 7. 创建 Agent 执行器
+  /** 初始化 Provider */
+  private initProviders(): void {
+    this.availableModels = initProviders(this.config, this.llmGateway);
+  }
+
+  /** 初始化通道 */
+  private initChannels(): void {
+    initChannels(this.config, this.channelManager, this.messageBus, FeishuChannel);
+  }
+
+  /** 初始化记忆系统 */
+  private async initMemorySystem(): Promise<void> {
+    const result = await initMemorySystem(this.config, this.llmGateway, startupInfo);
+    this.memoryStore = result.memoryStore;
+    this.summarizer = result.summarizer;
+    this.knowledgeBaseManager = result.knowledgeBaseManager;
+  }
+
+  /** 创建 Agent 执行器 */
+  private createExecutor(): void {
     this.executor = new AgentExecutor(
       this.messageBus,
       this.llmGateway,
@@ -283,186 +223,33 @@ class AppImpl implements App {
         idleTimeout: this.config.agents.memory?.idleTimeout,
         knowledgeEnabled: true,
         knowledgeLimit: 3,
+        // 引用溯源配置
+        citationEnabled: this.config.agents.citation?.enabled,
+        citationMinConfidence: this.config.agents.citation?.minConfidence,
+        citationMaxCount: this.config.agents.citation?.maxCitations,
       },
-      this.memoryStore ?? undefined,
-      this.summarizer ?? undefined,
-      this.knowledgeBaseManager ?? undefined,
-      this.sessionStore
+      {
+        memoryStore: this.memoryStore ?? undefined,
+        summarizer: this.summarizer ?? undefined,
+        knowledgeBaseManager: this.knowledgeBaseManager ?? undefined,
+        sessionStore: this.sessionStore,
+      }
     );
 
-    // 8. 创建并启动 ChannelGateway（消息处理中心）
     this.channelGateway = new ChannelGatewayImpl({
       executor: this.executor,
       getChannels: () => this.channelManager.getChannels(),
     });
+  }
 
-    this.startGateway();
-
-    // 9. 打印启动信息
-    this.printStartupInfo();
+  /** 加载系统提示词 */
+  private loadSystemPrompt(): string {
+    return loadSystemPrompt(this.workspace, this.skillsLoader);
   }
 
   /** 打印启动信息 */
   private printStartupInfo(): void {
-    const chatModel = this.config.agents.models?.chat;
-    
-    console.log('─'.repeat(50));
-    
-    // 工具
-    if (startupInfo.tools.length > 0) {
-      console.log(`  \x1b[90m工具:\x1b[0m ${startupInfo.tools.join(', ')}`);
-    }
-    
-    // 技能
-    if (startupInfo.skills.length > 0) {
-      console.log(`  \x1b[90m技能:\x1b[0m ${startupInfo.skills.join(', ')}`);
-    }
-    
-    // 模型
-    const models = startupInfo.models;
-    
-    // 对话模型
-    if (chatModel) {
-      console.log(`  \x1b[90m对话模型:\x1b[0m ${chatModel}`);
-    }
-    
-    // 视觉模型
-    if (models.vision && models.vision !== chatModel) {
-      console.log(`  \x1b[90m视觉模型:\x1b[0m ${models.vision}`);
-    } else if (chatModel) {
-      console.log(`  \x1b[90m视觉模型:\x1b[0m ${chatModel} (继承对话模型)`);
-    }
-    
-    // 嵌入模型
-    if (models.embed) {
-      console.log(`  \x1b[90m嵌入模型:\x1b[0m ${models.embed}`);
-    }
-    
-    // 代码模型
-    if (models.coder && models.coder !== chatModel) {
-      console.log(`  \x1b[90m编程模型:\x1b[0m ${models.coder}`);
-    } else if (chatModel) {
-      console.log(`  \x1b[90m编程模型:\x1b[0m ${chatModel} (继承对话模型)`);
-    }
-    
-    // 意图模型
-    if (models.intent && models.intent !== chatModel) {
-      console.log(`  \x1b[90m意图模型:\x1b[0m ${models.intent}`);
-    } else if (chatModel) {
-      console.log(`  \x1b[90m意图模型:\x1b[0m ${chatModel} (继承对话模型)`);
-    }
-    
-    // 记忆模式
-    const modeLabel = startupInfo.memory.mode === 'vector' 
-      ? '向量检索' 
-      : startupInfo.memory.mode === 'hybrid' 
-        ? '混合检索' 
-        : '全文检索';
-    const embedModelInfo = startupInfo.memory.embedModel 
-      ? ` (${startupInfo.memory.embedModel})` 
-      : '';
-    console.log(`  \x1b[90m记忆:\x1b[0m ${modeLabel}${embedModelInfo}`);
-    
-    // 自动摘要
-    if (startupInfo.memory.autoSummarize && startupInfo.memory.summarizeThreshold) {
-      console.log(`  \x1b[90m自动摘要:\x1b[0m ${startupInfo.memory.summarizeThreshold} 条消息`);
-    }
-    
-    // 渠道
-    if (startupInfo.channels.length > 0) {
-      console.log(`  \x1b[90m渠道:\x1b[0m ${startupInfo.channels.join(', ')}`);
-    }
-    
-    // 状态信息（蓝色）
-    if (startupInfo.infos.length > 0) {
-      console.log();
-      for (const info of startupInfo.infos) {
-        console.log(`  \x1b[36mℹ ${info}\x1b[0m`);
-      }
-    }
-    
-    // 警告（黄色）
-    if (startupInfo.warnings.length > 0) {
-      console.log();
-      for (const w of startupInfo.warnings) {
-        console.log(`  \x1b[33m⚠ ${w}\x1b[0m`);
-      }
-    }
-    
-    console.log('─'.repeat(50));
-  }
-
-  private loadSystemPrompt(): string {
-    // 加载基础提示词（SOUL.md + USER.md + AGENTS.md）
-    const basePrompt = loadSystemPromptFromUserConfig(this.workspace);
-
-    const parts: string[] = [];
-
-    // 0. 系统路径说明（告知 LLM 各路径的用途和访问权限）
-    parts.push(`# 系统路径说明
-
-## 可访问目录（使用文件工具读写）
-
-| 路径 | 用途 | 说明 |
-|------|------|------|
-| \`${this.workspace}\` | 工作区 | 用户项目文件，主要工作目录 |
-| \`~/.micro-agent/workspace\` | 默认工作区 | 未指定时的默认工作目录 |
-| \`~/.micro-agent/knowledge/\` | 知识库 | 上传的文档存储位置 |
-| \`~/.micro-agent/SOUL.md\` | 身份定义 | 定义你的角色和人格 |
-| \`~/.micro-agent/USER.md\` | 用户信息 | 关于用户的重要信息 |
-| \`~/.micro-agent/AGENTS.md\` | 行为准则 | 你的行为规范和原则 |
-| \`~/.micro-agent/settings.yaml\` | 系统配置 | 模型、通道等配置 |
-
-## 文件工具使用规则
-
-1. 路径相对于工作区：\`read_file("file.txt")\` 或 \`list_dir(".")\`
-2. 子目录使用相对路径：\`read_file("src/index.ts")\`
-3. 访问系统目录使用绝对路径或 ~ 开头：\`read_file("~/.micro-agent/USER.md")\`
-
-## 知识库查询
-
-用户询问知识库内容时，系统会自动检索相关文档并注入上下文，无需手动读取文件。`);
-
-    // 1. Always 技能（Level 2 直接注入）
-    if (this.skillsLoader && this.skillsLoader.count > 0) {
-      const alwaysContent = this.skillsLoader.buildAlwaysSkillsContent();
-      if (alwaysContent) {
-        parts.push(alwaysContent);
-      }
-    }
-
-    // 2. 可用技能摘要（Level 1 渐进式加载）
-    if (this.skillsLoader && this.skillsLoader.count > 0) {
-      const skillsSummary = this.skillsLoader.buildSkillsSummary();
-      if (skillsSummary) {
-        parts.push(`# 技能
-
-以下技能可以扩展你的能力。
-
-**使用规则：**
-1. 当用户请求与某个技能的 description 关键词匹配时（如"创建XX技能"、"获取天气"等），必须先使用 \`read_file\` 读取该技能的完整内容
-2. 读取 location 路径下的 SKILL.md 文件
-3. 按照 SKILL.md 中的指导执行操作，而不是直接写代码
-
-${skillsSummary}`);
-      }
-    }
-
-    if (parts.length > 0) {
-      return basePrompt + '\n\n---\n\n' + parts.join('\n\n---\n\n');
-    }
-
-    return basePrompt;
-  }
-
-  private registerBuiltinTools(): void {
-    this.toolRegistry.register(ReadFileTool);
-    this.toolRegistry.register(WriteFileTool);
-    this.toolRegistry.register(ListDirTool);
-    this.toolRegistry.register(createExecTool(this.workspace));
-    this.toolRegistry.register(WebFetchTool);
-    this.toolRegistry.register(MessageTool);
-    startupInfo.tools = this.toolRegistry.getDefinitions().map(t => t.name);
+    printStartupInfo(startupInfo, this.config);
   }
 
   /**
@@ -485,6 +272,17 @@ ${skillsSummary}`);
     })().catch(error => {
       console.error('Gateway 异常:', error instanceof Error ? error.message : String(error));
     });
+  }
+
+  /** 注册内置工具 */
+  private registerBuiltinTools(): void {
+    this.toolRegistry.register(ReadFileTool);
+    this.toolRegistry.register(WriteFileTool);
+    this.toolRegistry.register(ListDirTool);
+    this.toolRegistry.register(createExecTool(this.workspace));
+    this.toolRegistry.register(WebFetchTool);
+    this.toolRegistry.register(MessageTool);
+    startupInfo.tools = this.toolRegistry.getDefinitions().map(t => t.name);
   }
 
   async stop(): Promise<void> {
@@ -521,186 +319,6 @@ ${skillsSummary}`);
       coderModel: this.config.agents.models?.coder,
       intentModel: this.config.agents.models?.intent,
     };
-  }
-
-  private initProviders(): void {
-    const providers = this.config.providers as Record<string, ProviderEntry | undefined>;
-    const chatModel = this.config.agents.models?.chat || '';
-
-    const slashIndex = chatModel.indexOf('/');
-    const defaultProviderName = slashIndex > 0 ? chatModel.slice(0, slashIndex) : null;
-    const defaultModelId = slashIndex > 0 ? chatModel.slice(slashIndex + 1) : chatModel;
-
-    for (const [name, config] of Object.entries(providers)) {
-      if (!config) continue;
-
-      const modelIds = config.models ?? [];
-      const modelConfigs = parseModelConfigs(modelIds);
-
-      if (modelConfigs.length > 0) {
-        this.availableModels.set(name, modelConfigs);
-      }
-
-      const provider = new OpenAICompatibleProvider({
-        baseUrl: config.baseUrl,
-        apiKey: config.apiKey,
-        defaultModel: modelConfigs[0]?.id ?? defaultModelId,
-        modelConfigs,
-      });
-
-      const priority = name === defaultProviderName ? 1 : 100;
-      this.llmGateway.registerProvider(name, provider, modelIds.length > 0 ? modelIds : ['*'], priority, modelConfigs);
-    }
-  }
-
-  private initChannels(): void {
-    const channels = this.config.channels;
-
-    // 飞书通道
-    if (channels.feishu?.enabled && channels.feishu.appId && channels.feishu.appSecret) {
-      const channel = new FeishuChannel(this.messageBus, {
-        appId: channels.feishu.appId,
-        appSecret: channels.feishu.appSecret,
-        allowFrom: channels.feishu.allowFrom ?? [],
-      });
-      this.channelManager.register(channel);
-    }
-  }
-
-  /**
-   * 初始化记忆系统
-   */
-  private async initMemorySystem(): Promise<void> {
-    const memoryConfig = this.config.agents.memory;
-    
-    // 检查是否启用记忆系统
-    if (memoryConfig?.enabled === false) {
-      startupInfo.infos.push('记忆系统已禁用');
-      return;
-    }
-
-    try {
-      // 初始化嵌入服务
-      let embeddingService;
-      const embedModel = this.config.agents.models?.embed;
-      
-      // 收集模型信息
-      startupInfo.models.chat = this.config.agents.models?.chat;
-      startupInfo.models.vision = this.config.agents.models?.vision;
-      startupInfo.models.embed = embedModel;
-      startupInfo.models.coder = this.config.agents.models?.coder;
-      startupInfo.models.intent = this.config.agents.models?.intent;
-      
-      if (embedModel) {
-        const slashIndex = embedModel.indexOf('/');
-        const providerName = slashIndex > 0 ? embedModel.slice(0, slashIndex) : Object.keys(this.config.providers)[0];
-        const modelName = slashIndex > 0 ? embedModel.slice(slashIndex + 1) : embedModel;
-        const providerConfig = this.config.providers[providerName || ''];
-        
-        if (providerConfig?.baseUrl) {
-          embeddingService = new OpenAIEmbedding(
-            modelName,
-            providerConfig.baseUrl,
-            providerConfig.apiKey || ''
-          );
-          startupInfo.memory.mode = 'vector';
-          startupInfo.memory.embedModel = embedModel;
-        } else {
-          embeddingService = new NoEmbedding();
-          startupInfo.memory.mode = 'fulltext';
-          startupInfo.warnings.push('嵌入模型配置缺少 baseUrl，使用全文检索');
-        }
-      } else {
-        embeddingService = new NoEmbedding();
-        startupInfo.memory.mode = 'fulltext';
-      }
-
-      // 初始化 MemoryStore
-      const storagePath = memoryConfig?.storagePath 
-        ? expandPath(memoryConfig.storagePath)
-        : resolve(homedir(), '.micro-agent/memory');
-
-      this.memoryStore = new MemoryStore({
-        storagePath,
-        embeddingService,
-        embedModel, // 传入当前嵌入模型 ID
-        defaultSearchLimit: memoryConfig?.searchLimit ?? 10,
-        shortTermRetentionDays: memoryConfig?.shortTermRetentionDays ?? 7,
-      });
-
-      await this.memoryStore.initialize();
-      
-      // 检测模型变更并自动启动迁移
-      const modelChange = await this.memoryStore.detectModelChange();
-      if (modelChange.needMigration && modelChange.hasOldModelVectors) {
-        log.info('🔄 检测到嵌入模型变更，启动后台迁移', { 
-          oldModel: modelChange.oldModel, 
-          newModel: modelChange.newModel,
-        });
-        
-        // 自动启动后台迁移
-        try {
-          const result = await this.memoryStore.migrateToModel(modelChange.newModel, { autoStart: true });
-          if (result.success) {
-            startupInfo.infos.push(`嵌入模型迁移已启动：${modelChange.oldModel || '未知'} → ${modelChange.newModel}`);
-          } else {
-            startupInfo.warnings.push(`嵌入模型迁移启动失败：${result.error}`);
-          }
-        } catch (error) {
-          log.error('嵌入模型迁移启动异常', { error: String(error) });
-          startupInfo.warnings.push(`嵌入模型已从 ${modelChange.oldModel || '未知'} 变更为 ${modelChange.newModel}，迁移启动失败`);
-        }
-      } else if (modelChange.needMigration) {
-        // 模型变更但无旧向量，无需迁移
-        log.info('嵌入模型已变更，无旧向量需要迁移', { 
-          oldModel: modelChange.oldModel, 
-          newModel: modelChange.newModel,
-        });
-      }
-      
-      log.debug('记忆存储已初始化', { path: storagePath, embedModel });
-
-      // 初始化 Summarizer
-      if (memoryConfig?.autoSummarize !== false && this.memoryStore) {
-        const threshold = memoryConfig?.summarizeThreshold ?? 20;
-        this.summarizer = new ConversationSummarizer(
-          this.llmGateway,
-          this.memoryStore,
-          {
-            minMessages: threshold,
-            maxLength: 2000,
-            idleTimeout: memoryConfig?.idleTimeout ?? 300000,
-          }
-        );
-        startupInfo.memory.autoSummarize = true;
-        startupInfo.memory.summarizeThreshold = threshold;
-      }
-
-      // 初始化知识库
-      try {
-        const knowledgePath = resolve(homedir(), '.micro-agent/knowledge');
-        this.knowledgeBaseManager = new KnowledgeBaseManager(
-          {
-            basePath: knowledgePath,
-            embedModel: embedModel || undefined,
-          },
-          this.memoryStore // 注入 MemoryStore
-        );
-        await this.knowledgeBaseManager.initialize();
-        startupInfo.infos.push('知识库系统已启用');
-        log.info('📚 知识库系统已初始化', { path: knowledgePath });
-      } catch (error) {
-        log.warn('知识库初始化失败', { error: error instanceof Error ? error.message : String(error) });
-        this.knowledgeBaseManager = null;
-      }
-
-    } catch (error) {
-      log.error('记忆系统初始化失败', { error: error instanceof Error ? error.message : String(error) });
-      startupInfo.warnings.push('记忆系统初始化失败');
-      this.memoryStore = null;
-      this.summarizer = null;
-      this.knowledgeBaseManager = null;
-    }
   }
 }
 

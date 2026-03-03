@@ -2,9 +2,9 @@
 
 ## 概述
 
-Agent 实现了双执行模式：
-- **Function Calling 模式**：主流 LLM 的原生工具调用方式
-- **ReAct 模式**：基于 JSON 结构化输出的推理-行动循环
+Agent 核心执行器（AgentExecutor）采用 **Function Calling 模式**，利用主流 LLM 的原生工具调用能力实现 Agent 行为。
+
+同时提供独立的 ReAct Agent 实现（`ReActAgent`），基于 JSON 结构化输出的推理-行动循环。
 
 ## 工作流程
 
@@ -12,10 +12,14 @@ Agent 实现了双执行模式：
 
 ```mermaid
 flowchart LR
-    Start([用户消息]) --> Context[构建上下文]
-    Context --> Route[任务类型识别]
-    Route --> React[ReAct循环]
-    React --> Save[保存会话]
+    Start([用户消息]) --> Preflight[意图预处理]
+    Preflight --> Route[任务类型路由]
+    Route --> Context[构建上下文]
+    Context --> Execute[Function Calling 执行]
+    Execute --> Loop{循环检测?}
+    Loop -->|是| Execute
+    Loop -->|否| Cite[引用溯源]
+    Cite --> Save[保存会话]
     Save --> End([返回响应])
 ```
 
@@ -42,18 +46,54 @@ flowchart LR
     end
 ```
 
-### ReAct 循环
+### Function Calling 循环
 
 ```mermaid
 flowchart TB
-    subgraph ReAct[ReAct 循环]
+    subgraph FC[Function Calling 循环]
         direction TB
-        RL1[调用LLM] --> RL2{有工具调用?}
-        RL2 -->|是| Execute[执行工具]
-        RL2 -->|否| Return[返回响应]
-        Execute --> RL1
+        FC1[调用LLM] --> FC2{有工具调用?}
+        FC2 -->|是| Execute[执行工具]
+        FC2 -->|否| Check{循环检测?}
+        Check -->|是| FC1
+        Check -->|否| Return[返回响应]
+        Execute --> FC1
     end
 ```
+
+### 循环检测
+
+AgentExecutor 内置循环检测机制，防止 Agent 陷入无限循环：
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `warningThreshold` | 3 | 警告阈值，相同调用次数达到此值时发出警告 |
+| `criticalThreshold` | 5 | 临界阈值，达到此值时中断执行 |
+| `globalCircuitBreaker` | 30 | 全局熔断，累计调用次数上限 |
+
+```yaml
+agents:
+  executor:
+    loopDetection:
+      enabled: true
+      warningThreshold: 3
+      criticalThreshold: 5
+```
+
+### 引用溯源
+
+启用引用溯源后，Agent 响应会包含来源文档的引用：
+
+```yaml
+agents:
+  executor:
+    citationEnabled: true
+```
+
+引用格式支持：
+- `numbered` - 编号格式 [1], [2]
+- `bracket` - 括号格式
+- `footnote` - 脚注格式
 
 ## 配置
 
@@ -65,10 +105,18 @@ interface AgentConfig {
     vision?: string;   // 图片识别模型（默认使用 chat）
     coder?: string;    // 编程模型（默认使用 chat）
     intent?: string;   // 意图识别模型（默认使用 chat）
+    embed?: string;    // 嵌入模型（用于记忆检索）
   };
   maxIterations: number;
-  generation?: GenerationConfig;
-  availableModels?: Map<string, ModelConfig[]>;
+  maxHistoryMessages?: number;  // 消息历史保留数量
+  memoryEnabled?: boolean;      // 启用记忆系统
+  knowledgeEnabled?: boolean;   // 启用知识库
+  citationEnabled?: boolean;    // 启用引用溯源
+  loopDetection?: {
+    enabled: boolean;
+    warningThreshold: number;   // 警告阈值（默认 3）
+    criticalThreshold: number;  // 临界阈值（默认 5）
+  };
 }
 ```
 
