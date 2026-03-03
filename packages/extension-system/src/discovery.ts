@@ -9,6 +9,7 @@ import { join, resolve, dirname } from 'path';
 import { load } from 'js-yaml';
 import { getLogger } from '@logtape/logtape';
 import type { ExtensionDescriptor, ExtensionDiscoveryResult, ExtensionType } from '@micro-agent/types';
+import { EXTENSION_TYPES, isValidExtensionType } from '@micro-agent/types';
 
 const log = getLogger(['extension', 'discovery']);
 
@@ -154,9 +155,8 @@ export class ExtensionDiscovery {
 
     // 验证扩展类型
     const type = raw.type as ExtensionType;
-    const validTypes: ExtensionType[] = ['tool', 'channel', 'skill', 'agent', 'workflow', 'command', 'mcp-client', 'mcp-server'];
-    if (!validTypes.includes(type)) {
-      throw new Error(`无效的扩展类型: ${type}`);
+    if (!isValidExtensionType(type)) {
+      throw new Error(`无效的扩展类型: ${type}，有效类型: ${EXTENSION_TYPES.join(', ')}`);
     }
 
     return {

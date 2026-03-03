@@ -12,7 +12,11 @@ describe('SessionStore', () => {
   beforeEach(() => {
     // 清理测试目录
     if (existsSync(TEST_DIR)) {
-      rmSync(TEST_DIR, { recursive: true, force: true });
+      try {
+        rmSync(TEST_DIR, { recursive: true, force: true });
+      } catch {
+        // 忽略删除失败
+      }
     }
     mkdirSync(TEST_DIR, { recursive: true });
     
@@ -23,8 +27,16 @@ describe('SessionStore', () => {
   });
 
   afterEach(() => {
+    // 关闭数据库连接
+    store.close();
+    
+    // 清理测试目录
     if (existsSync(TEST_DIR)) {
-      rmSync(TEST_DIR, { recursive: true, force: true });
+      try {
+        rmSync(TEST_DIR, { recursive: true, force: true });
+      } catch {
+        // 忽略删除失败
+      }
     }
   });
 
@@ -70,7 +82,10 @@ describe('SessionStore', () => {
       session1.messages.push({ role: 'user', content: 'First', timestamp: Date.now() });
       store.save(session1);
       
-      // 模拟超时：使用新的 store 实例，并设置很长的超时时间
+      // 关闭当前 store
+      store.close();
+      
+      // 模拟超时：使用新的 store 实例，并设置很短的超时时间
       const store2 = new SessionStore({
         sessionsDir: TEST_DIR,
         sessionTimeout: 1, // 1ms 超时
@@ -85,6 +100,8 @@ describe('SessionStore', () => {
       // 获取会话应该是新的（因为超时）
       const session2 = store2.getOrCreate('feishu:123');
       expect(session2.messages).toHaveLength(0);
+      
+      store2.close();
     });
 
     it('should reuse session within timeout', () => {
@@ -98,8 +115,8 @@ describe('SessionStore', () => {
     });
   });
 
-  describe('JSONL 格式', () => {
-    it('should persist session to JSONL file', () => {
+  describe('SQLite 持久化', () => {
+    it('should persist session to SQLite database', () => {
       store.addMessage('feishu:123', 'user', 'Hello');
       store.addMessage('feishu:123', 'assistant', 'Hi!');
       
@@ -108,9 +125,12 @@ describe('SessionStore', () => {
       expect(session?.messages).toHaveLength(2);
     });
 
-    it('should load existing session from file', () => {
+    it('should load existing session from database', () => {
       // 创建会话
       store.addMessage('feishu:123', 'user', 'Hello');
+      
+      // 关闭当前 store
+      store.close();
       
       // 创建新的 store 实例
       const store2 = new SessionStore({ sessionsDir: TEST_DIR, sessionTimeout: 60000 });
@@ -119,6 +139,8 @@ describe('SessionStore', () => {
       expect(session).not.toBeNull();
       expect(session?.messages).toHaveLength(1);
       expect(session?.messages[0].content).toBe('Hello');
+      
+      store2.close();
     });
   });
 
@@ -146,6 +168,8 @@ describe('SessionStore', () => {
       
       const history = longTimeoutStore.getHistory('feishu:456', 20);
       expect(history).toHaveLength(20);
+      
+      longTimeoutStore.close();
     });
   });
 

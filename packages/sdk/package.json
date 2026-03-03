@@ -1,6 +1,6 @@
 {
   "name": "@micro-agent/sdk",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "MicroAgent 开发者 SDK",
   "type": "module",
   "author": "jesspig",
@@ -31,7 +31,7 @@
     "@micro-agent/config": "workspace:*",
     "@micro-agent/providers": "workspace:*",
     "@micro-agent/extension-system": "workspace:*",
-    "@logtape/logtape": "^2.0.2",
+    "@logtape/logtape": "^2.0.4",
     "zod": "^4.3.6",
     "mitt": "^3.0.1"
   },

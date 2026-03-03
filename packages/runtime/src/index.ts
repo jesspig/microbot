@@ -84,7 +84,72 @@ export {
   // Summarizer
   ConversationSummarizer,
   type SummarizerConfig,
+  // Classifier
+  classifyMemory,
+  classifyMemoriesBatch,
+  getMemoryTypeDescription,
+  getMemoryTypeIcon,
 } from './memory';
+
+// Citation System (RAG 级别溯源)
+export {
+  type Citation,
+  type CitedResponse,
+  type CitationGeneratorConfig,
+} from './types';
+export {
+  CitationGenerator,
+  createCitationGenerator,
+} from './citation';
+
+// Knowledge Base System
+export {
+  // Types
+  type KnowledgeBaseConfig,
+  type KnowledgeDocument,
+  type KnowledgeDocMetadata,
+  type KnowledgeDocStatus,
+  type KnowledgeDocType,
+  type KnowledgeChunk,
+  type KnowledgeSearchResult,
+  type KnowledgeBaseStats,
+  type BackgroundBuildStatus,
+  // Manager
+  KnowledgeBaseManager,
+  getKnowledgeBase,
+  setKnowledgeBase,
+  // Utils
+  getKnowledgeDocType,
+  isKnowledgeFileSupported,
+  KNOWLEDGE_FILE_EXTENSIONS,
+} from './knowledge';
 
 // Channel Gateway
 export { ChannelGatewayImpl } from './gateway';
+
+// Logging System
+export {
+  // Types
+  type LogLevel,
+  type LoggingConfig,
+  type TraceContext,
+  type MethodCallLog,
+  type LLMCallLog,
+  type ToolCallLog,
+  type EventLog,
+  type LogEntry,
+  type TracerOptions,
+  DEFAULT_LOGGING_CONFIG,
+  // Config
+  initLogging,
+  closeLogging,
+  isLoggingInitialized,
+  getLogFilePath,
+  createModuleLogger,
+  // Tracer
+  Tracer,
+  getTracer,
+  setTracer,
+  traceMethod,
+  traced,
+} from './logging';

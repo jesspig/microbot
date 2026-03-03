@@ -33,7 +33,7 @@ class MockBus implements MessageBus {
 }
 
 class TestChannel implements Channel {
-  readonly name: ChannelType = 'feishu';
+  readonly name: ChannelType = 'feishu' as ChannelType;
   private helper: ChannelHelper;
   private _running = false;
 

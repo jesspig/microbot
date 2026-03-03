@@ -18,7 +18,7 @@ const log = getLogger(['feishu']);
  */
 export class FeishuChannel implements Channel {
   /** 通道类型 */
-  readonly name: ChannelType = 'feishu';
+  readonly name: ChannelType = 'feishu' as ChannelType;
   /** Lark 客户端 */
   private client: Client | null = null;
   /** WebSocket 客户端 */

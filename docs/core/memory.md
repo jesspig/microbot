@@ -81,8 +81,20 @@ const result = await store.cleanupExpired();
 
 | 模式 | 条件 | 说明 |
 |------|------|------|
-| 向量检索 | 配置嵌入服务 | 基于语义相似度，召回最相关记忆 |
-| 全文检索 | 无嵌入服务 | 基于关键词匹配，支持中英文混合 |
+| `auto` | 默认 | 自动选择（向量优先，无嵌入服务时降级全文） |
+| `vector` | 配置嵌入服务 | 强制向量检索，基于语义相似度 |
+| `fulltext` | 无嵌入服务 | 强制全文检索，基于关键词匹配 |
+| `hybrid` | 配置嵌入服务 | 混合检索，结合向量和全文 |
+
+**向量检索算法**：
+1. 向量检索 Top-200 条记忆
+2. 关键词重排序，结合向量相似度（权重 0.7）和关键词匹配度（权重 0.3）
+3. 返回最终 Top-N 结果
+
+**双层检索算法**：
+1. 第一层：向量检索 Top-200 条记忆
+2. 第二层：关键词重排序，结合向量相似度（0.7）和关键词匹配度（0.3）
+3. 返回最终 Top-N 结果
 
 **全文检索算法**：
 - 英文：提取连续字母作为关键词
@@ -184,7 +196,7 @@ agents:
   models:
     chat: gpt-4o
     embed: text-embedding-3-small  # 嵌入模型
-  
+
   memory:
     enabled: true                    # 启用记忆系统
     storagePath: '~/.micro-agent/memory'
@@ -193,6 +205,12 @@ agents:
     idleTimeout: 300000              # 空闲超时 (ms)
     shortTermRetentionDays: 7        # 保留天数
     searchLimit: 10                  # 检索数量
+    multiEmbed:                      # 多嵌入模型配置
+      enabled: true
+      maxModels: 3
+      autoMigrate: true
+      batchSize: 50
+      migrateInterval: 0
 ```
 
 **配置项说明**：
@@ -206,6 +224,11 @@ agents:
 | `idleTimeout` | number | 300000 | 空闲超时时间 (ms) |
 | `shortTermRetentionDays` | number | 7 | 短期记忆保留天数 |
 | `searchLimit` | number | 10 | 检索结果数量上限 |
+| `multiEmbed.enabled` | boolean | true | 是否启用多嵌入模型 |
+| `multiEmbed.maxModels` | number | 3 | 最大支持的嵌入模型数 |
+| `multiEmbed.autoMigrate` | boolean | true | 是否自动迁移向量数据 |
+| `multiEmbed.batchSize` | number | 50 | 迁移批次大小 |
+| `multiEmbed.migrateInterval` | number | 0 | 迁移间隔时间 (ms) |
 
 ## 工作流程
 
@@ -311,8 +334,11 @@ const systemPrompt = `${basePrompt}\n\n相关记忆:\n${context}`;
 |------|------|----------|
 | `conversation` | 对话记录 | 用户-助手交互 |
 | `summary` | 对话摘要 | 结构化摘要 |
-| `fact` | 事实记忆 | 用户偏好、实体信息 |
-| `task` | 任务记忆 | 待办事项、项目状态 |
+| `preference` | 用户偏好 | 用户偏好设置 |
+| `fact` | 事实记忆 | 用户信息、实体信息 |
+| `decision` | 决策记录 | 重要决策 |
+| `entity` | 实体记忆 | 提及的实体 |
+| `document` | 文档知识 | 从知识库导入的内容 |
 
 ## 源码位置
 

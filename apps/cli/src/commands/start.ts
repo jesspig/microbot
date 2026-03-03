@@ -6,20 +6,33 @@
 
 import { createApp } from '../app';
 import { loadConfig, getConfigStatus } from '@micro-agent/config';
-import { configure, getConsoleSink } from '@logtape/logtape';
-import { prettyFormatter } from '@logtape/pretty';
+import { initLogging, getLogFilePath, type LoggingConfig } from '@micro-agent/runtime';
+import { getLogger } from '@logtape/logtape';
 
-/** 初始化 LogTape */
-async function initLogTape(verbose: boolean = false): Promise<void> {
-  await configure({
-    sinks: {
-      console: getConsoleSink({ formatter: prettyFormatter }),
-    },
-    loggers: [
-      { category: [], sinks: ['console'], lowestLevel: verbose ? 'debug' : 'info' },
-      { category: ['logtape', 'meta'], lowestLevel: 'warning' },
-    ],
-    reset: true,
+const log = getLogger(['cli', 'start']);
+
+/** 初始化日志系统 */
+async function initLoggingSystem(verbose: boolean = false, logDir?: string): Promise<void> {
+  const config: Partial<LoggingConfig> = {
+    console: true,
+    file: true,
+    level: verbose ? 'debug' : 'info',
+    traceEnabled: true,
+    logInput: true,
+    logOutput: true,
+    logDuration: true,
+  };
+
+  if (logDir) {
+    config.logDir = logDir;
+  }
+
+  await initLogging(config);
+  
+  log.info('日志系统已初始化', { 
+    logFile: getLogFilePath(config),
+    level: config.level,
+    traceEnabled: config.traceEnabled,
   });
 }
 
@@ -27,10 +40,15 @@ async function initLogTape(verbose: boolean = false): Promise<void> {
  * 启动服务
  * @param configPath - 可选的配置文件路径
  * @param verbose - 是否显示详细日志
+ * @param logDir - 可选的日志目录
  */
-export async function runStartCommand(configPath?: string, verbose: boolean = false): Promise<void> {
+export async function runStartCommand(
+  configPath?: string, 
+  verbose: boolean = false,
+  logDir?: string
+): Promise<void> {
   // 初始化日志
-  await initLogTape(verbose);
+  await initLoggingSystem(verbose, logDir);
   
   console.log('\x1b[2J\x1b[H'); // 清屏
   console.log();
@@ -95,6 +113,7 @@ export async function runStartCommand(configPath?: string, verbose: boolean = fa
     if (verbose) {
       console.log(`  \x1b[2m日志:\x1b[0m 详细模式`);
     }
+    console.log(`  \x1b[2m日志文件:\x1b[0m ${getLogFilePath({ logDir })}`);
     console.log();
     console.log('按 Ctrl+C 停止');
     console.log('─'.repeat(50));

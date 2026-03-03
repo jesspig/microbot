@@ -2,7 +2,7 @@
  * Runtime 核心类型定义
  */
 
-// 从 providers 重新导出 LLM 消息类型
+// 从 types 重新导出 LLM 消息类型（遵循依赖倒置原则）
 export type {
   LLMMessage,
   MessageRole,
@@ -18,14 +18,33 @@ export type {
   LLMResponse,
   LLMToolDefinition,
   GenerationConfig,
-} from '@micro-agent/providers';
+} from '@micro-agent/types';
 
 // ============================================================================
 // 记忆系统类型
 // ============================================================================
 
-/** 记忆条目类型 */
-export type MemoryEntryType = 'conversation' | 'summary' | 'entity';
+/** 记忆条目类型
+ * 
+ * 分类说明：
+ * - conversation: 对话记录（原始消息）
+ * - summary: 会话摘要
+ * - preference: 用户偏好（喜欢/讨厌/想要）
+ * - fact: 事实陈述（用户属性/状态）
+ * - decision: 决策记录（达成的共识/决定）
+ * - entity: 实体信息（联系人/地点/项目等）
+ * - document: 文档内容（知识库文档分块）
+ * - other: 其他无法分类的信息
+ */
+export type MemoryEntryType = 
+  | 'conversation' 
+  | 'summary' 
+  | 'preference' 
+  | 'fact' 
+  | 'decision' 
+  | 'entity' 
+  | 'document'
+  | 'other';
 
 /** 记忆元数据 */
 export interface MemoryMetadata {
@@ -39,6 +58,39 @@ export interface MemoryMetadata {
   importance?: number;
   /** 过期时间 */
   expiresAt?: Date;
+  /** 分类信息 */
+  classification?: {
+    confidence: number;
+    matchedPatterns: string[];
+  };
+  
+  // === 文档记忆专用字段 ===
+  /** 文档 ID（知识库来源） */
+  documentId?: string;
+  /** 文档路径（知识库来源） */
+  documentPath?: string;
+  /** 文件类型（知识库来源） */
+  fileType?: string;
+  /** 文档标题 */
+  documentTitle?: string;
+  /** 分块索引（文档记忆专用） */
+  chunkIndex?: number;
+  /** 分块起始位置（文档记忆专用） */
+  chunkStart?: number;
+  /** 分块结束位置（文档记忆专用） */
+  chunkEnd?: number;
+  /** 相似度分数 */
+  score?: number;
+  
+  // === 溯源引用字段 (RAG 级别溯源) ===
+  /** 页码（PDF/文档来源） */
+  pageNumber?: number;
+  /** 章节名称 */
+  section?: string;
+  /** 置信度 (0-1) */
+  confidence?: number;
+  /** 字符范围 [start, end] */
+  charRange?: [number, number];
 }
 
 /** 记忆条目 */
@@ -96,6 +148,52 @@ export interface MemoryStats {
 }
 
 // ============================================================================
+// 引用溯源类型 (RAG 级别溯源)
+// ============================================================================
+
+/** 引用来源 */
+export interface Citation {
+  /** 引用 ID */
+  id: string;
+  /** 来源文档 ID */
+  documentId: string;
+  /** 来源文档路径 */
+  documentPath: string;
+  /** 文档标题 */
+  documentTitle?: string;
+  /** 引用内容片段 */
+  snippet: string;
+  /** 页码 */
+  pageNumber?: number;
+  /** 章节 */
+  section?: string;
+  /** 置信度 (0-1) */
+  confidence: number;
+  /** 字符范围 */
+  charRange?: [number, number];
+}
+
+/** 带引用的响应 */
+export interface CitedResponse {
+  /** 响应内容 */
+  content: string;
+  /** 引用列表 */
+  citations: Citation[];
+}
+
+/** 引用生成器配置 */
+export interface CitationGeneratorConfig {
+  /** 最小置信度阈值 */
+  minConfidence: number;
+  /** 最大引用数 */
+  maxCitations: number;
+  /** 片段最大长度 */
+  maxSnippetLength: number;
+  /** 引用格式 */
+  format: 'numbered' | 'bracket' | 'footnote';
+}
+
+// ============================================================================
 // 循环检测类型
 // ============================================================================
 
@@ -145,8 +243,8 @@ export interface MessageManagerConfig {
 export interface MemoryFilter {
   /** 会话标识 */
   sessionId?: string;
-  /** 条目类型 */
-  type?: MemoryEntryType;
+  /** 条目类型（支持单个或多个） */
+  type?: MemoryEntryType | MemoryEntryType[];
   /** 标签 */
   tags?: string[];
   /** 日期范围 */
@@ -160,7 +258,9 @@ export interface SearchOptions {
   /** 过滤条件 */
   filter?: MemoryFilter;
   /** 检索模式 */
-  mode?: 'vector' | 'fulltext' | 'hybrid';
+  mode?: 'auto' | 'vector' | 'fulltext' | 'hybrid';
+  /** 指定使用的嵌入模型 ID（格式：<provider>/<model>） */
+  model?: string;
 }
 
 // ============================================================================

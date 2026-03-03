@@ -4,8 +4,22 @@
  * 零依赖模块，定义所有核心接口，避免循环依赖。
  */
 
-/** 通道类型 */
-export type ChannelType = 'feishu' | 'email' | 'system' | 'cli';
+/**
+ * 通道类型
+ *
+ * 使用 branded string 支持：
+ * 1. 类型区分（防止与其他 string 混淆）
+ * 2. 动态扩展（插件可注册新的通道类型）
+ *
+ * @example
+ * // 在通道实现中
+ * readonly name: ChannelType = 'my-channel' as ChannelType;
+ *
+ * // 或使用 SDK 提供的辅助函数
+ * import { createChannelType } from '@micro-agent/sdk';
+ * readonly name = createChannelType('my-channel');
+ */
+export type ChannelType = string & { readonly __brand: unique symbol };
 
 /** 通道接口 */
 export interface Channel {
@@ -45,8 +59,6 @@ export interface App {
   getProviderStatus(): string;
   /** 获取路由状态 */
   getRouterStatus(): { chatModel: string; visionModel?: string; coderModel?: string; intentModel?: string };
-  /** 交互式对话 */
-  chat(input: string): Promise<string>;
 }
 
 /** 广播消息结构 */

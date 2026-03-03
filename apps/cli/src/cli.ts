@@ -5,19 +5,27 @@
  *
  * 命令:
  * - start: 启动服务
- * - chat:  交互式对话
  * - status: 显示状态
  * - ext: 扩展管理
  */
 
 import { parseArgs } from 'util';
-import { createInterface } from 'readline';
-import { initLogger } from '@micro-agent/config';
 import { createApp } from './app';
 import { loadConfig, getConfigStatus } from '@micro-agent/config';
+import { initLogging, getLogFilePath } from '@micro-agent/runtime';
 import type { App } from '@micro-agent/types';
 
 const VERSION = '0.2.1';
+
+/** 初始化日志系统 */
+async function initLoggingSystem(level: 'debug' | 'info' | 'warn' = 'info'): Promise<void> {
+  await initLogging({
+    console: true,
+    file: true,
+    level,
+    traceEnabled: level === 'debug',
+  });
+}
 
 /** 显示帮助信息 */
 function showHelp(): void {
@@ -29,23 +37,27 @@ MicroAgent - 轻量级 AI 助手框架
 
 命令:
   start       启动服务（连接外部通道）
-  chat        交互式对话（终端直接对话）
   status      显示状态
   ext         扩展管理
 
 选项:
   -c, --config <path>   配置文件路径
-  -v, --verbose         显示详细日志
+  -v, --verbose         显示详细日志（工具调用详情）
+  -q, --quiet           静默模式，仅显示警告和错误
   -h, --help            显示帮助
       --version         显示版本
 
+日志级别:
+  默认      显示 INFO 级别日志，工具调用摘要
+  -v        显示 DEBUG 级别日志，工具调用详情
+  -q        仅显示 WARNING 和 ERROR 日志
+
 示例:
-  micro-agent chat              # 终端对话
-  micro-agent start             # 启动服务连接飞书/钉钉
-  micro-agent start -v
+  micro-agent start             # 启动服务
+  micro-agent start -v          # 详细模式，查看工具调用详情
+  micro-agent start -q          # 静默模式
   micro-agent start -c ./config.yaml
   micro-agent status
-  micro-agent ext list
 `);
 }
 
@@ -67,84 +79,22 @@ function showStatus(app: App): void {
   console.log();
 }
 
-/** 交互式对话模式 */
-async function chatService(configPath?: string): Promise<void> {
-  console.log('\x1b[2J\x1b[H');
-  console.log();
-  console.log('\x1b[1m\x1b[36mMicroAgent Chat\x1b[0m');
-  console.log('─'.repeat(50));
-
-  const baseConfig = loadConfig(configPath ? { configPath } : {});
-  const configStatus = getConfigStatus(baseConfig);
-
-  if (configStatus.missingRequired.length > 0) {
-    console.log();
-    console.log('\x1b[33m  ⚠ 配置不完整\x1b[0m');
-    console.log();
-    console.log('  缺少必填项：');
-    for (const item of configStatus.missingRequired) {
-      console.log(`    \x1b[31m✗\x1b[0m ${item}`);
-    }
-    console.log();
-    console.log('  请编辑 \x1b[36m~/.micro-agent/settings.yaml\x1b[0m 完成配置');
-    console.log('─'.repeat(50));
-    console.log();
-    process.exit(1);
-  }
-
-  const app = await createApp(configPath);
-  await app.start();
-
-  const routerStatus = app.getRouterStatus();
-  console.log(`  \x1b[2m对话模型:\x1b[0m ${routerStatus.chatModel}`);
-  console.log('─'.repeat(50));
-  console.log();
-  console.log('输入消息开始对话，输入 /exit 退出');
-  console.log();
-
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  const question = (prompt: string): Promise<string> => {
-    return new Promise(resolve => {
-      rl.question(prompt, resolve);
-    });
-  };
-
-  // 主对话循环
-  try {
-    while (true) {
-      const input = await question('\x1b[1m你:\x1b[0m ');
-
-      if (!input.trim()) continue;
-      if (input.trim().toLowerCase() === '/exit') {
-        break;
-      }
-
-      try {
-        // 发送消息到 Agent（响应已由 CliChannel 输出）
-        await app.chat(input.trim());
-      } catch (error) {
-        console.log();
-        console.log(`\x1b[31m错误: ${error instanceof Error ? error.message : String(error)}\x1b[0m`);
-        console.log();
-      }
-    }
-  } finally {
-    rl.close();
-    await app.stop();
-    console.log('再见！');
-  }
-}
-
 /** 启动服务 */
-async function startService(configPath?: string): Promise<void> {
+async function startService(configPath?: string, logLevel: 'debug' | 'info' | 'warn' = 'info'): Promise<void> {
+  // 初始化日志
+  await initLoggingSystem(logLevel);
+
   console.log('\x1b[2J\x1b[H'); // 清屏
   console.log();
   console.log('\x1b[1m\x1b[36mMicroAgent\x1b[0m');
   console.log('─'.repeat(50));
+  
+  // 显示日志级别
+  if (logLevel === 'debug') {
+    console.log('  \x1b[90m日志级别:\x1b[0m \x1b[36mDEBUG\x1b[0m (详细模式)');
+  } else if (logLevel === 'warn') {
+    console.log('  \x1b[90m日志级别:\x1b[0m \x1b[33mWARN\x1b[0m (静默模式)');
+  }
 
   // 检查配置状态
   const baseConfig = loadConfig(configPath ? { configPath } : {});
@@ -191,40 +141,20 @@ async function startService(configPath?: string): Promise<void> {
   // 启动
   try {
     await app.start();
-    const routerStatus = app.getRouterStatus();
     const runningChannels = app.getRunningChannels();
     const hasChannels = runningChannels.length > 0;
 
-    console.log('─'.repeat(50));
-
-    // 通道状态显示
-    if (hasChannels) {
-      console.log(`  \x1b[2m通道:\x1b[0m ${runningChannels.join(', ')}`);
-    } else {
-      console.log(`  \x1b[33m通道: 未配置\x1b[0m`);
-    }
-
-    console.log(`  \x1b[2m对话模型:\x1b[0m ${routerStatus.chatModel}`);
-    if (routerStatus.visionModel) {
-      console.log(`  \x1b[2m视觉模型:\x1b[0m ${routerStatus.visionModel}`);
-    }
-    if (routerStatus.coderModel) {
-      console.log(`  \x1b[2m编程模型:\x1b[0m ${routerStatus.coderModel}`);
-    }
+    // 日志文件路径
+    console.log(`  \x1b[2m日志文件:\x1b[0m ${getLogFilePath()}`);
 
     // 未配置通道时显示警告
     if (!hasChannels) {
       console.log();
       console.log('\x1b[33m  ⚠ 未配置消息通道\x1b[0m');
       console.log();
-      console.log('  Agent 已启动但无法接收消息。请选择以下方式之一：');
+      console.log('  Agent 已启动但无法接收消息。');
       console.log();
-      console.log('  \x1b[36m1. 配置外部通道\x1b[0m');
-      console.log('     编辑 ~/.micro-agent/settings.yaml，启用飞书/钉钉等通道');
-      console.log();
-      console.log('  \x1b[36m2. 使用交互模式\x1b[0m');
-      console.log('     运行: micro-agent chat');
-      console.log();
+      console.log('  请编辑 \x1b[36m~/.micro-agent/settings.yaml\x1b[0m 启用飞书等通道');
       console.log('─'.repeat(50));
     } else {
       console.log();
@@ -245,6 +175,7 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
     options: {
       config: { type: 'string', short: 'c' },
       verbose: { type: 'boolean', short: 'v' },
+      quiet: { type: 'boolean', short: 'q' },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean' },
     },
@@ -254,12 +185,10 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
 
   const helpVal = parsed.values.help as boolean | undefined;
   const versionVal = parsed.values.version as boolean | undefined;
-  const configVal = parsed.values.config as string | undefined;
   const verboseVal = parsed.values.verbose as boolean | undefined;
+  const quietVal = parsed.values.quiet as boolean | undefined;
+  const configVal = parsed.values.config as string | undefined;
   const { positionals } = parsed;
-
-  // 初始化日志（必须在所有日志调用之前）
-  await initLogger({ verbose: verboseVal });
 
   // 全局选项
   if (helpVal && positionals.length === 0) {
@@ -274,14 +203,13 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
 
   const command = positionals[0];
   const configPath = typeof configVal === 'string' ? configVal : undefined;
+  
+  // 日志级别：quiet > verbose > 默认
+  const logLevel = quietVal ? 'warn' : (verboseVal ? 'debug' : 'info');
 
   switch (command) {
     case 'start':
-      await startService(configPath);
-      break;
-
-    case 'chat':
-      await chatService(configPath);
+      await startService(configPath, logLevel);
       break;
 
     case 'status': {

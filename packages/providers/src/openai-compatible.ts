@@ -3,6 +3,7 @@
  */
 
 import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, OpenAIResponse, GenerationConfig } from './base';
+import type { ProviderCapabilities } from '@micro-agent/types';
 import { parseOpenAIResponse, toOpenAIMessages } from './base';
 import type { ModelConfig } from '@micro-agent/config';
 import { getLogger } from '@logtape/logtape';
@@ -112,10 +113,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
     return true;
   }
 
-  getModelCapabilities(modelId: string): ModelConfig {
-    const found = this.modelConfigs.find(m => m.id === modelId);
-    if (found) return found;
-    return { ...DEFAULT_MODEL_CONFIG, id: modelId };
+  getModelCapabilities(modelId: string): ProviderCapabilities {
+    // ModelConfig 不包含能力信息，返回默认配置
+    // 默认支持工具调用，不支持视觉和思考
+    return { vision: false, think: false, tool: true };
   }
 
   async listModels(): Promise<string[] | null> {

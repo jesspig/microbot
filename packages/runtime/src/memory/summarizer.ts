@@ -2,7 +2,7 @@
  * 对话摘要器
  */
 
-import type { LLMMessage, LLMGateway } from '@micro-agent/providers';
+import type { LLMMessage, LLMProvider } from '@micro-agent/types';
 import type { Summary, MemoryEntry } from '../types';
 import type { MemoryStore } from './store';
 import { getLogger } from '@logtape/logtape';
@@ -40,7 +40,7 @@ export class ConversationSummarizer {
   private pendingMessages: LLMMessage[] = [];
 
   constructor(
-    private gateway: LLMGateway,
+    private gateway: LLMProvider,
     private memoryStore: MemoryStore,
     private config: SummarizerConfig = DEFAULT_CONFIG
   ) {}
@@ -56,7 +56,7 @@ export class ConversationSummarizer {
    * 生成摘要
    */
   async summarize(messages: LLMMessage[]): Promise<Summary> {
-    log.info('生成对话摘要', { messageCount: messages.length });
+    log.debug('生成对话摘要', { messageCount: messages.length });
 
     const prompt = this.buildSummaryPrompt(messages);
     const response = await this.gateway.chat([
@@ -65,7 +65,7 @@ export class ConversationSummarizer {
     ]);
 
     const summary = this.parseSummary(response.content, messages);
-    log.info('摘要生成完成', { topic: summary.topic, keyPoints: summary.keyPoints.length });
+    log.debug('摘要生成完成', { topic: summary.topic, keyPoints: summary.keyPoints.length });
 
     return summary;
   }
@@ -87,7 +87,7 @@ export class ConversationSummarizer {
     };
 
     await this.memoryStore.store(entry);
-    log.info('摘要已存储', { id: summary.id, sessionId });
+    log.debug('摘要已存储', { id: summary.id, sessionId });
   }
 
   /**
