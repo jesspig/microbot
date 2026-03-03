@@ -65,9 +65,9 @@
     "test": "bun test",
     "test:container": "bun test tests/unit/container.test.ts",
     "test:config": "bun test tests/unit/config.test.ts",
-    "test:unit": "bun test tests/unit/",
-    "test:integration": "bun test tests/integration/",
-    "test:e2e": "bun test tests/e2e/",
+    "test:unit": "bun test tests/",
+    "test:integration": "bun test tests/",
+    "test:e2e": "bun test tests/",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

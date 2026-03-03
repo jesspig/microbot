@@ -2,14 +2,14 @@
  * 系统信息工具 - 主入口
  * 
  * 用法:
- *   bun src/index.ts              # 完整系统信息
- *   bun src/index.ts --type cpu   # 仅 CPU 信息（实时）
- *   bun src/index.ts --type mem   # 仅内存信息
- *   bun src/index.ts --type disk  # 仅磁盘信息
- *   bun src/index.ts --type network # 网络信息
- *   bun src/index.ts --type process # 进程信息
- *   bun src/index.ts --type sys   # 系统信息
- *   bun src/index.ts --json      # JSON 输出
+ *   bun scripts/index.ts              # 完整系统信息
+ *   bun scripts/index.ts --type cpu   # 仅 CPU 信息（实时）
+ *   bun scripts/index.ts --type mem   # 仅内存信息
+ *   bun scripts/index.ts --type disk  # 仅磁盘信息
+ *   bun scripts/index.ts --type network # 网络信息
+ *   bun scripts/index.ts --type process # 进程信息
+ *   bun scripts/index.ts --type sys   # 系统信息
+ *   bun scripts/index.ts --json      # JSON 输出
  */
 import { parseArgs, output } from './shared';
 import { getCpuInfo } from './cpu';

@@ -3,12 +3,12 @@
  * 时间工具 - 主入口
  * 
  * 用法:
- *   bun time.ts                    # 当前时间
- *   bun time.ts --timezone Asia/Tokyo     # 指定时区
- *   bun time.ts --format "YYYY/MM/DD"   # 自定义格式
- *   bun time.ts --diff "2026-12-31"    # 计算时间差
- *   bun time.ts --timestamp 1700000000   # 时间戳转日期
- *   bun time.ts --unix                   # 当前时间戳
+ *   bun scripts/index.ts                    # 当前时间
+ *   bun scripts/index.ts --timezone Asia/Tokyo     # 指定时区
+ *   bun scripts/index.ts --format "YYYY/MM/DD"   # 自定义格式
+ *   bun scripts/index.ts --diff "2026-12-31"    # 计算时间差
+ *   bun scripts/index.ts --timestamp 1700000000   # 时间戳转日期
+ *   bun scripts/index.ts --unix                   # 当前时间戳
  */
 import { parseArgs } from './shared';
 import { formatTime } from './format';
