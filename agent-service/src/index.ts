@@ -11,15 +11,10 @@
 import { loadConfig, type Config } from '@micro-agent/config';
 import { OpenAICompatibleProvider, type LLMProvider } from '../runtime/provider/llm/openai';
 import { ToolRegistry, type ToolContext } from '../runtime/capability/tool-system/registry';
+import { getLogger, initLogging, getTracer, subscribeToLogs, type ServiceLifecycleLog, type SessionLifecycleLog, type LLMCallLog, type ToolCallLog, type IPCMessageLog } from '../runtime/infrastructure/logging/logger';
 
-const log = {
-  info: (msg: string, data?: Record<string, unknown>) =>
-    console.log(`[AgentService] ${msg}`, data ? JSON.stringify(data) : ''),
-  error: (msg: string, error?: Error) =>
-    console.error(`[AgentService] ${msg}`, error?.message ?? ''),
-  debug: (msg: string, data?: Record<string, unknown>) =>
-    process.env.LOG_LEVEL === 'debug' && console.log(`[AgentService] ${msg}`, data ? JSON.stringify(data) : ''),
-};
+const log = getLogger(['agent-service']);
+const tracer = getTracer();
 
 /** Agent Service 配置 */
 interface AgentServiceConfig {
@@ -32,6 +27,82 @@ const DEFAULT_CONFIG: AgentServiceConfig = {
   logLevel: 'info',
   workspace: process.cwd(),
 };
+
+/**
+ * 记录服务生命周期日志
+ */
+function logServiceLifecycle(
+  event: ServiceLifecycleLog['event'],
+  options?: { error?: string; mode?: 'ipc' | 'standalone' }
+): void {
+  const entry: ServiceLifecycleLog = {
+    _type: 'service_lifecycle',
+    timestamp: new Date().toISOString(),
+    level: event === 'error' ? 'error' : 'info',
+    category: 'agent-service',
+    message: event === 'start' ? 'Agent Service 启动中...'
+      : event === 'ready' ? 'Agent Service 已就绪'
+      : event === 'stop' ? 'Agent Service 已停止'
+      : `Agent Service 错误: ${options?.error}`,
+    event,
+    service: {
+      version: '1.0.0',
+      mode: options?.mode,
+      pid: process.pid,
+    },
+    error: options?.error,
+  };
+  
+  log.info('📢 服务生命周期', entry);
+}
+
+/**
+ * 记录会话生命周期日志
+ */
+function logSessionLifecycle(
+  event: SessionLifecycleLog['event'],
+  sessionId: string,
+  user?: { id?: string; channel?: string }
+): void {
+  const entry: SessionLifecycleLog = {
+    _type: 'session_lifecycle',
+    timestamp: new Date().toISOString(),
+    level: 'info',
+    category: 'session',
+    message: event === 'create' ? `会话创建: ${sessionId.slice(0, 8)}`
+      : event === 'destroy' ? `会话销毁: ${sessionId.slice(0, 8)}`
+      : `会话${event}: ${sessionId.slice(0, 8)}`,
+    event,
+    sessionId,
+    user,
+  };
+  
+  log.info('📱 会话生命周期', entry);
+}
+
+/**
+ * 记录 IPC 消息日志
+ */
+function logIPCMessage(
+  direction: 'in' | 'out',
+  method: string,
+  options?: { requestId?: string; sessionId?: string; size?: number }
+): void {
+  const entry: IPCMessageLog = {
+    _type: 'ipc_message',
+    timestamp: new Date().toISOString(),
+    level: 'debug',
+    category: 'ipc',
+    message: direction === 'in' ? `收到请求: ${method}` : `发送响应: ${method}`,
+    direction,
+    method,
+    requestId: options?.requestId,
+    sessionId: options?.sessionId,
+    size: options?.size,
+  };
+  
+  log.debug('📨 IPC 消息', entry);
+}
 
 /**
  * Agent Service 实现
@@ -60,10 +131,14 @@ class AgentServiceImpl {
       return;
     }
 
-    log.info('Agent Service 启动中...', {
-      workspace: this.config.workspace,
-      mode: this.isIPCMode ? 'IPC' : '独立'
+    // 初始化日志系统
+    await initLogging({
+      console: true,
+      file: true,
+      level: this.config.logLevel ?? 'info',
     });
+
+    logServiceLifecycle('start', { mode: this.isIPCMode ? 'ipc' : 'standalone' });
 
     // 加载配置
     await this.loadAppConfig();
@@ -78,7 +153,7 @@ class AgentServiceImpl {
     }
 
     this.running = true;
-    log.info('Agent Service 已启动');
+    logServiceLifecycle('ready', { mode: this.isIPCMode ? 'ipc' : 'standalone' });
   }
 
   /**
@@ -91,8 +166,7 @@ class AgentServiceImpl {
       });
       log.info('配置加载成功');
     } catch (error) {
-      log.error('配置加载失败，使用默认配置', error as Error);
-      // 使用默认配置
+      log.error('配置加载失败，使用默认配置', { error: (error as Error).message });
       this.appConfig = {
         agents: {
           workspace: this.config.workspace ?? '~/.micro-agent/workspace',
@@ -114,14 +188,8 @@ class AgentServiceImpl {
    */
   private initializeComponents(): void {
     if (!this.appConfig) return;
-
-    // 初始化 LLM Provider
     this.initializeLLMProvider();
-
-    // 初始化 Tool Registry
     this.initializeToolRegistry();
-
-    // 设置系统提示词
     this.systemPrompt = this.buildSystemPrompt();
   }
 
@@ -132,13 +200,11 @@ class AgentServiceImpl {
     const providers = this.appConfig?.providers || {};
     const agentConfig = this.appConfig?.agents;
 
-    // 解析默认模型信息
     const chatModelConfig = agentConfig?.models?.chat || '';
     const slashIndex = chatModelConfig.indexOf('/');
     const defaultProviderName = slashIndex > 0 ? chatModelConfig.slice(0, slashIndex) : null;
     const defaultModelId = slashIndex > 0 ? chatModelConfig.slice(slashIndex + 1) : chatModelConfig;
 
-    // 如果指定了 provider 名称，优先使用该 provider
     if (defaultProviderName) {
       const providerConfig = providers[defaultProviderName];
       if (providerConfig?.baseUrl) {
@@ -146,7 +212,7 @@ class AgentServiceImpl {
         
         this.llmProvider = new OpenAICompatibleProvider({
           baseUrl: providerConfig.baseUrl,
-          apiKey: providerConfig.apiKey,  // 可选，Ollama 等本地 provider 不需要
+          apiKey: providerConfig.apiKey,
           defaultModel: defaultModelId,
           defaultGenerationConfig: {
             maxTokens: agentConfig?.maxTokens ?? 512,
@@ -157,20 +223,20 @@ class AgentServiceImpl {
           },
         }, defaultProviderName);
 
-        log.info(`LLM Provider 已初始化: ${defaultProviderName}, 默认模型: ${defaultModelId}`);
+        log.info('LLM Provider 已初始化', { 
+          _type: 'llm_call',
+          provider: defaultProviderName, 
+          model: defaultModelId,
+          success: true,
+        });
         return;
-      } else {
-        log.info(`配置的 provider "${defaultProviderName}" 未找到或缺少 baseUrl`);
       }
     }
 
     // 回退：查找第一个可用的 provider
     for (const [name, providerConfig] of Object.entries(providers)) {
       if (providerConfig.baseUrl) {
-        // 获取模型列表
         const models = providerConfig.models || [];
-        
-        // 确定要使用的模型 ID
         let modelId: string;
         if (models.length > 0) {
           const firstModel = models[0];
@@ -195,12 +261,11 @@ class AgentServiceImpl {
           },
         }, name);
 
-        log.info(`LLM Provider 已初始化（回退）: ${name}, 默认模型: ${modelId}`);
+        log.info('LLM Provider 已初始化（回退）', { provider: name, model: modelId });
         return;
       }
     }
 
-    // 没有配置 provider，使用模拟模式
     log.info('未配置 LLM Provider，使用模拟响应模式');
   }
 
@@ -212,10 +277,9 @@ class AgentServiceImpl {
       workspace: this.config.workspace,
     });
 
-    // 注册内置工具
     this.registerBuiltinTools();
 
-    log.info(`Tool Registry 已初始化，已注册 ${this.toolRegistry.size} 个工具`);
+    log.info('Tool Registry 已初始化', { toolCount: this.toolRegistry.size });
   }
 
   /**
@@ -223,9 +287,7 @@ class AgentServiceImpl {
    */
   private registerBuiltinTools(): void {
     if (!this.toolRegistry) return;
-
     // TODO: 注册更多内置工具
-    // 当前只有基础框架，后续可以注册文件操作、搜索等工具
   }
 
   /**
@@ -269,6 +331,8 @@ class AgentServiceImpl {
     const request = typeof message === 'string' ? JSON.parse(message) : message;
     const { id, method, params } = request;
 
+    logIPCMessage('in', method, { requestId: id });
+
     try {
       switch (method) {
         case 'ping':
@@ -286,6 +350,7 @@ class AgentServiceImpl {
         case 'execute':
           this.execute(params).then((result) => {
             process.send?.({ jsonrpc: '2.0', id, result });
+            logIPCMessage('out', 'execute', { requestId: id });
           }).catch((error) => {
             process.send?.({
               jsonrpc: '2.0',
@@ -332,7 +397,6 @@ class AgentServiceImpl {
       on: () => {},
     } as any);
 
-    // 注册方法处理器
     if ('registerMethod' in ipcServer) {
       ipcServer.registerMethod('ping', async () => ({ pong: true }));
       ipcServer.registerMethod('status', async () => this.getStatus());
@@ -347,9 +411,8 @@ class AgentServiceImpl {
 
     await ipcServer.start();
 
-    // 信号处理
     const shutdown = async () => {
-      console.log('\n正在关闭...');
+      logServiceLifecycle('stop');
       await ipcServer.stop();
       process.exit(0);
     };
@@ -383,7 +446,6 @@ class AgentServiceImpl {
       content: { type: string; text: string };
     };
 
-    // 如果有 LLM Provider，调用真实 LLM
     if (this.llmProvider) {
       const messages = [
         { role: 'system' as const, content: this.systemPrompt },
@@ -398,7 +460,6 @@ class AgentServiceImpl {
       };
     }
 
-    // 模拟响应
     return {
       sessionId,
       content: `执行结果: ${content.text}`,
@@ -415,25 +476,23 @@ class AgentServiceImpl {
       content: { type: string; text: string };
     };
 
-    // 存储会话
+    logSessionLifecycle('create', sessionId);
+
     if (!this.sessions.has(sessionId)) {
       this.sessions.set(sessionId, { messages: [] });
     }
     const session = this.sessions.get(sessionId)!;
     session.messages.push({ role: 'user', content: content.text });
 
-    // 如果有 LLM Provider，调用真实 LLM
     if (this.llmProvider) {
       try {
         await this.streamFromLLM(session, content.text, requestId);
         return;
       } catch (error) {
-        log.error('LLM 调用失败', error as Error);
-        // 回退到模拟响应
+        log.error('LLM 调用失败', { error: (error as Error).message });
       }
     }
 
-    // 模拟流式响应
     await this.streamMockResponse(content.text, requestId);
   }
 
@@ -447,12 +506,12 @@ class AgentServiceImpl {
   ): Promise<void> {
     if (!this.llmProvider) return;
 
-    // 构建消息历史
+    const startTime = Date.now();
+
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: this.systemPrompt },
     ];
 
-    // 添加历史消息（最近 10 条）
     const recentMessages = session.messages.slice(-10);
     for (const msg of recentMessages) {
       messages.push({
@@ -461,40 +520,66 @@ class AgentServiceImpl {
       });
     }
 
-    // 获取工具定义
     const tools = this.toolRegistry?.getDefinitions() || [];
 
-    // 调用 LLM（非流式，因为我们自己的流式层在 IPC 上）
-    const response = await this.llmProvider.chat(messages, tools.length > 0 ? tools : undefined);
+    try {
+      const response = await this.llmProvider.chat(messages, tools.length > 0 ? tools : undefined);
+      const elapsed = Date.now() - startTime;
 
-    // 检查是否有工具调用
-    if (response.hasToolCalls && response.toolCalls && this.toolRegistry) {
-      // 处理工具调用
-      await this.handleToolCalls(response.toolCalls, messages, requestId);
-      return;
-    }
+      // 记录 LLM 调用
+      tracer.logLLMCall(
+        this.defaultModel,
+        this.llmProvider.name,
+        messages.length,
+        tools.length,
+        elapsed,
+        true,
+        undefined,
+        undefined,
+        response.content?.slice(0, 100),
+        response.hasToolCalls
+      );
 
-    // 流式发送响应
-    const fullContent = response.content || '';
-    for (let i = 0; i < fullContent.length; i += 20) {
-      const chunk = fullContent.slice(i, i + 20);
+      if (response.hasToolCalls && response.toolCalls && this.toolRegistry) {
+        await this.handleToolCalls(response.toolCalls, messages, requestId);
+        return;
+      }
+
+      const fullContent = response.content || '';
+      
+      for (let i = 0; i < fullContent.length; i += 20) {
+        const chunk = fullContent.slice(i, i + 20);
+        process.send?.({
+          jsonrpc: '2.0',
+          id: requestId,
+          method: 'stream',
+          params: { delta: chunk, done: false },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
       process.send?.({
         jsonrpc: '2.0',
         id: requestId,
         method: 'stream',
-        params: { delta: chunk, done: false },
+        params: { done: true },
       });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      session.messages.push({ role: 'assistant', content: fullContent });
+    } catch (error) {
+      const elapsed = Date.now() - startTime;
+      tracer.logLLMCall(
+        this.defaultModel,
+        this.llmProvider.name,
+        messages.length,
+        tools.length,
+        elapsed,
+        false,
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+      throw error;
     }
-
-    process.send?.({
-      jsonrpc: '2.0',
-      id: requestId,
-      method: 'stream',
-      params: { done: true },
-    });
-
-    session.messages.push({ role: 'assistant', content: fullContent });
   }
 
   /**
@@ -507,38 +592,52 @@ class AgentServiceImpl {
   ): Promise<void> {
     if (!this.toolRegistry || !this.llmProvider) return;
 
-    // 添加助手消息（带工具调用）
     messages.push({
       role: 'assistant',
       content: '',
     });
 
-    // 执行工具
     for (const tc of toolCalls) {
-      const toolContext: ToolContext = {
-        channel: 'ipc',
-        chatId: requestId,
-        workspace: this.config.workspace ?? process.cwd(),
-        currentDir: this.config.workspace ?? process.cwd(),
-        sendToBus: async () => {},
-      };
+      const startTime = Date.now();
+      
+      try {
+        const toolContext: ToolContext = {
+          channel: 'ipc',
+          chatId: requestId,
+          workspace: this.config.workspace ?? process.cwd(),
+          currentDir: this.config.workspace ?? process.cwd(),
+          sendToBus: async () => {},
+        };
 
-      const result = await this.toolRegistry.execute(tc.name, tc.arguments, toolContext);
-      const resultContent = typeof result.content === 'string' 
-        ? result.content 
-        : JSON.stringify(result.content);
+        const result = await this.toolRegistry.execute(tc.name, tc.arguments, toolContext);
+        const resultContent = typeof result.content === 'string' 
+          ? result.content 
+          : JSON.stringify(result.content);
+        const elapsed = Date.now() - startTime;
 
-      messages.push({
-        role: 'user' as const,
-        content: `工具 ${tc.name} 结果: ${resultContent}`,
-      });
+        tracer.logToolCall(tc.name, tc.arguments, resultContent, elapsed, true);
+
+        messages.push({
+          role: 'user' as const,
+          content: `工具 ${tc.name} 结果: ${resultContent}`,
+        });
+      } catch (error) {
+        const elapsed = Date.now() - startTime;
+        tracer.logToolCall(
+          tc.name, 
+          tc.arguments, 
+          '', 
+          elapsed, 
+          false, 
+          error instanceof Error ? error.message : String(error)
+        );
+        throw error;
+      }
     }
 
-    // 再次调用 LLM 获取最终响应
     const finalResponse = await this.llmProvider.chat(messages);
     const fullContent = finalResponse.content || '';
 
-    // 流式发送响应
     for (let i = 0; i < fullContent.length; i += 20) {
       const chunk = fullContent.slice(i, i + 20);
       process.send?.({
@@ -595,13 +694,14 @@ class AgentServiceImpl {
       content: { type: string; text: string };
     };
 
+    logSessionLifecycle('create', sessionId);
+
     if (!this.sessions.has(sessionId)) {
       this.sessions.set(sessionId, { messages: [] });
     }
     const session = this.sessions.get(sessionId)!;
     session.messages.push({ role: 'user', content: content.text });
 
-    // 如果有 LLM Provider
     if (this.llmProvider) {
       try {
         const messages = [
@@ -615,11 +715,10 @@ class AgentServiceImpl {
         session.messages.push({ role: 'assistant', content: response.content || '' });
         return;
       } catch (error) {
-        log.error('LLM 调用失败', error as Error);
+        log.error('LLM 调用失败', { error: (error as Error).message });
       }
     }
 
-    // 模拟响应
     const response = `收到消息: "${content.text}"。Agent Service 正在运行。`;
     sendChunk({ delta: response, done: false });
     sendChunk({ done: true });
@@ -629,7 +728,7 @@ class AgentServiceImpl {
   stop(): void {
     this.running = false;
     this.sessions.clear();
-    log.info('Agent Service 已停止');
+    logServiceLifecycle('stop');
   }
 }
 
@@ -642,8 +741,6 @@ async function main(): Promise<void> {
   try {
     await service.start();
 
-    // IPC 模式不需要保持运行，等待父进程消息
-    // 独立模式需要保持运行
     if (!process.env.BUN_IPC) {
       await new Promise(() => {});
     }
@@ -653,7 +750,6 @@ async function main(): Promise<void> {
   }
 }
 
-// 入口
 if (import.meta.main) {
   main();
 }

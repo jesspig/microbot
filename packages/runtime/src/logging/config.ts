@@ -224,6 +224,33 @@ const DEFAULT_CONFIG: LoggingConfig = {
 /** 是否已初始化 */
 let initialized = false;
 
+/** 日志事件监听器 */
+type LogEventListener = (entry: Record<string, unknown>) => void;
+const logEventListeners: Set<LogEventListener> = new Set();
+
+/**
+ * 订阅日志事件
+ * 
+ * CLI 端可以订阅此事件来获取结构化日志并进行格式化显示
+ */
+export function subscribeToLogs(listener: LogEventListener): () => void {
+  logEventListeners.add(listener);
+  return () => logEventListeners.delete(listener);
+}
+
+/**
+ * 发布日志事件
+ */
+function emitLogEvent(entry: Record<string, unknown>): void {
+  for (const listener of logEventListeners) {
+    try {
+      listener(entry);
+    } catch {
+      // 忽略监听器错误
+    }
+  }
+}
+
 /** 当前日志文件信息 */
 interface LogFileInfo {
   path: string;
@@ -350,6 +377,9 @@ function jsonLinesFormatter(record: LogRecord): string {
   if (record.properties && Object.keys(record.properties).length > 0) {
     entry.properties = record.properties;
   }
+
+  // 发布日志事件供 CLI 订阅
+  emitLogEvent(entry);
 
   return JSON.stringify(entry) + '\n';
 }
