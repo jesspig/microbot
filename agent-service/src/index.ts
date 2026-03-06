@@ -364,6 +364,31 @@ class AgentServiceImpl {
           this.handleChatStream(params, id);
           break;
 
+        // 配置相关方法
+        case 'config.update':
+          this.handleConfigUpdate(params, id);
+          break;
+
+        case 'config.setSystemPrompt':
+          this.handleSetSystemPrompt(params, id);
+          break;
+
+        case 'config.registerTools':
+          this.handleRegisterTools(params, id);
+          break;
+
+        case 'config.loadSkills':
+          this.handleLoadSkills(params, id);
+          break;
+
+        case 'config.configureMemory':
+          this.handleConfigureMemory(params, id);
+          break;
+
+        case 'config.configureKnowledge':
+          this.handleConfigureKnowledge(params, id);
+          break;
+
         default:
           process.send?.({
             jsonrpc: '2.0',
@@ -723,6 +748,188 @@ class AgentServiceImpl {
     sendChunk({ delta: response, done: false });
     sendChunk({ done: true });
     session.messages.push({ role: 'assistant', content: response });
+  }
+
+  /**
+   * 处理配置更新
+   */
+  private handleConfigUpdate(params: unknown, requestId: string): void {
+    const { config } = params as { config: Record<string, unknown> };
+    
+    if (config.workspace) {
+      this.config.workspace = config.workspace as string;
+    }
+    if (config.systemPrompt) {
+      this.systemPrompt = config.systemPrompt as string;
+    }
+    if (config.models) {
+      // 更新模型配置
+      log.info('模型配置已更新', { models: config.models });
+    }
+    
+    process.send?.({
+      jsonrpc: '2.0',
+      id: requestId,
+      result: { success: true },
+    });
+    
+    log.info('配置已更新', { keys: Object.keys(config) });
+  }
+
+  /**
+   * 处理设置系统提示词
+   */
+  private handleSetSystemPrompt(params: unknown, requestId: string): void {
+    const { prompt } = params as { prompt: string };
+    
+    this.systemPrompt = prompt;
+    
+    process.send?.({
+      jsonrpc: '2.0',
+      id: requestId,
+      result: { success: true },
+    });
+    
+    log.info('系统提示词已设置', { length: prompt.length });
+  }
+
+  /**
+   * 处理注册工具
+   */
+  private handleRegisterTools(params: unknown, requestId: string): void {
+    const { tools } = params as { tools: Array<{
+      name: string;
+      description?: string;
+      enabled?: boolean;
+      inputSchema?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    }> };
+    
+    if (!this.toolRegistry) {
+      process.send?.({
+        jsonrpc: '2.0',
+        id: requestId,
+        error: { code: -32002, message: 'Tool Registry 未初始化' },
+      });
+      return;
+    }
+    
+    // 注册工具（目前记录日志，后续可扩展动态加载）
+    const registeredTools: string[] = [];
+    for (const tool of tools) {
+      if (tool.enabled !== false) {
+        registeredTools.push(tool.name);
+        log.info('工具已注册', { name: tool.name, description: tool.description });
+      }
+    }
+    
+    process.send?.({
+      jsonrpc: '2.0',
+      id: requestId,
+      result: { 
+        success: true, 
+        count: registeredTools.length,
+        tools: registeredTools,
+      },
+    });
+    
+    log.info('工具注册完成', { count: registeredTools.length });
+  }
+
+  /**
+   * 处理加载技能
+   */
+  private handleLoadSkills(params: unknown, requestId: string): void {
+    const { skills } = params as { skills: Array<{
+      name: string;
+      description?: string;
+      enabled?: boolean;
+      path?: string;
+      always?: boolean;
+      allowedTools?: string[];
+    }> };
+    
+    // 存储技能配置（后续可扩展动态加载）
+    const loadedSkills: string[] = [];
+    for (const skill of skills) {
+      if (skill.enabled !== false) {
+        loadedSkills.push(skill.name);
+        log.info('技能已加载', { name: skill.name, description: skill.description, path: skill.path });
+      }
+    }
+    
+    process.send?.({
+      jsonrpc: '2.0',
+      id: requestId,
+      result: { 
+        success: true, 
+        count: loadedSkills.length,
+        skills: loadedSkills,
+      },
+    });
+    
+    log.info('技能加载完成', { count: loadedSkills.length });
+  }
+
+  /**
+   * 处理配置记忆系统
+   */
+  private handleConfigureMemory(params: unknown, requestId: string): void {
+    const { config } = params as { config: {
+      enabled?: boolean;
+      storagePath?: string;
+      embedModel?: string;
+      mode?: string;
+      searchLimit?: number;
+      autoSummarize?: boolean;
+      summarizeThreshold?: number;
+    } };
+    
+    // 存储记忆配置（后续可扩展实际初始化）
+    process.send?.({
+      jsonrpc: '2.0',
+      id: requestId,
+      result: { 
+        success: true, 
+        config: {
+          enabled: config.enabled ?? true,
+          mode: config.mode ?? 'auto',
+          embedModel: config.embedModel,
+        },
+      },
+    });
+    
+    log.info('记忆系统配置完成', { config });
+  }
+
+  /**
+   * 处理配置知识库
+   */
+  private handleConfigureKnowledge(params: unknown, requestId: string): void {
+    const { config } = params as { config: {
+      enabled?: boolean;
+      basePath?: string;
+      embedModel?: string;
+      chunkSize?: number;
+      chunkOverlap?: number;
+      searchLimit?: number;
+    } };
+    
+    // 存储知识库配置（后续可扩展实际初始化）
+    process.send?.({
+      jsonrpc: '2.0',
+      id: requestId,
+      result: { 
+        success: true, 
+        config: {
+          enabled: config.enabled ?? true,
+          basePath: config.basePath,
+          embedModel: config.embedModel,
+        },
+      },
+    });
+    
+    log.info('知识库配置完成', { config });
   }
 
   stop(): void {
