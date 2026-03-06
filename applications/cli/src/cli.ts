@@ -63,10 +63,13 @@ async function startService(verbose: boolean, quiet: boolean): Promise<void> {
     console.log('  \x1b[90m日志级别:\x1b[0m \x1b[33mWARN\x1b[0m (静默模式)');
   }
 
-  const app = await createApp({ logLevel });
+  const app = await createApp({ 
+    logLevel,
+    verbose,
+  });
 
   // 信号处理
-  let isShuttingDown = false;
+  let isShutterDown = false;
   const shutdown = async () => {
     if (isShutterDown) return;
     isShutterDown = true;
@@ -86,6 +89,18 @@ async function startService(verbose: boolean, quiet: boolean): Promise<void> {
     console.error('启动失败:', error);
     process.exit(1);
   }
+}
+
+/** 显示状态 */
+async function showStatus(): Promise<void> {
+  console.log();
+  console.log('MicroAgent 状态');
+  console.log('─'.repeat(30));
+  
+  // TODO: 通过 IPC 查询 Agent Service 状态
+  console.log('  Agent Service: 未知（需要 IPC 连接）');
+  console.log('  通道: 请使用 start 命令启动');
+  console.log();
 }
 
 /** CLI 主入口 */
@@ -123,6 +138,10 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
   switch (command) {
     case 'start':
       await startService(verbose, quiet);
+      break;
+
+    case 'status':
+      await showStatus();
       break;
 
     case undefined:
