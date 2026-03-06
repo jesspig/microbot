@@ -20,7 +20,7 @@ import {
 import { getBuiltinToolConfigs } from './modules/tools-init';
 import { getBuiltinSkillConfigs, getSkillsBuiltinPath } from './modules/skills-init';
 import { getProviderConfigs, parseDefaultModelInfo } from './modules/providers-init';
-import { getMemorySystemConfig, getSearchModeDescription } from './modules/memory-init';
+import { getMemorySystemConfig, getSearchModeDescription, getEmbeddingModelInfo } from './modules/memory-init';
 import { ensureUserConfigFiles, loadSystemPrompt } from './modules/system-prompt';
 import { getLogger } from '@logtape/logtape';
 import { existsSync } from 'fs';
@@ -177,26 +177,36 @@ class CLIApp implements App {
       // 4. 配置记忆系统
       const memoryConfig = getMemorySystemConfig(this.settings as any);
       if (memoryConfig.enabled) {
+        // 获取嵌入模型信息
+        const embedModelInfo = getEmbeddingModelInfo(this.settings as any);
+        
         await this.agentClient.configureMemory({
           enabled: true,
           mode: memoryConfig.mode,
           embedModel: memoryConfig.embedModel,
+          embedBaseUrl: embedModelInfo?.baseUrl,
+          embedApiKey: embedModelInfo?.apiKey,
           storagePath: memoryConfig.storagePath,
           searchLimit: memoryConfig.searchLimit,
           autoSummarize: memoryConfig.autoSummarize,
           summarizeThreshold: memoryConfig.summarizeThreshold,
         });
-        log.info('记忆系统已配置', { mode: memoryConfig.mode });
+        log.info('记忆系统已配置', { mode: memoryConfig.mode, hasEmbedding: !!embedModelInfo?.baseUrl });
       }
 
       // 5. 配置知识库
       if (this.settings.agents?.workspace) {
+        // 获取嵌入模型信息
+        const embedModelInfo = getEmbeddingModelInfo(this.settings as any);
+        
         await this.agentClient.configureKnowledge({
           enabled: true,
           basePath: resolve(this.settings.agents.workspace, '.knowledge'),
           embedModel: this.settings.agents.models?.embed,
+          embedBaseUrl: embedModelInfo?.baseUrl,
+          embedApiKey: embedModelInfo?.apiKey,
         });
-        log.info('知识库已配置');
+        log.info('知识库已配置', { hasEmbedding: !!embedModelInfo?.baseUrl });
       }
 
       log.info('Agent Service 配置完成');

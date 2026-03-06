@@ -109,6 +109,10 @@ export interface MemoryConfig {
   storagePath?: string;
   /** 嵌入模型 */
   embedModel?: string;
+  /** 嵌入服务 Base URL */
+  embedBaseUrl?: string;
+  /** 嵌入服务 API Key */
+  embedApiKey?: string;
   /** 检索模式 */
   mode?: 'fulltext' | 'vector' | 'hybrid' | 'auto';
   /** 检索数量限制 */
@@ -127,6 +131,10 @@ export interface KnowledgeConfig {
   basePath?: string;
   /** 嵌入模型 */
   embedModel?: string;
+  /** 嵌入服务 Base URL */
+  embedBaseUrl?: string;
+  /** 嵌入服务 API Key */
+  embedApiKey?: string;
   /** 分块大小 */
   chunkSize?: number;
   /** 分块重叠 */
