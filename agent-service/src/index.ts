@@ -11,7 +11,43 @@
 import { loadConfig, type Config } from '@micro-agent/config';
 import { OpenAICompatibleProvider, type LLMProvider } from '../runtime/provider/llm/openai';
 import { ToolRegistry, type ToolContext } from '../runtime/capability/tool-system/registry';
+import { SkillRegistry, type SkillDefinition } from '../runtime/capability/skill-system/registry';
+import { AgentOrchestrator, type OrchestratorConfig, type StreamCallbacks } from '../runtime/kernel/orchestrator';
 import { getLogger, initLogging, getTracer, subscribeToLogs, type ServiceLifecycleLog, type SessionLifecycleLog, type LLMCallLog, type ToolCallLog, type IPCMessageLog } from '../runtime/infrastructure/logging/logger';
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { join, basename, resolve, dirname } from 'path';
+import { homedir } from 'os';
+import { fileURLToPath } from 'url';
+import matter from 'gray-matter';
+// 内置工具导入
+import {
+  ReadFileTool,
+  WriteFileTool,
+  ListDirTool,
+  createExecTool,
+  WebFetchTool,
+  MessageTool,
+} from '../../extensions/tool';
+import type { Tool } from '../types';
+import type { InboundMessage } from '../types/message';
+import {
+  KnowledgeBaseManager,
+  KnowledgeRetriever,
+  setKnowledgeBase,
+  createDocumentScanner,
+  createDocumentIndexer,
+  createRetriever,
+  type KnowledgeBaseConfig,
+  type RetrieverConfig,
+} from '../runtime/capability/knowledge';
+import {
+  MemoryManager,
+  type MemoryManagerConfig,
+} from '../runtime/capability/memory/manager';
+import {
+  createEmbeddingService,
+  type EmbeddingService,
+} from '../runtime/capability/memory/embedding';
 
 const log = getLogger(['agent-service']);
 const tracer = getTracer();
@@ -120,6 +156,31 @@ class AgentServiceImpl {
   private defaultModel: string = 'gpt-4';
   private systemPrompt: string = '你是一个有帮助的 AI 助手。';
 
+  // 知识库组件
+  private knowledgeBaseManager: KnowledgeBaseManager | null = null;
+  private knowledgeRetriever: KnowledgeRetriever | null = null;
+  private embeddingService: EmbeddingService | null = null;
+  private knowledgeConfig: KnowledgeBaseConfig | null = null;
+  
+  // 记忆系统组件
+  private memoryManager: MemoryManager | null = null;
+  
+  // 技能系统组件
+  private skillRegistry: SkillRegistry | null = null;
+  
+  // 编排器组件
+  private orchestrator: AgentOrchestrator | null = null;
+  
+  // 技能配置
+  private skillConfigs: Array<{
+    name: string;
+    description?: string;
+    enabled?: boolean;
+    path?: string;
+    always?: boolean;
+    allowedTools?: string[];
+  }> = [];
+
   constructor(config: Partial<AgentServiceConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.isIPCMode = process.env.BUN_IPC === '1' || !!process.send;
@@ -190,7 +251,208 @@ class AgentServiceImpl {
     if (!this.appConfig) return;
     this.initializeLLMProvider();
     this.initializeToolRegistry();
+    this.initializeSkillRegistry();
+    this.initializeOrchestrator();
     this.systemPrompt = this.buildSystemPrompt();
+  }
+  
+  /**
+   * 初始化 Orchestrator
+   */
+  private initializeOrchestrator(): void {
+    if (!this.llmProvider || !this.toolRegistry) {
+      log.warn('无法初始化 Orchestrator: 缺少 LLM Provider 或 Tool Registry');
+      return;
+    }
+
+    const orchestratorConfig: OrchestratorConfig = {
+      llmProvider: this.llmProvider,
+      defaultModel: this.defaultModel,
+      maxIterations: 5,
+      systemPrompt: this.systemPrompt,
+      workspace: this.config.workspace ?? process.cwd(),
+    };
+
+    this.orchestrator = new AgentOrchestrator(
+      orchestratorConfig,
+      this.toolRegistry,
+      this.memoryManager ?? undefined,
+      undefined, // SessionStore 可选
+      this.knowledgeRetriever ?? undefined
+    );
+
+    log.info('AgentOrchestrator 已初始化');
+  }
+
+  /**
+   * 更新 Orchestrator（在组件配置变更后调用）
+   */
+  private updateOrchestrator(): void {
+    if (!this.llmProvider || !this.toolRegistry) {
+      log.warn('无法更新 Orchestrator: 缺少必要组件');
+      return;
+    }
+
+    const orchestratorConfig: OrchestratorConfig = {
+      llmProvider: this.llmProvider,
+      defaultModel: this.defaultModel,
+      maxIterations: 5,
+      systemPrompt: this.systemPrompt,
+      workspace: this.config.workspace ?? process.cwd(),
+    };
+
+    this.orchestrator = new AgentOrchestrator(
+      orchestratorConfig,
+      this.toolRegistry,
+      this.memoryManager ?? undefined,
+      undefined, // SessionStore 可选
+      this.knowledgeRetriever ?? undefined
+    );
+
+    log.info('Orchestrator 已更新', {
+      hasMemory: !!this.memoryManager,
+      hasKnowledge: !!this.knowledgeRetriever,
+    });
+  }
+  
+  /**
+   * 获取内置技能路径
+   */
+  private getBuiltinSkillsPath(): string {
+    const currentDir = dirname(fileURLToPath(import.meta.url));
+    // 从 agent-service/src 向上到达项目根目录，然后进入 extensions/skills
+    return resolve(currentDir, '../../../extensions/skills');
+  }
+  
+  /**
+   * 初始化 Skill Registry
+   */
+  private initializeSkillRegistry(): void {
+    this.skillRegistry = new SkillRegistry({
+      workspace: this.config.workspace,
+    });
+    
+    // 加载内置技能
+    this.loadBuiltinSkills();
+    
+    // 加载用户技能
+    this.loadUserSkills();
+    
+    // 加载工作区技能
+    this.loadWorkspaceSkills();
+
+    log.info('Skill Registry 已初始化', { skillCount: this.skillRegistry.size });
+  }
+  
+  /**
+   * 加载内置技能
+   */
+  private loadBuiltinSkills(): void {
+    const builtinPath = this.getBuiltinSkillsPath();
+    this.loadSkillsFromDir(builtinPath, 'builtin');
+  }
+  
+  /**
+   * 加载用户技能
+   */
+  private loadUserSkills(): void {
+    const userSkillsPath = resolve(homedir(), '.micro-agent/skills');
+    this.loadSkillsFromDir(userSkillsPath, 'user');
+  }
+  
+  /**
+   * 加载工作区技能
+   */
+  private loadWorkspaceSkills(): void {
+    if (!this.config.workspace) return;
+    const projectSkillsPath = join(this.config.workspace, 'skills');
+    this.loadSkillsFromDir(projectSkillsPath, 'workspace');
+  }
+  
+  /**
+   * 从目录加载技能
+   */
+  private loadSkillsFromDir(dir: string, source: string): void {
+    if (!existsSync(dir)) return;
+    
+    const entries = readdirSync(dir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      
+      const skillDir = join(dir, entry.name);
+      const skillMdPath = join(skillDir, 'SKILL.md');
+      
+      if (!existsSync(skillMdPath)) continue;
+      
+      // 检查文件大小
+      try {
+        const stats = statSync(skillMdPath);
+        if (stats.size > 256000) { // 256KB 限制
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      
+      try {
+        const skill = this.parseSkill(skillMdPath, skillDir);
+        this.skillRegistry?.register(skill, source);
+        log.debug('技能已加载', { name: skill.name, source });
+      } catch (error) {
+        log.warn('加载技能失败', { name: entry.name, error: (error as Error).message });
+      }
+    }
+  }
+  
+  /**
+   * 解析技能文件
+   */
+  private parseSkill(path: string, skillDir: string): SkillDefinition {
+    const fileContent = readFileSync(path, 'utf-8');
+    const { data, content } = matter(fileContent);
+    
+    // 提取场景关键词
+    const scenarios = this.extractScenarios(data, content);
+    
+    return {
+      name: data.name ?? basename(skillDir),
+      description: data.description ?? '',
+      scenarios,
+      tools: data['allowed-tools'] ?? [],
+      promptTemplate: content.trim(),
+    };
+  }
+  
+  /**
+   * 从技能内容提取场景关键词
+   */
+  private extractScenarios(data: Record<string, unknown>, content: string): string[] {
+    const scenarios: string[] = [];
+    
+    // 从名称推断场景
+    if (data.name && typeof data.name === 'string') {
+      scenarios.push(data.name);
+    }
+    
+    // 从描述推断场景关键词
+    if (data.description && typeof data.description === 'string') {
+      const keywords = data.description.toLowerCase().match(/\b[a-z\u4e00-\u9fa5]+\b/g);
+      if (keywords) {
+        scenarios.push(...keywords.slice(0, 5));
+      }
+    }
+    
+    // 从内容标题推断场景
+    const headings = content.match(/^##\s+(.+)$/gm);
+    if (headings) {
+      for (const h of headings.slice(0, 3)) {
+        const title = h.replace(/^##\s+/, '').toLowerCase();
+        scenarios.push(title);
+      }
+    }
+    
+    return [...new Set(scenarios)];
   }
 
   /**
@@ -287,7 +549,25 @@ class AgentServiceImpl {
    */
   private registerBuiltinTools(): void {
     if (!this.toolRegistry) return;
-    // TODO: 注册更多内置工具
+
+    // 注册文件系统工具
+    this.toolRegistry.register(ReadFileTool, 'builtin');
+    this.toolRegistry.register(WriteFileTool, 'builtin');
+    this.toolRegistry.register(ListDirTool, 'builtin');
+
+    // 注册 Shell 工具（需要工作目录）
+    this.toolRegistry.register(
+      createExecTool(this.config.workspace ?? process.cwd()),
+      'builtin'
+    );
+
+    // 注册 Web 工具
+    this.toolRegistry.register(WebFetchTool, 'builtin');
+
+    // 注册消息工具
+    this.toolRegistry.register(MessageTool, 'builtin');
+
+    log.info('内置工具注册完成', { toolCount: this.toolRegistry.size });
   }
 
   /**
@@ -382,11 +662,23 @@ class AgentServiceImpl {
           break;
 
         case 'config.configureMemory':
-          this.handleConfigureMemory(params, id);
+          this.handleConfigureMemory(params, id).catch((error) => {
+            process.send?.({
+              jsonrpc: '2.0',
+              id,
+              error: { code: -32004, message: error.message },
+            });
+          });
           break;
 
         case 'config.configureKnowledge':
-          this.handleConfigureKnowledge(params, id);
+          this.handleConfigureKnowledge(params, id).catch((error) => {
+            process.send?.({
+              jsonrpc: '2.0',
+              id,
+              error: { code: -32003, message: error.message },
+            });
+          });
           break;
 
         default:
@@ -509,6 +801,18 @@ class AgentServiceImpl {
     const session = this.sessions.get(sessionId)!;
     session.messages.push({ role: 'user', content: content.text });
 
+    // 如果 Orchestrator 已初始化，使用它进行流式处理
+    if (this.orchestrator) {
+      try {
+        await this.streamWithOrchestrator(sessionId, content.text, requestId);
+        return;
+      } catch (error) {
+        log.error('Orchestrator 处理失败', { error: (error as Error).message });
+        // 回退到旧的流式处理
+      }
+    }
+
+    // 回退：直接使用 LLM Provider
     if (this.llmProvider) {
       try {
         await this.streamFromLLM(session, content.text, requestId);
@@ -519,6 +823,89 @@ class AgentServiceImpl {
     }
 
     await this.streamMockResponse(content.text, requestId);
+  }
+
+  /**
+   * 使用 Orchestrator 进行流式处理
+   */
+  private async streamWithOrchestrator(
+    sessionId: string,
+    userMessage: string,
+    requestId: string
+  ): Promise<void> {
+    if (!this.orchestrator) return;
+
+    // 构建入站消息
+    const msg: InboundMessage = {
+      channel: 'ipc',
+      senderId: requestId,
+      chatId: sessionId,
+      content: userMessage,
+      timestamp: new Date(),
+      media: [],
+      metadata: {},
+    };
+
+    // 构建流式回调
+    const callbacks: StreamCallbacks = {
+      onChunk: async (chunk: string) => {
+        process.send?.({
+          jsonrpc: '2.0',
+          id: requestId,
+          method: 'stream',
+          params: { delta: chunk, done: false },
+        });
+      },
+      onComplete: async () => {
+        process.send?.({
+          jsonrpc: '2.0',
+          id: requestId,
+          method: 'stream',
+          params: { done: true },
+        });
+      },
+      onError: async (error: Error) => {
+        log.error('流式处理错误', { error: error.message });
+        process.send?.({
+          jsonrpc: '2.0',
+          id: requestId,
+          error: { code: -32005, message: error.message },
+        });
+      },
+    };
+
+    // 更新 Orchestrator 的系统提示词（包含技能上下文）
+    const skillContext = this.buildSkillContext(userMessage);
+    const updatedSystemPrompt = this.systemPrompt + skillContext;
+    
+    // 重新初始化 Orchestrator 以使用更新后的系统提示词
+    if (this.llmProvider && this.toolRegistry) {
+      const orchestratorConfig: OrchestratorConfig = {
+        llmProvider: this.llmProvider,
+        defaultModel: this.defaultModel,
+        maxIterations: 5,
+        systemPrompt: updatedSystemPrompt,
+        workspace: this.config.workspace ?? process.cwd(),
+      };
+
+      const updatedOrchestrator = new AgentOrchestrator(
+        orchestratorConfig,
+        this.toolRegistry,
+        this.memoryManager ?? undefined,
+        undefined,
+        this.knowledgeRetriever ?? undefined
+      );
+
+      await updatedOrchestrator.processMessageStream(msg, callbacks, {
+        currentDir: this.config.workspace,
+      });
+    } else {
+      await this.orchestrator.processMessageStream(msg, callbacks, {
+        currentDir: this.config.workspace,
+      });
+    }
+
+    log.info('Orchestrator 流式处理完成', { sessionId });
   }
 
   /**
@@ -533,8 +920,12 @@ class AgentServiceImpl {
 
     const startTime = Date.now();
 
+    // 构建包含技能上下文的系统提示词
+    const skillContext = this.buildSkillContext(userMessage);
+    const systemPromptWithSkills = this.systemPrompt + skillContext;
+
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: this.systemPrompt },
+      { role: 'system', content: systemPromptWithSkills },
     ];
 
     const recentMessages = session.messages.slice(-10);
@@ -729,8 +1120,12 @@ class AgentServiceImpl {
 
     if (this.llmProvider) {
       try {
+        // 构建包含技能上下文的系统提示词
+        const skillContext = this.buildSkillContext(content.text);
+        const systemPromptWithSkills = this.systemPrompt + skillContext;
+
         const messages = [
-          { role: 'system' as const, content: this.systemPrompt },
+          { role: 'system' as const, content: systemPromptWithSkills },
           { role: 'user' as const, content: content.text },
         ];
         const response = await this.llmProvider.chat(messages);
@@ -814,12 +1209,43 @@ class AgentServiceImpl {
       return;
     }
     
-    // 注册工具（目前记录日志，后续可扩展动态加载）
     const registeredTools: string[] = [];
-    for (const tool of tools) {
-      if (tool.enabled !== false) {
-        registeredTools.push(tool.name);
-        log.info('工具已注册', { name: tool.name, description: tool.description });
+    const skippedTools: string[] = [];
+    
+    for (const toolConfig of tools) {
+      // 跳过禁用的工具
+      if (toolConfig.enabled === false) {
+        skippedTools.push(toolConfig.name);
+        continue;
+      }
+      
+      // 检查工具是否已存在
+      if (this.toolRegistry.has(toolConfig.name)) {
+        log.debug('工具已存在，跳过注册', { name: toolConfig.name });
+        registeredTools.push(toolConfig.name);
+        continue;
+      }
+      
+      // 动态创建工具
+      try {
+        const dynamicTool = this.createDynamicTool(toolConfig);
+        if (dynamicTool) {
+          this.toolRegistry.register(dynamicTool, 'dynamic');
+          registeredTools.push(toolConfig.name);
+          log.info('动态工具已注册', { 
+            name: toolConfig.name, 
+            description: toolConfig.description 
+          });
+        } else {
+          skippedTools.push(toolConfig.name);
+          log.warn('无法创建动态工具', { name: toolConfig.name });
+        }
+      } catch (error) {
+        skippedTools.push(toolConfig.name);
+        log.error('动态工具注册失败', { 
+          name: toolConfig.name, 
+          error: (error as Error).message 
+        });
       }
     }
     
@@ -830,10 +1256,52 @@ class AgentServiceImpl {
         success: true, 
         count: registeredTools.length,
         tools: registeredTools,
+        skipped: skippedTools,
+        totalInRegistry: this.toolRegistry.size,
       },
     });
     
-    log.info('工具注册完成', { count: registeredTools.length });
+    log.info('工具注册完成', { 
+      registered: registeredTools.length, 
+      skipped: skippedTools.length,
+      totalInRegistry: this.toolRegistry.size,
+    });
+  }
+  
+  /**
+   * 创建动态工具
+   */
+  private createDynamicTool(config: {
+    name: string;
+    description?: string;
+    inputSchema?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  }): Tool | null {
+    // 如果没有 inputSchema，使用默认的空 schema
+    const schema = config.inputSchema ?? {
+      type: 'object',
+      properties: {},
+    };
+    
+    return {
+      name: config.name,
+      description: config.description ?? `动态工具: ${config.name}`,
+      inputSchema: schema as any,
+      execute: async (input: unknown, ctx: ToolContext) => {
+        // 动态工具的默认执行逻辑：记录并返回
+        log.debug('执行动态工具', { 
+          name: config.name, 
+          input: JSON.stringify(input).slice(0, 200) 
+        });
+        
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `动态工具 ${config.name} 已收到请求。此工具需要具体实现。`,
+          }],
+        };
+      },
+    };
   }
 
   /**
@@ -849,12 +1317,47 @@ class AgentServiceImpl {
       allowedTools?: string[];
     }> };
     
-    // 存储技能配置（后续可扩展动态加载）
+    // 如果 SkillRegistry 未初始化，先初始化
+    if (!this.skillRegistry) {
+      this.initializeSkillRegistry();
+    }
+    
+    // 存储技能配置并注册启用的技能
     const loadedSkills: string[] = [];
-    for (const skill of skills) {
-      if (skill.enabled !== false) {
-        loadedSkills.push(skill.name);
-        log.info('技能已加载', { name: skill.name, description: skill.description, path: skill.path });
+    const matchedSkills: Array<{ name: string; source: string }> = [];
+    
+    for (const skillConfig of skills) {
+      if (skillConfig.enabled !== false) {
+        // 存储配置
+        this.skillConfigs.push(skillConfig);
+        loadedSkills.push(skillConfig.name);
+        
+        // 检查 SkillRegistry 中是否已有此技能
+        if (this.skillRegistry?.has(skillConfig.name)) {
+          matchedSkills.push({ name: skillConfig.name, source: 'registry' });
+        } else if (skillConfig.path) {
+          // 如果提供了路径，尝试从路径加载
+          try {
+            const skill = this.loadSkillFromPath(skillConfig.path, skillConfig.name, skillConfig.description);
+            if (skill) {
+              this.skillRegistry?.register(skill, 'dynamic');
+              matchedSkills.push({ name: skillConfig.name, source: 'dynamic' });
+            }
+          } catch (error) {
+            log.warn('动态加载技能失败', { 
+              name: skillConfig.name, 
+              path: skillConfig.path, 
+              error: (error as Error).message 
+            });
+          }
+        }
+        
+        log.info('技能配置已记录', { 
+          name: skillConfig.name, 
+          description: skillConfig.description, 
+          path: skillConfig.path,
+          always: skillConfig.always 
+        });
       }
     }
     
@@ -865,71 +1368,389 @@ class AgentServiceImpl {
         success: true, 
         count: loadedSkills.length,
         skills: loadedSkills,
+        totalInRegistry: this.skillRegistry?.size ?? 0,
       },
     });
     
-    log.info('技能加载完成', { count: loadedSkills.length });
+    log.info('技能加载完成', { 
+      count: loadedSkills.length, 
+      totalInRegistry: this.skillRegistry?.size ?? 0 
+    });
+  }
+  
+  /**
+   * 从路径加载技能
+   */
+  private loadSkillFromPath(
+    skillPath: string, 
+    name: string, 
+    description?: string
+  ): SkillDefinition | null {
+    const skillMdPath = join(skillPath, 'SKILL.md');
+    
+    if (!existsSync(skillMdPath)) {
+      log.warn('技能文件不存在', { path: skillMdPath });
+      return null;
+    }
+    
+    try {
+      return this.parseSkill(skillMdPath, skillPath);
+    } catch (error) {
+      log.error('解析技能文件失败', { path: skillMdPath, error: (error as Error).message });
+      return null;
+    }
+  }
+  
+  /**
+   * 根据场景匹配技能
+   */
+  private matchSkillsByScenario(scenario: string): Array<{ skill: SkillDefinition; score: number; reason: string }> {
+    if (!this.skillRegistry) return [];
+    return this.skillRegistry.matchByScenario(scenario);
+  }
+  
+  /**
+   * 构建技能上下文提示
+   */
+  private buildSkillContext(userMessage: string): string {
+    if (!this.skillRegistry || this.skillRegistry.size === 0) return '';
+    
+    // 匹配相关技能
+    const matches = this.matchSkillsByScenario(userMessage);
+    
+    if (matches.length === 0) return '';
+    
+    // 取前3个最相关的技能
+    const topMatches = matches.slice(0, 3);
+    
+    const skillContexts = topMatches.map(m => {
+      const skill = m.skill;
+      let context = `### 技能: ${skill.name}\n${skill.description}\n`;
+      if (skill.promptTemplate) {
+        context += `\n${skill.promptTemplate.slice(0, 500)}...\n`;
+      }
+      return context;
+    });
+    
+    return `\n\n# 相关技能\n\n${skillContexts.join('\n---\n\n')}\n`;
   }
 
   /**
    * 处理配置记忆系统
    */
-  private handleConfigureMemory(params: unknown, requestId: string): void {
+  private async handleConfigureMemory(params: unknown, requestId: string): Promise<void> {
     const { config } = params as { config: {
       enabled?: boolean;
       storagePath?: string;
       embedModel?: string;
+      embedBaseUrl?: string;
+      embedApiKey?: string;
       mode?: string;
       searchLimit?: number;
       autoSummarize?: boolean;
       summarizeThreshold?: number;
     } };
     
-    // 存储记忆配置（后续可扩展实际初始化）
-    process.send?.({
-      jsonrpc: '2.0',
-      id: requestId,
-      result: { 
-        success: true, 
-        config: {
-          enabled: config.enabled ?? true,
-          mode: config.mode ?? 'auto',
-          embedModel: config.embedModel,
+    // 记忆系统未启用
+    if (config.enabled === false) {
+      this.memoryManager = null;
+      process.send?.({
+        jsonrpc: '2.0',
+        id: requestId,
+        result: { 
+          success: true, 
+          config: { enabled: false },
         },
-      },
-    });
-    
-    log.info('记忆系统配置完成', { config });
+      });
+      log.info('记忆系统已禁用');
+      return;
+    }
+
+    try {
+      // 确定存储路径
+      const storagePath = config.storagePath ?? join(homedir(), '.micro-agent', 'memory');
+      
+      // 创建嵌入服务（如果提供了配置）
+      let embeddingService: EmbeddingService | undefined;
+      if (config.embedModel && config.embedBaseUrl && config.embedApiKey) {
+        const slashIndex = config.embedModel.indexOf('/');
+        const modelId = slashIndex > 0 ? config.embedModel.slice(slashIndex + 1) : config.embedModel;
+        
+        embeddingService = createEmbeddingService(
+          modelId,
+          config.embedBaseUrl,
+          config.embedApiKey
+        );
+        
+        // 同时存储到实例变量供知识库等复用
+        this.embeddingService = embeddingService;
+        
+        log.info('记忆系统嵌入服务已创建', { 
+          model: config.embedModel, 
+          available: embeddingService.isAvailable() 
+        });
+      }
+
+      // 创建记忆管理器配置
+      const memoryConfig: MemoryManagerConfig = {
+        storagePath,
+        enabled: true,
+        autoSummarize: config.autoSummarize ?? true,
+        summarizeThreshold: config.summarizeThreshold ?? 20,
+        searchLimit: config.searchLimit ?? 10,
+        embedding: embeddingService && config.embedBaseUrl && config.embedApiKey ? {
+          modelId: config.embedModel?.split('/').pop() ?? config.embedModel ?? '',
+          baseUrl: config.embedBaseUrl,
+          apiKey: config.embedApiKey,
+        } : undefined,
+        llmProvider: this.llmProvider ?? undefined,
+      };
+
+      // 创建并初始化记忆管理器
+      this.memoryManager = new MemoryManager(memoryConfig);
+      await this.memoryManager.initialize();
+
+      // 获取统计信息
+      const stats = await this.memoryManager.getStats();
+      
+      process.send?.({
+        jsonrpc: '2.0',
+        id: requestId,
+        result: { 
+          success: true, 
+          config: {
+            enabled: true,
+            mode: config.mode ?? 'auto',
+            embedModel: config.embedModel,
+            storagePath,
+          },
+          stats: {
+            totalEntries: stats.totalEntries,
+            totalSessions: stats.totalSessions,
+            hasEmbedding: embeddingService?.isAvailable() ?? false,
+          },
+        },
+      });
+      
+      log.info('记忆系统初始化完成', { 
+        storagePath,
+        totalEntries: stats.totalEntries,
+        hasEmbedding: embeddingService?.isAvailable() ?? false,
+      });
+      
+      // 更新 Orchestrator 以使用新的 MemoryManager
+      this.updateOrchestrator();
+    } catch (error) {
+      log.error('记忆系统初始化失败', { error: (error as Error).message });
+      
+      process.send?.({
+        jsonrpc: '2.0',
+        id: requestId,
+        error: { 
+          code: -32004, 
+          message: `记忆系统初始化失败: ${(error as Error).message}` 
+        },
+      });
+    }
   }
 
   /**
    * 处理配置知识库
    */
-  private handleConfigureKnowledge(params: unknown, requestId: string): void {
+  private async handleConfigureKnowledge(params: unknown, requestId: string): Promise<void> {
     const { config } = params as { config: {
       enabled?: boolean;
       basePath?: string;
       embedModel?: string;
       chunkSize?: number;
       chunkOverlap?: number;
-      searchLimit?: number;
+      maxSearchResults?: number;
+      minSimilarityScore?: number;
+      backgroundBuild?: {
+        enabled?: boolean;
+        interval?: number;
+        batchSize?: number;
+        idleDelay?: number;
+      };
+      // 嵌入服务配置
+      embedBaseUrl?: string;
+      embedApiKey?: string;
     } };
-    
-    // 存储知识库配置（后续可扩展实际初始化）
-    process.send?.({
-      jsonrpc: '2.0',
-      id: requestId,
-      result: { 
-        success: true, 
-        config: {
-          enabled: config.enabled ?? true,
-          basePath: config.basePath,
-          embedModel: config.embedModel,
+
+    // 知识库未启用
+    if (config.enabled === false) {
+      this.knowledgeBaseManager = null;
+      this.knowledgeRetriever = null;
+      this.knowledgeConfig = null;
+      process.send?.({
+        jsonrpc: '2.0',
+        id: requestId,
+        result: { 
+          success: true, 
+          config: { enabled: false },
         },
-      },
-    });
-    
-    log.info('知识库配置完成', { config });
+      });
+      log.info('知识库已禁用');
+      return;
+    }
+
+    try {
+      // 构建知识库配置
+      const knowledgeConfig: KnowledgeBaseConfig = {
+        basePath: config.basePath ?? join(homedir(), '.micro-agent', 'knowledge'),
+        embedModel: config.embedModel,
+        chunkSize: config.chunkSize ?? 1000,
+        chunkOverlap: config.chunkOverlap ?? 200,
+        maxSearchResults: config.maxSearchResults ?? 5,
+        minSimilarityScore: config.minSimilarityScore ?? 0.6,
+        backgroundBuild: {
+          enabled: config.backgroundBuild?.enabled ?? true,
+          interval: config.backgroundBuild?.interval ?? 60000,
+          batchSize: config.backgroundBuild?.batchSize ?? 3,
+          idleDelay: config.backgroundBuild?.idleDelay ?? 5000,
+        },
+      };
+
+      // 复用或创建嵌入服务
+      // 优先复用已有的嵌入服务（来自记忆系统初始化）
+      let effectiveEmbeddingService = this.embeddingService;
+      
+      // 如果提供了新的嵌入服务配置，检查是否需要创建新服务
+      if (config.embedModel && config.embedBaseUrl && config.embedApiKey) {
+        const needsNewService = !this.embeddingService || !this.embeddingService.isAvailable();
+        
+        if (needsNewService) {
+          const slashIndex = config.embedModel.indexOf('/');
+          const modelId = slashIndex > 0 ? config.embedModel.slice(slashIndex + 1) : config.embedModel;
+          
+          this.embeddingService = createEmbeddingService(
+            modelId,
+            config.embedBaseUrl,
+            config.embedApiKey
+          );
+          effectiveEmbeddingService = this.embeddingService;
+          
+          log.info('知识库嵌入服务已创建', { 
+            model: config.embedModel, 
+            available: this.embeddingService.isAvailable() 
+          });
+        } else {
+          log.info('复用已有嵌入服务', { 
+            available: this.embeddingService.isAvailable() 
+          });
+        }
+      }
+
+      // 创建知识库管理器
+      this.knowledgeBaseManager = new KnowledgeBaseManager(
+        knowledgeConfig,
+        effectiveEmbeddingService ?? undefined
+      );
+
+      // 初始化知识库（加载数据库和索引）
+      await this.knowledgeBaseManager.initialize();
+
+      // 设置全局实例
+      setKnowledgeBase(this.knowledgeBaseManager);
+
+      // 扫描文档目录
+      const scanner = createDocumentScanner(
+        this.knowledgeBaseManager.getDocumentMap(),
+        knowledgeConfig.basePath,
+        (type, doc) => {
+          log.debug('文档变更', { type, path: doc.path });
+        }
+      );
+
+      await scanner.scanDocuments();
+
+      // 创建索引构建器并处理待索引文档
+      const indexer = createDocumentIndexer(
+        {
+          chunkSize: knowledgeConfig.chunkSize,
+          chunkOverlap: knowledgeConfig.chunkOverlap,
+        },
+        this.embeddingService ?? undefined,
+        (doc, chunkCount) => {
+          log.info('文档索引完成', { path: doc.path, chunkCount });
+        },
+        (doc, error) => {
+          log.error('文档索引失败', { path: doc.path, error: String(error) });
+        }
+      );
+
+      // 处理待索引文档
+      const pendingDocs = this.knowledgeBaseManager.getDocuments()
+        .filter(d => d.status === 'pending');
+      
+      for (const doc of pendingDocs) {
+        await indexer.buildDocumentIndex(doc);
+        this.knowledgeBaseManager.setDocument(doc.path, doc);
+      }
+
+      // 存储配置
+      this.knowledgeConfig = knowledgeConfig;
+
+      // 创建知识库检索器
+      const retrieverConfig: RetrieverConfig = {
+        maxResults: knowledgeConfig.maxSearchResults,
+        minScore: knowledgeConfig.minSimilarityScore,
+      };
+      
+      this.knowledgeRetriever = createRetriever(
+        this.knowledgeBaseManager.getDocumentMap(),
+        effectiveEmbeddingService ?? undefined,
+        retrieverConfig
+      );
+      
+      log.info('知识库检索器已创建', {
+        maxResults: retrieverConfig.maxResults,
+        minScore: retrieverConfig.minScore,
+        hasEmbedding: effectiveEmbeddingService?.isAvailable() ?? false,
+      });
+
+      const stats = this.knowledgeBaseManager.getStats();
+      
+      process.send?.({
+        jsonrpc: '2.0',
+        id: requestId,
+        result: { 
+          success: true, 
+          config: {
+            enabled: true,
+            basePath: knowledgeConfig.basePath,
+            embedModel: knowledgeConfig.embedModel,
+          },
+          stats: {
+            totalDocuments: stats.totalDocuments,
+            indexedDocuments: stats.indexedDocuments,
+            pendingDocuments: stats.pendingDocuments,
+            hasRetriever: this.knowledgeRetriever !== null,
+          },
+        },
+      });
+      
+      log.info('知识库初始化完成', { 
+        basePath: knowledgeConfig.basePath,
+        totalDocs: stats.totalDocuments,
+        indexedDocs: stats.indexedDocuments,
+        hasEmbedding: this.embeddingService?.isAvailable() ?? false,
+      });
+      
+      // 更新 Orchestrator 以使用新的 KnowledgeRetriever
+      this.updateOrchestrator();
+    } catch (error) {
+      log.error('知识库初始化失败', { error: (error as Error).message });
+      
+      process.send?.({
+        jsonrpc: '2.0',
+        id: requestId,
+        error: { 
+          code: -32003, 
+          message: `知识库初始化失败: ${(error as Error).message}` 
+        },
+      });
+    }
   }
 
   stop(): void {
