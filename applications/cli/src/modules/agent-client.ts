@@ -5,7 +5,7 @@
  */
 
 import { MicroAgentClient } from '@micro-agent/client-sdk';
-import type { StreamChunk } from '@micro-agent/client-sdk';
+import type { StreamChunk, ToolConfig, SkillConfig, MemoryConfig, KnowledgeConfig } from '@micro-agent/client-sdk';
 import type { AgentClient, MessageContent } from './message-router';
 
 /**
@@ -118,5 +118,62 @@ export class AgentClientImpl implements AgentClient {
       uptime: number;
       activeSessions: number;
     };
+  }
+
+  /**
+   * 设置系统提示词
+   */
+  async setSystemPrompt(prompt: string): Promise<void> {
+    if (!this._connected) {
+      throw new Error('未连接到 Agent Service');
+    }
+    await this.client.config.setSystemPrompt(prompt);
+    console.log('[AgentClient] 系统提示词已设置');
+  }
+
+  /**
+   * 注册工具
+   */
+  async registerTools(tools: ToolConfig[]): Promise<{ count: number; tools: string[] }> {
+    if (!this._connected) {
+      throw new Error('未连接到 Agent Service');
+    }
+    await this.client.config.registerTools(tools);
+    console.log('[AgentClient] 工具已注册', { count: tools.length });
+    return { count: tools.length, tools: tools.map(t => t.name) };
+  }
+
+  /**
+   * 加载技能
+   */
+  async loadSkills(skills: SkillConfig[]): Promise<{ count: number; skills: string[] }> {
+    if (!this._connected) {
+      throw new Error('未连接到 Agent Service');
+    }
+    await this.client.config.loadSkills(skills);
+    console.log('[AgentClient] 技能已加载', { count: skills.length });
+    return { count: skills.length, skills: skills.map(s => s.name) };
+  }
+
+  /**
+   * 配置记忆系统
+   */
+  async configureMemory(config: MemoryConfig): Promise<void> {
+    if (!this._connected) {
+      throw new Error('未连接到 Agent Service');
+    }
+    await this.client.config.configureMemory(config);
+    console.log('[AgentClient] 记忆系统已配置', { enabled: config.enabled, mode: config.mode });
+  }
+
+  /**
+   * 配置知识库
+   */
+  async configureKnowledge(config: KnowledgeConfig): Promise<void> {
+    if (!this._connected) {
+      throw new Error('未连接到 Agent Service');
+    }
+    await this.client.config.configureKnowledge(config);
+    console.log('[AgentClient] 知识库已配置', { enabled: config.enabled });
   }
 }

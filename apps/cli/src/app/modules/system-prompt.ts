@@ -1,7 +1,9 @@
 /**
  * 系统提示词构建模块
  *
- * 负责构建系统提示词
+ * 提示词分为两类：
+ * - 系统级（不可修改）：system.mdx - 从模板目录加载
+ * - 用户级（可修改）：SOUL.mdx, USER.mdx, AGENTS.mdx - 从 ~/.micro-agent/ 加载
  */
 
 import { readFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
@@ -13,18 +15,27 @@ import type { SkillsLoader } from '@micro-agent/sdk';
 /** 用户级配置目录 */
 const USER_CONFIG_DIR = resolve(homedir(), '.micro-agent');
 
+/** 用户级提示词文件（可修改） */
+const USER_PROMPT_FILES = [
+  { name: 'SOUL.mdx', template: 'soul.mdx', description: '身份定义' },
+  { name: 'USER.mdx', template: 'user.mdx', description: '用户信息' },
+  { name: 'AGENTS.mdx', template: 'agents.mdx', description: '行为准则' },
+] as const;
+
 /**
- * 获取模板路径
+ * 获取模板目录路径
  */
 function getTemplatesPath(): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
-  return resolve(currentDir, '../../../../templates/prompts/agent');
+  // apps/cli/src/app/modules -> applications/templates/prompts
+  return resolve(currentDir, '../../../../../applications/templates/prompts');
 }
 
 /**
  * 确保用户级配置文件存在
  *
- * 首次启动时创建默认的 SOUL.md、USER.md、AGENTS.md
+ * 首次启动时从模板复制 SOUL.mdx、USER.mdx、AGENTS.mdx 到 ~/.micro-agent/
+ * system.mdx 不会被复制，始终从模板目录加载
  */
 export function ensureUserConfigFiles(): { created: string[] } {
   const created: string[] = [];
@@ -34,18 +45,12 @@ export function ensureUserConfigFiles(): { created: string[] } {
     mkdirSync(USER_CONFIG_DIR, { recursive: true });
   }
 
-  const templatesPath = getTemplatesPath();
-  const files = [
-    { name: 'SOUL.md', template: 'soul.md' },
-    { name: 'USER.md', template: 'user.md' },
-    { name: 'AGENTS.md', template: 'agents.md' },
-  ];
+  const templatesPath = resolve(getTemplatesPath(), 'agent');
 
-  for (const file of files) {
+  for (const file of USER_PROMPT_FILES) {
     const targetPath = resolve(USER_CONFIG_DIR, file.name);
     const templatePath = resolve(templatesPath, file.template);
 
-    // 文件不存在且模板存在时创建
     if (!existsSync(targetPath) && existsSync(templatePath)) {
       copyFileSync(templatePath, targetPath);
       created.push(file.name);
@@ -56,145 +61,121 @@ export function ensureUserConfigFiles(): { created: string[] } {
 }
 
 /**
- * 加载系统提示词
+ * 加载单个提示词文件
+ */
+function loadPromptFile(name: string, searchPaths: string[]): string | null {
+  for (const basePath of searchPaths) {
+    const filePath = resolve(basePath, name);
+    if (existsSync(filePath)) {
+      return readFileSync(filePath, 'utf-8');
+    }
+  }
+  return null;
+}
+
+/**
+ * 加载系统级提示词（不可修改）
+ *
+ * 从模板目录加载 system.mdx
+ */
+export function loadSystemPromptTemplate(workspace: string): string {
+  const templatesPath = getTemplatesPath();
+  const systemPath = resolve(templatesPath, 'system.mdx');
+
+  if (existsSync(systemPath)) {
+    let content = readFileSync(systemPath, 'utf-8');
+    // 替换工作区占位符
+    content = content.replace(/{workspace}/g, workspace);
+    return content;
+  }
+
+  return `# 系统路径说明
+
+工作区: ${workspace}
+`;
+}
+
+/**
+ * 加载用户级提示词（可修改）
  *
  * 优先级：用户级 ~/.micro-agent/ > workspace/
  */
-export function loadSystemPromptFromUserConfig(workspace: string): string {
+export function loadUserPrompts(workspace?: string): string {
+  const searchPaths = [USER_CONFIG_DIR];
+  if (workspace) {
+    searchPaths.push(workspace);
+  }
+
   const parts: string[] = [];
 
-  // 1. 加载 SOUL.md（身份）
-  const soulPaths = [
-    resolve(USER_CONFIG_DIR, 'SOUL.md'),
-    resolve(workspace, 'SOUL.md'),
-  ];
-
-  for (const soulPath of soulPaths) {
-    if (existsSync(soulPath)) {
-      parts.push(readFileSync(soulPath, 'utf-8'));
-      break;
-    }
+  // 1. 加载 SOUL.mdx（身份）
+  const soulContent = loadPromptFile('SOUL.mdx', searchPaths);
+  if (soulContent) {
+    parts.push(soulContent);
   }
 
-  // 2. 加载 USER.md（用户信息）
-  const userPaths = [
-    resolve(USER_CONFIG_DIR, 'USER.md'),
-    resolve(workspace, 'USER.md'),
-  ];
-
-  for (const userPath of userPaths) {
-    if (existsSync(userPath)) {
-      parts.push('\n\n---\n\n' + readFileSync(userPath, 'utf-8'));
-      break;
-    }
+  // 2. 加载 USER.mdx（用户信息）
+  const userContent = loadPromptFile('USER.mdx', searchPaths);
+  if (userContent) {
+    parts.push('\n\n---\n\n' + userContent);
   }
 
-  // 3. 加载 AGENTS.md（行为指南）
-  const agentsPaths = [
-    resolve(USER_CONFIG_DIR, 'AGENTS.md'),
-    resolve(workspace, 'AGENTS.md'),
-  ];
-
-  for (const agentsPath of agentsPaths) {
-    if (existsSync(agentsPath)) {
-      parts.push('\n\n---\n\n' + readFileSync(agentsPath, 'utf-8'));
-      break;
-    }
+  // 3. 加载 AGENTS.mdx（行为准则）
+  const agentsContent = loadPromptFile('AGENTS.mdx', searchPaths);
+  if (agentsContent) {
+    parts.push('\n\n---\n\n' + agentsContent);
   }
 
   if (parts.length > 0) {
     return parts.join('');
   }
 
-  // 默认提示词
-  return '你是一个有帮助的 AI 助手。';
+  return '';
 }
 
 /**
- * 加载系统提示词（包含技能信息）
+ * 加载完整系统提示词
+ *
+ * 组合顺序：
+ * 1. 用户级提示词（SOUL.mdx, USER.mdx, AGENTS.mdx）
+ * 2. 系统级提示词（system.mdx）
+ * 3. Always 技能内容
+ * 4. 技能摘要
+ *
+ * @param workspace 工作区路径
+ * @param skillsLoader 技能加载器
  */
 export function loadSystemPrompt(
   workspace: string,
   skillsLoader: SkillsLoader | null
 ): string {
-  const basePrompt = loadSystemPromptFromUserConfig(workspace);
   const parts: string[] = [];
 
-  parts.push(buildPathExplanation(workspace));
-  appendAlwaysSkills(parts, skillsLoader);
-  appendSkillsSummary(parts, skillsLoader);
-
-  if (parts.length > 0) {
-    return basePrompt + '\n\n---\n\n' + parts.join('\n\n---\n\n');
+  // 1. 用户级提示词（可修改）
+  const userPrompts = loadUserPrompts(workspace);
+  if (userPrompts) {
+    parts.push(userPrompts);
   }
 
-  return basePrompt;
-}
-
-/**
- * 构建系统路径说明
- */
-function buildPathExplanation(workspace: string): string {
-  return `# 系统路径说明
-
-## 可访问目录（使用文件工具读写）
-
-| 路径 | 用途 | 说明 |
-|------|------|------|
-| \`\${workspace}\` | 工作区 | 用户项目文件，主要工作目录 |
-| \`~/.micro-agent/workspace\` | 默认工作区 | 未指定时的默认工作区 |
-| \`~/.micro-agent/knowledge/\` | 知识库 | 上传的文档存储位置 |
-| \`~/.micro-agent/SOUL.md\` | 身份定义 | 定义你的角色和人格 |
-| \`~/.micro-agent/USER.md\` | 用户信息 | 关于用户的重要信息 |
-| \`~/.micro-agent/AGENTS.md\` | 行为准则 | 你的行为规范和原则 |
-| \`~/.micro-agent/settings.yaml\` | 系统配置 | 模型、通道等配置 |
-
-## 文件工具使用规则
-
-1. 路径相对于工作区：\`read_file("file.txt")\` 或 \`list_dir(".")\`
-2. 子目录使用相对路径：\`read_file("src/index.ts")\`
-3. 访问系统目录使用绝对路径或 ~ 开头：\`read_file("~/.micro-agent/USER.md")\`
-
-## 知识库查询
-
-用户询问知识库内容时，系统会自动检索相关文档并注入 \`<knowledge-documents>\` 标签中。
-
-### 禁止事项
-
-- **禁止使用 read_file 读取 PDF**：PDF 是二进制格式，直接读取只会得到乱码
-- **禁止使用 web_fetch 读取本地文件**：仅支持 HTTP/HTTPS
-- **必须使用知识库上下文**：所有文档内容都在 \`<knowledge-documents>\` 标签中
-
-### 知识库引用规范
-
-回答基于知识库文档时，**必须标注来源**：
-
-- **格式**：\`(来源: 文档名称, 页码X)\` 或 \`[来源: 文档名称]\`
-- **示例**：RAG 系统包含检索和生成两个组件... (来源: 大模型解决方案白皮书, 页码3)
-- 如果知识库上下文不足，请告知用户，不要尝试其他方式读取文件`;
-}
-
-/**
- * 添加 Always 技能内容
- */
-function appendAlwaysSkills(parts: string[], skillsLoader: SkillsLoader | null): void {
-  if (!skillsLoader || skillsLoader.count === 0) return;
-
-  const alwaysContent = skillsLoader.buildAlwaysSkillsContent();
-  if (alwaysContent) {
-    parts.push(alwaysContent);
+  // 2. 系统级提示词（不可修改）
+  const systemPrompt = loadSystemPromptTemplate(workspace);
+  if (systemPrompt) {
+    parts.push(systemPrompt);
   }
-}
 
-/**
- * 添加技能摘要内容
- */
-function appendSkillsSummary(parts: string[], skillsLoader: SkillsLoader | null): void {
-  if (!skillsLoader || skillsLoader.count === 0) return;
+  // 3. Always 技能内容（直接注入上下文）
+  if (skillsLoader && skillsLoader.count > 0) {
+    const alwaysContent = skillsLoader.buildAlwaysSkillsContent();
+    if (alwaysContent) {
+      parts.push(alwaysContent);
+    }
+  }
 
-  const skillsSummary = skillsLoader.buildSkillsSummary();
-  if (skillsSummary) {
-    parts.push(`# 技能
+  // 4. 技能摘要
+  if (skillsLoader && skillsLoader.count > 0) {
+    const skillsSummary = skillsLoader.buildSkillsSummary();
+    if (skillsSummary) {
+      parts.push(`# 技能
 
 以下技能可以扩展你的能力。
 
@@ -203,6 +184,9 @@ function appendSkillsSummary(parts: string[], skillsLoader: SkillsLoader | null)
 2. 读取 location 路径下的 SKILL.md 文件
 3. 按照 SKILL.md 中的指导执行操作，而不是直接写代码
 
-\${skillsSummary}`);
+${skillsSummary}`);
+    }
   }
+
+  return parts.join('\n\n---\n\n');
 }

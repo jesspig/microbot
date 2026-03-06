@@ -92,6 +92,16 @@ export interface AgentClient {
     content: MessageContent,
     metadata?: Record<string, unknown>
   ): Promise<string>;
+  /** 设置系统提示词 */
+  setSystemPrompt(prompt: string): Promise<void>;
+  /** 注册工具 */
+  registerTools(tools: unknown[]): Promise<{ count: number; tools: string[] }>;
+  /** 加载技能 */
+  loadSkills(skills: unknown[]): Promise<{ count: number; skills: string[] }>;
+  /** 配置记忆系统 */
+  configureMemory(config: unknown): Promise<void>;
+  /** 配置知识库 */
+  configureKnowledge(config: unknown): Promise<void>;
 }
 
 /**
