@@ -7,10 +7,16 @@ export type TransportType = 'ipc' | 'http' | 'websocket';
 
 /** IPC 配置 */
 export interface IPCConfig {
-  /** Socket 路径（Linux/macOS）或管道名（Windows） */
+  /** Agent Service 路径（Bun IPC 模式） */
+  servicePath?: string;
+  /** TCP 端口（TCP Loopback 模式，Windows） */
+  port?: number;
+  /** Socket 路径（Unix Socket 模式，Linux/macOS） */
   path?: string;
   /** 超时时间（毫秒） */
   timeout?: number;
+  /** 序列化方式（Bun IPC） */
+  serialization?: 'advanced' | 'json';
 }
 
 /** HTTP 配置 */
@@ -98,4 +104,28 @@ export interface PromptTemplate {
     default?: unknown;
     required?: boolean;
   }>;
+}
+
+/** LLM 消息 */
+export interface LLMMessage {
+  /** 角色 */
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  /** 内容 */
+  content: string;
+  /** 时间戳 */
+  timestamp?: Date;
+  /** 工具调用 */
+  toolCalls?: ToolCall[];
+}
+
+/** 工具调用 */
+export interface ToolCall {
+  /** 调用 ID */
+  id: string;
+  /** 工具名称 */
+  name: string;
+  /** 参数 */
+  arguments: Record<string, unknown>;
+  /** 结果 */
+  result?: unknown;
 }
