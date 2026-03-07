@@ -78,9 +78,8 @@ export class ModelRouter {
       return { model: this.visionModel, config, reason: '使用视觉模型', isVision: true };
     }
 
-    // 无视觉模型时使用对话模型
-    log.warn('[Router] 未配置视觉模型，使用对话模型代替');
-    return this.selectChatModel();
+    // 未配置视觉模型，抛出错误
+    throw new Error('未配置视觉模型，请在 settings.yaml 中设置 agents.models.vision');
   }
 
   /**

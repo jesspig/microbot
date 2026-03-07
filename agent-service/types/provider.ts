@@ -24,6 +24,26 @@ export interface GenerationConfig {
   topP?: number;
   /** 频率惩罚 */
   frequencyPenalty?: number;
+  /** 是否启用思考/推理模式 */
+  enableThinking?: boolean;
+}
+
+/** Provider 厂商类型 */
+export type ProviderVendor = 
+  | 'openai' 
+  | 'deepseek' 
+  | 'glm' 
+  | 'kimi' 
+  | 'minimax' 
+  | 'ollama'
+  | 'openai-compatible';
+
+/** 思考模式配置 */
+export interface ThinkingConfig {
+  /** 是否启用思考模式 */
+  enabled: boolean;
+  /** 思考内容的最大长度（用于截断） */
+  maxLength?: number;
 }
 
 /** Provider 能力配置 */
@@ -68,7 +88,7 @@ export interface Provider {
   ): Promise<LLMResponse>;
   
   /** 获取默认模型 */
-  getDefaultModel(): string;
+  getDefaultModel(): string | undefined;
   
   /** 检查 Provider 是否可用 */
   isAvailable(): Promise<boolean>;

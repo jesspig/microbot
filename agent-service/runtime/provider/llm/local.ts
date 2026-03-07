@@ -11,7 +11,7 @@ import type {
   GenerationConfig,
   ProviderCapabilities,
 } from '../../../types';
-import { OpenAICompatibleProvider, type OpenAICompatibleConfig } from './openai';
+import { createLLMProvider, type LLMProviderConfig } from './openai';
 
 const log = getLogger(['provider', 'local']);
 
@@ -19,8 +19,6 @@ const log = getLogger(['provider', 'local']);
 export interface LocalProviderConfig {
   /** 基础 URL (默认: http://localhost:11434/v1 for Ollama) */
   baseUrl?: string;
-  /** 默认模型 */
-  defaultModel: string;
   /** 默认生成配置 */
   defaultGenerationConfig?: GenerationConfig;
   /** Provider 名称 */
@@ -38,18 +36,20 @@ const DEFAULT_OLLAMA_URL = 'http://localhost:11434/v1';
 export class LocalProvider implements LLMProvider {
   readonly name: string;
   readonly type = 'llm' as const;
-  private delegate: OpenAICompatibleProvider;
+  private delegate: LLMProvider;
+  private baseUrl: string;
 
   constructor(config: LocalProviderConfig) {
     this.name = config.name ?? 'local';
+    this.baseUrl = config.baseUrl ?? DEFAULT_OLLAMA_URL;
     
-    const openaiConfig: OpenAICompatibleConfig = {
-      baseUrl: config.baseUrl ?? DEFAULT_OLLAMA_URL,
-      defaultModel: config.defaultModel,
+    const providerConfig: LLMProviderConfig = {
+      baseUrl: this.baseUrl,
       defaultGenerationConfig: config.defaultGenerationConfig,
+      vendor: 'ollama',
     };
 
-    this.delegate = new OpenAICompatibleProvider(openaiConfig, this.name);
+    this.delegate = createLLMProvider(providerConfig, this.name);
   }
 
   async chat(
@@ -61,13 +61,13 @@ export class LocalProvider implements LLMProvider {
     return this.delegate.chat(messages, tools, model, config);
   }
 
-  getDefaultModel(): string {
+  getDefaultModel(): string | undefined {
     return this.delegate.getDefaultModel();
   }
 
   async isAvailable(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.delegate['config'].baseUrl.replace('/v1', '')}/api/tags`, {
+      const response = await fetch(`${this.baseUrl.replace('/v1', '')}/api/tags`, {
         method: 'GET',
       });
       return response.ok;
@@ -84,7 +84,7 @@ export class LocalProvider implements LLMProvider {
   async listModels(): Promise<string[] | null> {
     try {
       // 尝试 Ollama API
-      const ollamaUrl = this.delegate['config'].baseUrl.replace('/v1', '');
+      const ollamaUrl = this.baseUrl.replace('/v1', '');
       const response = await fetch(`${ollamaUrl}/api/tags`, {
         method: 'GET',
       });
