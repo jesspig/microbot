@@ -197,7 +197,7 @@ export const ConfigSchema = z.object({
   channels: ChannelConfigSchema.default({}),
   /** 知识库配置 */
   knowledgeBase: KnowledgeBaseConfigSchema.optional(),
-});
+}).passthrough(); // 允许额外字段（如 $schema, _docs 等）
 
 /** 配置类型 */
 export type Config = z.infer<typeof ConfigSchema>;

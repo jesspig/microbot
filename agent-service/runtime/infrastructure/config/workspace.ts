@@ -27,24 +27,43 @@ export function resolveWorkspacePaths(workspaces: WorkspaceConfig[]): string[] {
   return workspaces.map(w => expandPath(w.path));
 }
 
+/** 访问控制配置 */
+export interface AccessControlConfig {
+  /** 工作区路径 */
+  workspace?: string;
+  /** 知识库路径 */
+  knowledgeBase?: string;
+  /** 额外允许的工作区 */
+  workspaces?: WorkspaceConfig[];
+}
+
 /**
  * 验证工作区访问权限
  *
- * MicroAgent 是隔离的，只能读写工作区内的文件
+ * MicroAgent 是隔离的，只能读写指定目录内的文件：
+ * - 工作区目录（默认 ~/.micro-agent/workspace）
+ * - 知识库目录（默认 ~/.micro-agent/knowledge）
+ * - 额外配置的工作区
  */
 export function validateWorkspaceAccess(
   targetPath: string,
-  allowedWorkspaces: WorkspaceConfig[] = []
+  config: AccessControlConfig = {}
 ): void {
   const normalizedTarget = resolve(expandPath(targetPath));
   const userDir = expandPath(USER_CONFIG_DIR);
+
+  // 默认路径
   const defaultWorkspace = resolve(userDir, 'workspace');
+  const defaultKnowledgeBase = resolve(userDir, 'knowledge');
 
   // 允许访问的路径
-  const allowedPaths = [
-    userDir,                    // ~/.micro-agent（配置目录）
-    defaultWorkspace,           // 默认工作区
-    ...resolveWorkspacePaths(allowedWorkspaces),
+  const allowedPaths: string[] = [
+    // 工作区
+    config.workspace ? expandPath(config.workspace) : defaultWorkspace,
+    // 知识库
+    config.knowledgeBase ? expandPath(config.knowledgeBase) : defaultKnowledgeBase,
+    // 额外配置的工作区
+    ...(config.workspaces ? resolveWorkspacePaths(config.workspaces) : []),
   ];
 
   for (const allowed of allowedPaths) {
@@ -56,16 +75,12 @@ export function validateWorkspaceAccess(
   }
 
   // 构建错误信息
-  const workspaceList = allowedWorkspaces.length > 0
-    ? allowedWorkspaces.map(w => '  - ' + w.path).join('\n')
-    : '  （未配置）';
+  const allowedList = allowedPaths.map(p => '  - ' + p).join('\n');
 
   throw new Error(
     '工作区访问被拒绝: ' + targetPath + '\n' +
-    '当前允许的工作区:\n' + workspaceList + '\n' +
-    '如需访问此路径，请在 ~/.micro-agent/settings.yaml 中添加:\n' +
-    'workspaces:\n' +
-    '  - ' + targetPath
+    '允许访问的目录:\n' + allowedList + '\n' +
+    '如需访问其他路径，请在 settings.yaml 中配置 workspaces'
   );
 }
 
@@ -74,24 +89,26 @@ export function validateWorkspaceAccess(
  */
 export function canAccessWorkspace(
   targetPath: string,
-  allowedWorkspaces: WorkspaceConfig[] = []
+  config: AccessControlConfig = {}
 ): boolean {
   try {
-    validateWorkspaceAccess(targetPath, allowedWorkspaces);
+    validateWorkspaceAccess(targetPath, config);
     return true;
   } catch {
     return false;
   }
 }
 
+/** 配置文件名 */
+const CONFIG_FILE_NAME = 'settings.yaml';
+
 /**
  * 获取用户配置文件路径
  */
 export function getUserConfigPath(): string {
   const userDir = expandPath(USER_CONFIG_DIR);
-  const existing = findConfigFile(userDir);
-  if (existing) return existing;
-  return resolve(userDir, 'settings.yaml');
+  const configPath = resolve(userDir, CONFIG_FILE_NAME);
+  return configPath;
 }
 
 /**
@@ -106,18 +123,9 @@ export function createDefaultUserConfig(systemDefaultsDir: string): void {
     mkdirSync(configDir, { recursive: true });
   }
 
-  // 查找模板文件（优先 settings.example.yaml）
-  const templateNames = ['settings.example.yaml', 'settings.yaml'];
-  let templatePath: string | null = null;
-  for (const name of templateNames) {
-    const p = resolve(systemDefaultsDir, name);
-    if (existsSync(p)) {
-      templatePath = p;
-      break;
-    }
-  }
-
-  if (templatePath) {
+  // 查找模板文件
+  const templatePath = resolve(systemDefaultsDir, 'settings.example.yaml');
+  if (existsSync(templatePath)) {
     const template = readFileSync(templatePath, 'utf-8');
     writeFileSync(configPath, template, 'utf-8');
   } else {
@@ -129,32 +137,17 @@ export function createDefaultUserConfig(systemDefaultsDir: string): void {
  * 获取最小配置（无模板时的备用）
  */
 function getMinimalConfig(): string {
-  return '' +
-'# MicroAgent 配置文件\n' +
-'# 文档：https://micro-agent.dev/config\n' +
-'\n' +
-'agents:\n' +
-'  models:\n' +
-'    # chat: ollama/qwen3  # 必填\n' +
-'\n' +
-'providers:\n' +
-'  # ollama:\n' +
-'  #   baseUrl: http://localhost:11434/v1\n' +
-'  #   models:\n' +
-'  #     - qwen3\n' +
-'\n';
-}
+  return `# MicroAgent 配置文件
+# 文档: https://micro-agent.dev/config
 
-/** 配置文件名列表 */
-const CONFIG_FILE_NAMES = ['settings.yaml', 'settings.yml', 'settings.json'];
+agents:
+  models:
+    # chat: ollama/qwen3  # 必填
 
-/**
- * 查找配置文件
- */
-function findConfigFile(dir: string): string | null {
-  for (const name of CONFIG_FILE_NAMES) {
-    const path = resolve(dir, name);
-    if (existsSync(path)) return path;
-  }
-  return null;
+providers:
+  # ollama:
+  #   baseUrl: http://localhost:11434/v1
+  #   models:
+  #     - qwen3
+`;
 }

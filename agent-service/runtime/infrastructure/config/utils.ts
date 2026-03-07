@@ -4,7 +4,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { load } from 'js-yaml';
-import { resolve, dirname, basename, join } from 'path';
+import { resolve, dirname, join } from 'path';
 import { homedir } from 'os';
 
 /** 用户配置目录（展开后） */
@@ -76,41 +76,23 @@ export function resolveEnvVars(obj: unknown): unknown {
   return obj;
 }
 
-/** 配置文件名列表 */
-export const CONFIG_FILE_NAMES = ['settings.yaml', 'settings.yml', 'settings.json'];
+/** 配置文件名 */
+export const CONFIG_FILE_NAME = 'settings.yaml';
 
 /**
  * 查找配置文件
  */
 export function findConfigFile(dir: string): string | null {
-  for (const name of CONFIG_FILE_NAMES) {
-    const path = resolve(dir, name);
-    if (existsSync(path)) return path;
-  }
-  return null;
+  const path = resolve(dir, CONFIG_FILE_NAME);
+  return existsSync(path) ? path : null;
 }
 
 /**
- * 加载配置文件
+ * 加载配置文件（YAML 格式）
  */
 export function loadConfigFile(filePath: string): Record<string, unknown> {
   const content = readFileSync(filePath, 'utf-8');
-  const ext = basename(filePath).split('.').pop()?.toLowerCase();
-
-  let config: Record<string, unknown> | undefined;
-
-  switch (ext) {
-    case 'yaml':
-    case 'yml':
-      config = load(content) as Record<string, unknown> | undefined;
-      break;
-    case 'json':
-      config = JSON.parse(content);
-      break;
-    default:
-      config = load(content) as Record<string, unknown> | undefined;
-  }
-
+  const config = load(content) as Record<string, unknown> | undefined;
   return resolveEnvVars(config || {}) as Record<string, unknown>;
 }
 

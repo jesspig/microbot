@@ -54,7 +54,7 @@ export {
   loadConfigFile,
   buildPathChain,
   getBuiltinDefaults,
-  CONFIG_FILE_NAMES,
+  CONFIG_FILE_NAME,
 } from './utils';
 
 // Workspace
