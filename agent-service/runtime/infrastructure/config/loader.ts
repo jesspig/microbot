@@ -39,6 +39,46 @@ export interface LoadConfigOptions {
 }
 
 /**
+ * 展开配置中的路径字段
+ * 
+ * 将 ~ 前缀的路径展开为实际的用户主目录
+ */
+function expandConfigPaths(config: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...config };
+
+  // 展开 agents.workspace
+  if (result.agents && typeof result.agents === 'object') {
+    const agents = { ...(result.agents as Record<string, unknown>) };
+    
+    if (typeof agents.workspace === 'string') {
+      agents.workspace = expandPath(agents.workspace);
+    }
+    
+    // 展开 agents.memory.storagePath
+    if (agents.memory && typeof agents.memory === 'object') {
+      const memory = { ...(agents.memory as Record<string, unknown>) };
+      if (typeof memory.storagePath === 'string') {
+        memory.storagePath = expandPath(memory.storagePath);
+      }
+      agents.memory = memory;
+    }
+    
+    // 展开 agents.knowledge.basePath
+    if (agents.knowledge && typeof agents.knowledge === 'object') {
+      const knowledge = { ...(agents.knowledge as Record<string, unknown>) };
+      if (typeof knowledge.basePath === 'string') {
+        knowledge.basePath = expandPath(knowledge.basePath);
+      }
+      agents.knowledge = knowledge;
+    }
+    
+    result.agents = agents;
+  }
+
+  return result;
+}
+
+/**
  * 加载配置
  */
 export function loadConfig(options: LoadConfigOptions = {}): Config {
@@ -62,7 +102,8 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
   if (configPath) {
     if (existsSync(configPath)) {
       const config = loadConfigFile(configPath);
-      return ConfigSchema.parse(deepMerge(getBuiltinDefaults(), config));
+      const merged = deepMerge(getBuiltinDefaults(), config);
+      return ConfigSchema.parse(expandConfigPaths(merged));
     }
     return ConfigSchema.parse(getBuiltinDefaults());
   }
@@ -78,7 +119,7 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
     }
   }
 
-  return ConfigSchema.parse(mergedConfig);
+  return ConfigSchema.parse(expandConfigPaths(mergedConfig));
 }
 
 /**

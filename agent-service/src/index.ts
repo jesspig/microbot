@@ -231,7 +231,7 @@ class AgentServiceImpl {
       log.error('配置加载失败，使用默认配置', { error: (error as Error).message });
       this.appConfig = {
         agents: {
-          workspace: this.config.workspace ?? '~/.micro-agent/workspace',
+          workspace: this.config.workspace ?? join(homedir(), '.micro-agent', 'workspace'),
           maxTokens: 512,
           temperature: 0.7,
           topK: 50,

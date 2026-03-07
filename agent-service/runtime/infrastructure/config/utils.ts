@@ -4,7 +4,11 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { load } from 'js-yaml';
-import { resolve, dirname, basename } from 'path';
+import { resolve, dirname, basename, join } from 'path';
+import { homedir } from 'os';
+
+/** 用户配置目录（展开后） */
+const USER_CONFIG_DIR = join(homedir(), '.micro-agent');
 
 /**
  * 深度合并对象
@@ -135,7 +139,7 @@ export function buildPathChain(workspace: string, currentDir: string): string[] 
 export function getBuiltinDefaults(): Record<string, unknown> {
   return {
     agents: {
-      workspace: '~/.micro-agent/workspace',
+      workspace: join(USER_CONFIG_DIR, 'workspace'),
       maxTokens: 512,
       temperature: 0.7,
       executor: {
@@ -143,7 +147,7 @@ export function getBuiltinDefaults(): Record<string, unknown> {
       },
       memory: {
         enabled: true,
-        storagePath: '~/.micro-agent/memory',
+        storagePath: join(USER_CONFIG_DIR, 'memory'),
         autoSummarize: true,
         summarizeThreshold: 20,
         idleTimeout: 300000,
