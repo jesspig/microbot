@@ -30,6 +30,8 @@ export interface OrchestratorConfig {
   generationConfig?: GenerationConfig;
   /** 工作目录 */
   workspace: string;
+  /** 知识库目录 */
+  knowledgeBase: string;
 }
 
 /** 流式响应回调 */
@@ -140,14 +142,14 @@ export class AgentOrchestrator {
       // 执行流式 ReAct 循环
       const result = await this.executeLoopWithStream(messages, msg, callbacks, toolContext);
 
-      // 记录 LLM 输出
-      if (result.answer) {
-        log.info('LLM 响应', { 
-          sessionKey,
-          content: result.answer.slice(0, 500),
-          iterations: result.iterations,
-        });
-      }
+      // 记录 LLM 输出（包括空响应）
+      log.info('LLM 响应', { 
+        sessionKey,
+        content: result.answer.slice(0, 500),
+        reasoning: result.reasoning?.slice(0, 200),
+        iterations: result.iterations,
+        isEmpty: !result.answer.trim(),
+      });
 
       // 更新历史
       messages.push({ role: 'assistant', content: result.answer });
@@ -303,6 +305,7 @@ export class AgentOrchestrator {
           chatId: msg.chatId,
           workspace: this.config.workspace,
           currentDir: this.config.workspace,
+          knowledgeBase: this.config.knowledgeBase,
           sendToBus: async () => {},
         });
 
@@ -326,9 +329,10 @@ export class AgentOrchestrator {
     msg: InboundMessage,
     callbacks: StreamCallbacks,
     toolContext?: Partial<ToolContext>
-  ): Promise<{ answer: string; iterations: number }> {
+  ): Promise<{ answer: string; reasoning?: string; iterations: number }> {
     const toolDefinitions = this.toLLMToolDefinitions(this.tools.getDefinitions());
     let finalAnswer = '';
+    let finalReasoning: string | undefined;
 
     let iterations = 0;
     while (iterations < this.config.maxIterations) {
@@ -344,6 +348,7 @@ export class AgentOrchestrator {
       // 记录每次 LLM 响应（包括中间响应）
       log.info('LLM 思考', { 
         iteration: iterations,
+        reasoning: response.reasoning?.slice(0, 200),
         content: response.content?.slice(0, 200),
         toolCalls: response.toolCalls?.map(tc => tc.name) ?? [],
       });
@@ -351,6 +356,16 @@ export class AgentOrchestrator {
       // 检查是否有工具调用
       if (!response.hasToolCalls || !response.toolCalls?.length) {
         finalAnswer = response.content || '';
+        finalReasoning = response.reasoning;
+        
+        // 如果 content 为空但 reasoning 有内容，使用 reasoning 作为回答
+        if (!finalAnswer.trim() && finalReasoning?.trim()) {
+          finalAnswer = finalReasoning;
+        }
+        // 如果两者都为空，提供默认消息
+        if (!finalAnswer.trim()) {
+          finalAnswer = '抱歉，我无法生成有效的响应。请尝试重新表述您的问题。';
+        }
         
         // 流式发送最终响应
         for (let i = 0; i < finalAnswer.length; i += 20) {
@@ -359,7 +374,7 @@ export class AgentOrchestrator {
           await new Promise(resolve => setTimeout(resolve, 10));
         }
         
-        return { answer: finalAnswer, iterations };
+        return { answer: finalAnswer, reasoning: finalReasoning, iterations };
       }
 
       // 执行工具调用
@@ -371,6 +386,7 @@ export class AgentOrchestrator {
           chatId: msg.chatId,
           workspace: this.config.workspace,
           currentDir: toolContext?.currentDir ?? this.config.workspace,
+          knowledgeBase: this.config.knowledgeBase,
           sendToBus: async () => {},
         };
 
@@ -405,7 +421,7 @@ export class AgentOrchestrator {
     // 超过最大迭代次数
     const timeoutMsg = '抱歉，我无法完成您的请求，请尝试简化您的问题。';
     await callbacks.onChunk(timeoutMsg);
-    return { answer: timeoutMsg, iterations };
+    return { answer: timeoutMsg, reasoning: undefined, iterations };
   }
 
   /**

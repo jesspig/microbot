@@ -17,6 +17,8 @@ const log = getLogger(['kernel', 'execution-engine']);
 export interface ExecutionEngineConfig {
   /** 工作目录 */
   workspace: string;
+  /** 知识库目录 */
+  knowledgeBase: string;
   /** 工具执行超时（毫秒） */
   toolTimeout?: number;
 }

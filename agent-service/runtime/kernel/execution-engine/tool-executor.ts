@@ -15,6 +15,8 @@ const log = getLogger(['kernel', 'tool-executor']);
 export interface ToolExecutorConfig {
   /** 工作目录 */
   workspace: string;
+  /** 知识库目录 */
+  knowledgeBase: string;
   /** 工具执行超时（毫秒） */
   toolTimeout?: number;
 }
@@ -93,6 +95,7 @@ export class ToolExecutor {
       chatId: context?.chatId as string || 'default',
       workspace: this.config.workspace,
       currentDir: context?.currentDir as string || this.config.workspace,
+      knowledgeBase: this.config.knowledgeBase,
       sendToBus: async () => {},
     };
   }

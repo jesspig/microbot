@@ -72,6 +72,8 @@ export interface ToolContext {
   workspace: string;
   /** 当前工作目录（用于目录级配置查找） */
   currentDir: string;
+  /** 知识库目录 */
+  knowledgeBase: string;
   /** 发送消息到总线 */
   sendToBus: (msg: unknown) => Promise<void>;
 }
