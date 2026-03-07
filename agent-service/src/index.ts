@@ -681,6 +681,10 @@ class AgentServiceImpl {
           });
           break;
 
+        case 'config.reload':
+          this.handleConfigReload(id);
+          break;
+
         default:
           process.send?.({
             jsonrpc: '2.0',
@@ -1143,6 +1147,51 @@ class AgentServiceImpl {
     sendChunk({ delta: response, done: false });
     sendChunk({ done: true });
     session.messages.push({ role: 'assistant', content: response });
+  }
+
+  /**
+   * 处理配置重载
+   */
+  private handleConfigReload(requestId: string): void {
+    log.info('正在重新加载配置...');
+
+    try {
+      // 重新加载配置
+      this.appConfig = loadConfig({
+        workspace: this.config.workspace,
+      });
+      log.info('配置已重新加载');
+
+      // 重新初始化 LLM Provider
+      this.llmProvider = null;
+      this.defaultModel = '';
+      this.initializeLLMProvider();
+
+      // 更新 Orchestrator
+      if (this.orchestrator && this.llmProvider) {
+        this.updateOrchestrator();
+        log.info('Orchestrator 已更新');
+      } else if (!this.llmProvider) {
+        log.warn('无法更新 Orchestrator: LLM Provider 未初始化');
+      }
+
+      process.send?.({
+        jsonrpc: '2.0',
+        id: requestId,
+        result: { 
+          success: true, 
+          hasProvider: !!this.llmProvider,
+          defaultModel: this.defaultModel,
+        },
+      });
+    } catch (error) {
+      log.error('配置重载失败', { error: (error as Error).message });
+      process.send?.({
+        jsonrpc: '2.0',
+        id: requestId,
+        error: { code: -32005, message: (error as Error).message },
+      });
+    }
   }
 
   /**

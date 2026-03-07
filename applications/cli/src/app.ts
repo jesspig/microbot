@@ -23,7 +23,7 @@ import { getProviderConfigs, parseDefaultModelInfo } from './modules/providers-i
 import { getMemorySystemConfig, getSearchModeDescription, getEmbeddingModelInfo } from './modules/memory-init';
 import { ensureUserConfigFiles, loadSystemPrompt } from './modules/system-prompt';
 import { getLogger } from '@logtape/logtape';
-import { existsSync } from 'fs';
+import { existsSync, watch, type FSWatcher } from 'fs';
 import { SkillsLoader } from '@micro-agent/sdk';
 import { fileURLToPath } from 'url';
 
@@ -61,6 +61,9 @@ class CLIApp implements App {
   private skillsLoader: SkillsLoader | null = null;
   private startupInfo: StartupInfo;
   private settings: Settings;
+  private configWatcher: FSWatcher | null = null;
+  private reloadTimer: Timer | null = null;
+  private isReloading = false;
 
   constructor(config: AppConfig) {
     this.config = config;
@@ -109,7 +112,10 @@ class CLIApp implements App {
 
       log.info('应用启动完成');
 
-      // 10. 保持运行
+      // 10. 启动配置热重载监听
+      this.startConfigWatcher();
+
+      // 11. 保持运行
       await this.keepAlive();
 
     } catch (error) {
@@ -223,11 +229,14 @@ class CLIApp implements App {
     displayShutdownInfo();
     this.running = false;
 
+    // 关闭配置监听器
+    this.stopConfigWatcher();
+
     if (this.router) {
       await this.router.stop();
     }
 
-    console.log('  ✓ 已停止');
+    log.info('服务已停止');
   }
 
   getStatus(): { running: boolean; channels: string[]; sessions: number } {
@@ -390,6 +399,226 @@ class CLIApp implements App {
       log.warn('配置加载失败', { error: error instanceof Error ? error.message : String(error) });
       return { channels: {} };
     }
+  }
+
+  /**
+   * 启动配置文件热重载监听
+   */
+  private startConfigWatcher(): void {
+    const configPath = this.getUserConfigPath();
+    if (!configPath) {
+      log.debug('未找到用户配置文件，跳过热重载监听');
+      return;
+    }
+
+    try {
+      this.configWatcher = watch(configPath, (eventType) => {
+        if (eventType === 'change') {
+          this.scheduleConfigReload();
+        }
+      });
+      console.log(`\x1b[36m[热重载]\x1b[0m 已启用，监听 ${configPath.replace(homedir(), '~')}`);
+      log.info('配置热重载已启用', { path: configPath });
+    } catch (error) {
+      log.warn('配置监听启动失败', { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /**
+   * 停止配置文件监听
+   */
+  private stopConfigWatcher(): void {
+    if (this.reloadTimer) {
+      clearTimeout(this.reloadTimer);
+      this.reloadTimer = null;
+    }
+    if (this.configWatcher) {
+      this.configWatcher.close();
+      this.configWatcher = null;
+      log.debug('配置监听已关闭');
+    }
+  }
+
+  /**
+   * 调度配置重载（防抖处理）
+   */
+  private scheduleConfigReload(): void {
+    if (this.reloadTimer) {
+      clearTimeout(this.reloadTimer);
+    }
+    // 1 秒防抖，避免编辑器多次保存事件
+    this.reloadTimer = setTimeout(() => {
+      this.reloadConfig();
+    }, 1000);
+  }
+
+  /**
+   * 重载配置并更新组件
+   */
+  private async reloadConfig(): Promise<void> {
+    // 防止并发重载
+    if (this.isReloading) {
+      log.debug('配置正在重载中，跳过');
+      return;
+    }
+
+    this.isReloading = true;
+
+    try {
+      const oldSettings = this.settings;
+      const newSettings = this.loadSettings();
+
+      // 检测是否有实际变化
+      if (JSON.stringify(oldSettings) === JSON.stringify(newSettings)) {
+        log.debug('配置未发生变化');
+        return;
+      }
+
+      // 检查配置是否有效（防止文件写入中途触发）
+      if (!this.isValidConfig(newSettings)) {
+        log.warn('配置文件���能不完整，跳过此次重载');
+        return;
+      }
+
+      console.log(`\x1b[36m[热重载]\x1b[0m 检测到配置变化，正在更新...`);
+      this.settings = newSettings;
+
+      // 通知 Agent Service 重新加载配置（包括 providers）
+      if (this.agentClient && this.agentClient.connected) {
+        try {
+          const reloadResult = await this.agentClient.reloadConfig();
+          if (reloadResult.hasProvider) {
+            console.log(`\x1b[32m[热重载]\x1b[0m LLM Provider 已更新 (${reloadResult.defaultModel})`);
+          } else {
+            console.log(`\x1b[33m[热重载]\x1b[0m 未配置 LLM Provider`);
+          }
+
+          // 重新配置其他组件
+          await this.configureAgentService();
+          console.log(`\x1b[32m[热重载]\x1b[0m Agent Service 配置已更新`);
+        } catch (error) {
+          console.log(`\x1b[31m[热重载]\x1b[0m Agent Service 配置更新失败: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      // 热更新通道配置
+      if (JSON.stringify(oldSettings.channels) !== JSON.stringify(newSettings.channels)) {
+        await this.updateChannels(oldSettings.channels, newSettings.channels);
+      }
+    } finally {
+      this.isReloading = false;
+    }
+  }
+
+  /**
+   * 检查配置是否有效
+   */
+  private isValidConfig(settings: Settings): boolean {
+    // 至少要有 channels 或 providers 中的一个
+    if (!settings.channels && !settings.providers) {
+      return false;
+    }
+    // 如果有 channels，检查结构是否完整
+    if (settings.channels) {
+      for (const key of Object.keys(settings.channels)) {
+        const channel = settings.channels[key as keyof typeof settings.channels];
+        // 如果通道标记为启用但没有必要配置，可能是文件写入中途
+        if (channel?.enabled && !channel.appId && !channel.appSecret) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  /**
+   * 热更新通道配置
+   */
+  private async updateChannels(
+    oldChannels: Settings['channels'],
+    newChannels: Settings['channels']
+  ): Promise<void> {
+    if (!this.router) return;
+
+    const oldEnabledTypes = new Set(
+      Object.keys(oldChannels || {}).filter(t => oldChannels?.[t as keyof typeof oldChannels]?.enabled)
+    );
+    const newEnabledTypes = new Set(
+      Object.keys(newChannels || {}).filter(t => newChannels?.[t as keyof typeof newChannels]?.enabled)
+    );
+
+    // 停止被禁用的通道（只处理真正禁用的）
+    for (const type of oldEnabledTypes) {
+      if (!newEnabledTypes.has(type)) {
+        console.log(`\x1b[33m[热重载]\x1b[0m 通道 ${type} 已禁用，正在停止...`);
+        await this.router.unregisterChannel(type);
+        console.log(`\x1b[32m[热重载]\x1b[0m 通道 ${type} 已停止`);
+      }
+    }
+
+    // 启动新启用的通道或重启配置变化的通道
+    for (const type of newEnabledTypes) {
+      const oldConfig = oldChannels?.[type as keyof typeof oldChannels];
+      const newConfig = newChannels?.[type as keyof typeof newChannels];
+
+      if (!oldEnabledTypes.has(type)) {
+        // 新启用的通道
+        console.log(`\x1b[33m[热重载]\x1b[0m 通道 ${type} 已启用，正在启动...`);
+        await this.registerChannel(type);
+      } else if (JSON.stringify(oldConfig) !== JSON.stringify(newConfig)) {
+        // 配置变化，重启通道
+        console.log(`\x1b[33m[热重载]\x1b[0m 通道 ${type} 配置已变化，正在重启...`);
+        await this.router.unregisterChannel(type);
+        await this.registerChannel(type);
+      }
+    }
+  }
+
+  /**
+   * 注册单个通道
+   */
+  private async registerChannel(type: string): Promise<void> {
+    if (!this.router) return;
+
+    if (type === 'feishu' && this.settings.channels?.feishu?.enabled) {
+      const feishuConfig = this.settings.channels.feishu;
+
+      if (!feishuConfig.appId || !feishuConfig.appSecret) {
+        console.log(`\x1b[31m[热重载]\x1b[0m 飞书配置不完整，跳过启动`);
+        return;
+      }
+
+      try {
+        const feishu = new FeishuWrapper({
+          appId: feishuConfig.appId,
+          appSecret: feishuConfig.appSecret,
+          encryptKey: feishuConfig.encryptKey,
+          verificationToken: feishuConfig.verificationToken,
+        });
+
+        this.router.registerChannel(feishu);
+        await feishu.start();
+        console.log(`\x1b[32m[热重载]\x1b[0m 飞书通道已启动`);
+      } catch (error) {
+        console.log(`\x1b[31m[热重载]\x1b[0m 飞书通道启动失败: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  /**
+   * 获取用户配置文件路径
+   */
+  private getUserConfigPath(): string | null {
+    const configDir = join(homedir(), '.micro-agent');
+    const configFiles = ['settings.yaml', 'settings.yml', 'settings.json'];
+
+    for (const file of configFiles) {
+      const path = join(configDir, file);
+      if (existsSync(path)) {
+        return path;
+      }
+    }
+    return null;
   }
 
   /**

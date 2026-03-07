@@ -133,10 +133,28 @@ export class MessageRouter {
    */
   registerChannel(channel: Channel): void {
     this.channels.set(channel.type, channel);
-    
+
     // 注册通道消息处理器
     channel.onMessage((msg) => this.handleInboundMessage(msg));
     channel.onError((error) => this.handleError(error));
+  }
+
+  /**
+   * 注销通道
+   */
+  async unregisterChannel(channelType: string): Promise<void> {
+    const channel = this.channels.get(channelType);
+    if (channel) {
+      await channel.stop();
+      this.channels.delete(channelType);
+    }
+  }
+
+  /**
+   * 获取已注册的通道类型列表
+   */
+  getChannelTypes(): string[] {
+    return Array.from(this.channels.keys());
   }
 
   /**

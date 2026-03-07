@@ -93,4 +93,18 @@ export class ConfigAPI {
     this.currentConfig.knowledge = config;
     await this.transport.send('config.configureKnowledge', { config });
   }
+
+  /**
+   * 重新加载配置
+   * 
+   * 通知 Agent Service 重新加载配置文件并重新初始化 LLM Provider
+   */
+  async reloadConfig(): Promise<{ success: boolean; hasProvider: boolean; defaultModel: string }> {
+    const result = await this.transport.send('config.reload', {}) as {
+      success: boolean;
+      hasProvider: boolean;
+      defaultModel: string;
+    };
+    return result;
+  }
 }
