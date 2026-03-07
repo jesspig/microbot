@@ -103,6 +103,12 @@ export class FeishuChannel implements Channel {
       return;
     }
 
+    // 检查空内容
+    if (!msg.content || !msg.content.trim()) {
+      log.warn('消息内容为空，跳过发送');
+      return;
+    }
+
     const receiveIdType = chatId.startsWith('ou_') ? 'open_id' : 'chat_id';
     const content = messageCard.defaultCard({
       title: '',

@@ -69,8 +69,10 @@ function suppressThirdPartyLogs(): void {
 
 /** 初始化日志系统 */
 async function initLoggingSystem(level: 'debug' | 'info' | 'warn' = 'info'): Promise<void> {
+  // CLI 只启用文件日志，禁用控制台输出
+  // 避免与 UI 输出混淆
   await initLogging({
-    console: true,
+    console: false,
     file: true,
     level,
     traceEnabled: level === 'debug',
@@ -120,11 +122,11 @@ async function startService(verbose: boolean, quiet: boolean, configPath?: strin
     process.env.MICRO_AGENT_VERBOSE = 'true';
   }
 
-  // 初始化日志系统（必须在 suppressThirdPartyLogs 之前）
-  await initLoggingSystem(logLevel);
-
-  // 拦截第三方库的冗余日志（在 logtape 初始化之后）
+  // 拦截第三方库的冗余日志（必须在最前面）
   suppressThirdPartyLogs();
+
+  // 初始化日志系统
+  await initLoggingSystem(logLevel);
 
   // 清屏并显示标题（UI 元素，使用 console.log）
   console.log('\x1b[2J\x1b[H');

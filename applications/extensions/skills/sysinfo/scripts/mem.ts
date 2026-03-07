@@ -29,3 +29,13 @@ export function getMemInfo(): MemInfo {
     freeBytes: freeMem
   };
 }
+
+// 直接执行时输出内存信息
+if (import.meta.main) {
+  const info = getMemInfo();
+  console.log('内存:');
+  console.log(`  total: ${info.total}`);
+  console.log(`  used: ${info.used}`);
+  console.log(`  free: ${info.free}`);
+  console.log(`  usage: ${info.usage}`);
+}

@@ -57,12 +57,16 @@ const tracer = getTracer();
 interface AgentServiceConfig {
   logLevel?: 'debug' | 'info' | 'warn' | 'error';
   workspace?: string;
+  knowledgeBase?: string;
+  maxIterations?: number;
 }
 
 /** 默认配置 */
 const DEFAULT_CONFIG: AgentServiceConfig = {
   logLevel: 'info',
   workspace: process.cwd(),
+  knowledgeBase: join(homedir(), '.micro-agent', 'knowledge'),
+  maxIterations: 20,
 };
 
 /**
@@ -266,12 +270,18 @@ class AgentServiceImpl {
       return;
     }
 
+    // 知识库路径：优先使用已配置的知识库路径，其次使用 config 中的配置，最后使用默认值
+    const knowledgeBasePath = this.knowledgeConfig?.basePath
+      ?? this.config.knowledgeBase
+      ?? join(homedir(), '.micro-agent', 'knowledge');
+
     const orchestratorConfig: OrchestratorConfig = {
       llmProvider: this.llmProvider,
       defaultModel: this.defaultModel,
-      maxIterations: 5,
+      maxIterations: this.config.maxIterations ?? 20,
       systemPrompt: this.systemPrompt,
       workspace: this.config.workspace ?? process.cwd(),
+      knowledgeBase: knowledgeBasePath,
     };
 
     this.orchestrator = new AgentOrchestrator(
@@ -294,12 +304,18 @@ class AgentServiceImpl {
       return;
     }
 
+    // 知识库路径：优先使用已配置的知识库路径，其次使用 config 中的配置，最后使用默认值
+    const knowledgeBasePath = this.knowledgeConfig?.basePath
+      ?? this.config.knowledgeBase
+      ?? join(homedir(), '.micro-agent', 'knowledge');
+
     const orchestratorConfig: OrchestratorConfig = {
       llmProvider: this.llmProvider,
       defaultModel: this.defaultModel,
-      maxIterations: 5,
+      maxIterations: this.config.maxIterations ?? 20,
       systemPrompt: this.systemPrompt,
       workspace: this.config.workspace ?? process.cwd(),
+      knowledgeBase: knowledgeBasePath,
     };
 
     this.orchestrator = new AgentOrchestrator(
@@ -476,7 +492,6 @@ class AgentServiceImpl {
         this.llmProvider = new OpenAICompatibleProvider({
           baseUrl: providerConfig.baseUrl,
           apiKey: providerConfig.apiKey,
-          defaultModel: defaultModelId,
           defaultGenerationConfig: {
             maxTokens: agentConfig?.maxTokens ?? 512,
             temperature: agentConfig?.temperature ?? 0.7,
@@ -514,7 +529,6 @@ class AgentServiceImpl {
         this.llmProvider = new OpenAICompatibleProvider({
           baseUrl: providerConfig.baseUrl,
           apiKey: providerConfig.apiKey,
-          defaultModel: modelId,
           defaultGenerationConfig: {
             maxTokens: agentConfig?.maxTokens ?? 512,
             temperature: agentConfig?.temperature ?? 0.7,
@@ -775,7 +789,7 @@ class AgentServiceImpl {
         { role: 'user' as const, content: content.text },
       ];
 
-      const response = await this.llmProvider.chat(messages);
+      const response = await this.llmProvider.chat(messages, undefined, this.defaultModel);
       return {
         sessionId,
         content: response.content,
@@ -889,9 +903,10 @@ class AgentServiceImpl {
       const orchestratorConfig: OrchestratorConfig = {
         llmProvider: this.llmProvider,
         defaultModel: this.defaultModel,
-        maxIterations: 5,
+        maxIterations: this.config.maxIterations ?? 20,
         systemPrompt: updatedSystemPrompt,
         workspace: this.config.workspace ?? process.cwd(),
+        knowledgeBase: this.config.knowledgeBase ?? join(homedir(), '.micro-agent', 'knowledge'),
       };
 
       const updatedOrchestrator = new AgentOrchestrator(
@@ -955,7 +970,7 @@ class AgentServiceImpl {
     })) : undefined;
 
     try {
-      const response = await this.llmProvider.chat(messages, llmTools);
+      const response = await this.llmProvider.chat(messages, llmTools, this.defaultModel);
       const elapsed = Date.now() - startTime;
 
       // 记录 LLM 调用
@@ -1038,6 +1053,7 @@ class AgentServiceImpl {
           chatId: requestId,
           workspace: this.config.workspace ?? process.cwd(),
           currentDir: this.config.workspace ?? process.cwd(),
+          knowledgeBase: this.config.knowledgeBase ?? join(homedir(), '.micro-agent', 'knowledge'),
           sendToBus: async () => {},
         };
 
@@ -1067,7 +1083,7 @@ class AgentServiceImpl {
       }
     }
 
-    const finalResponse = await this.llmProvider.chat(messages);
+    const finalResponse = await this.llmProvider.chat(messages, undefined, this.defaultModel);
     const fullContent = finalResponse.content || '';
 
     for (let i = 0; i < fullContent.length; i += 20) {
@@ -1144,7 +1160,7 @@ class AgentServiceImpl {
           { role: 'system' as const, content: systemPromptWithSkills },
           { role: 'user' as const, content: content.text },
         ];
-        const response = await this.llmProvider.chat(messages);
+        const response = await this.llmProvider.chat(messages, undefined, this.defaultModel);
         
         sendChunk({ delta: response.content || '', done: false });
         sendChunk({ done: true });

@@ -23,3 +23,15 @@ export function getSysInfo(): SysInfo {
     release: release()
   };
 }
+
+// 直接执行时输出系统信息
+if (import.meta.main) {
+  const info = getSysInfo();
+  console.log('系统:');
+  console.log(`  platform: ${info.platform}`);
+  console.log(`  arch: ${info.arch}`);
+  console.log(`  hostname: ${info.hostname}`);
+  console.log(`  uptime: ${info.uptime}`);
+  console.log(`  type: ${info.type}`);
+  console.log(`  release: ${info.release}`);
+}

@@ -4,13 +4,12 @@
  * 提供文件读取、写入、目录列表功能。
  *
  * 允许访问的目录：
- * - 工作区（workspace）- 用户项目文件，默认 ~/.micro-agent/workspace
- * - 知识库 - ~/.micro-agent/knowledge/
- * - 上下文文件 - ~/.micro-agent/*.md（SOUL.md, USER.md, AGENTS.md 等）
- * - 用户配置 - ~/.micro-agent/settings.yaml
+ * - 工作区（workspace）- 用户项目文件
+ * - 知识库（knowledgeBase）- 文档存储
  *
  * 禁止访问：
  * - node_modules 目录
+ * - 配置文件（settings.yaml）
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'fs';
@@ -18,11 +17,6 @@ import { resolve, isAbsolute, normalize } from 'path';
 import { homedir } from 'os';
 import { defineTool } from '@micro-agent/sdk';
 import type { Tool, JSONSchema, ToolContext } from '@micro-agent/types';
-
-/** 获取 MicroAgent 主目录 */
-function getMicroAgentHome(): string {
-  return resolve(homedir(), '.micro-agent');
-}
 
 /**
  * 解析路径，支持：
@@ -50,13 +44,17 @@ function resolvePath(path: string, workspace: string): string {
  * 验证路径是否允许访问
  * @param targetPath 目标路径（已解析为绝对路径）
  * @param workspace 工作区路径
+ * @param knowledgeBase 知识库路径
  * @returns 验证结果，失败时返回错误信息
  */
-function validatePathAccess(targetPath: string, workspace: string): { allowed: boolean; error?: string } {
+function validatePathAccess(
+  targetPath: string,
+  workspace: string,
+  knowledgeBase: string
+): { allowed: boolean; error?: string } {
   // 解析真实路径（处理符号链接和 .. 等）
   let resolvedTarget: string;
   try {
-    // 先规范化路径，再检查
     const normalized = normalize(targetPath);
     resolvedTarget = resolve(normalized);
   } catch {
@@ -67,10 +65,10 @@ function validatePathAccess(targetPath: string, workspace: string): { allowed: b
   const toComparable = (p: string) => p.toLowerCase().replace(/\//g, '\\').replace(/\\+/g, '\\');
   
   const normalizedTarget = toComparable(resolvedTarget);
-  const microAgentHome = toComparable(getMicroAgentHome());
   const normalizedWorkspace = toComparable(workspace);
+  const normalizedKnowledgeBase = toComparable(knowledgeBase);
 
-  // 检查是否在 node_modules 内（全局禁止）- 使用路径组件检查
+  // 检查是否在 node_modules 内（全局禁止）
   const pathParts = normalizedTarget.split(/[/\\]/);
   if (pathParts.includes('node_modules')) {
     return {
@@ -87,30 +85,30 @@ function validatePathAccess(targetPath: string, workspace: string): { allowed: b
     };
   }
 
-  // 1. 检查是否在工作区内
+  // 检查是否在工作区内
   if (normalizedTarget.startsWith(normalizedWorkspace)) {
     return { allowed: true };
   }
 
-  // 2. 检查是否在 ~/.micro-agent 目录内（知识库、上下文、配置）
-  if (normalizedTarget.startsWith(microAgentHome)) {
+  // 检查是否在知识库内
+  if (normalizedTarget.startsWith(normalizedKnowledgeBase)) {
     return { allowed: true };
   }
 
   return {
     allowed: false,
-    error: `访问被拒绝：路径必须在允许的目录内（工作区或 ~/.micro-agent）`,
+    error: `访问被拒绝：路径必须在允许的目录内（工作区或知识库）`,
   };
 }
 
 /** 读取文件工具 */
 export const ReadFileTool = defineTool({
   name: 'read_file',
-  description: '读取文件内容。支持相对路径（相对于工作区）、~ 路径或绝对路径。可访问：工作区、~/.micro-agent/ 目录',
+  description: '读取文件内容。支持相对路径（相对于工作区）、~ 路径或绝对路径。可访问：工作区、知识库目录',
   inputSchema: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: '文件路径（如 "README.md"、"~/.micro-agent/USER.md" 或绝对路径）' },
+      path: { type: 'string', description: '文件路径（如 "README.md" 或绝对路径）' },
       limit: { type: 'number', description: '最大读取行数（可选）' },
     },
     required: ['path'],
@@ -133,7 +131,7 @@ export const ReadFileTool = defineTool({
     const filePath = resolvePath(path, ctx.workspace);
 
     // 验证路径访问权限
-    const validation = validatePathAccess(filePath, ctx.workspace);
+    const validation = validatePathAccess(filePath, ctx.workspace, ctx.knowledgeBase);
     if (!validation.allowed) {
       return `错误: ${validation.error}`;
     }
@@ -156,11 +154,11 @@ export const ReadFileTool = defineTool({
 /** 写入文件工具 */
 export const WriteFileTool = defineTool({
   name: 'write_file',
-  description: '创建或覆盖文件。支持相对路径（相对于工作区）、~ 路径或绝对路径。可访问：工作区、~/.micro-agent/ 目录',
+  description: '创建或覆盖文件。支持相对路径（相对于工作区）、~ 路径或绝对路径。可访问：工作区、知识库目录',
   inputSchema: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: '文件路径（如 "file.txt"、"~/.micro-agent/USER.md" 或绝对路径）' },
+      path: { type: 'string', description: '文件路径（如 "file.txt" 或绝对路径）' },
       content: { type: 'string', description: '文件内容' },
     },
     required: ['path', 'content'],
@@ -169,7 +167,7 @@ export const WriteFileTool = defineTool({
     const filePath = resolvePath(input.path, ctx.workspace);
 
     // 验证路径访问权限
-    const validation = validatePathAccess(filePath, ctx.workspace);
+    const validation = validatePathAccess(filePath, ctx.workspace, ctx.knowledgeBase);
     if (!validation.allowed) {
       return `错误: ${validation.error}`;
     }
@@ -182,11 +180,11 @@ export const WriteFileTool = defineTool({
 /** 列出目录工具 */
 export const ListDirTool = defineTool({
   name: 'list_dir',
-  description: '列出目录内容。支持相对路径（相对于工作区）、~ 路径或绝对路径。可访问：工作区、~/.micro-agent/ 目录',
+  description: '列出目录内容。支持相对路径（相对于工作区）、~ 路径或绝对路径。可访问：工作区、知识库目录',
   inputSchema: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: '目录路径（如 "."、"~/.micro-agent/knowledge" 或绝对路径）' },
+      path: { type: 'string', description: '目录路径（如 "." 或绝对路径）' },
     },
     required: ['path'],
   } satisfies JSONSchema,
@@ -205,7 +203,7 @@ export const ListDirTool = defineTool({
     const dirPath = resolvePath(path, ctx.workspace);
 
     // 验证路径访问权限
-    const validation = validatePathAccess(dirPath, ctx.workspace);
+    const validation = validatePathAccess(dirPath, ctx.workspace, ctx.knowledgeBase);
     if (!validation.allowed) {
       return `错误: ${validation.error}`;
     }

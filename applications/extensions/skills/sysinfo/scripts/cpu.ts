@@ -88,3 +88,16 @@ export function getCpuInfoSync(): CpuInfo {
     loadavg: loadavg()
   };
 }
+
+// 直接执行时输出 CPU 信息
+if (import.meta.main) {
+  getCpuInfo().then(info => {
+    console.log('CPU:');
+    console.log(`  cores: ${info.cores}`);
+    console.log(`  model: ${info.model}`);
+    console.log(`  usage: ${info.usage}`);
+    console.log(`  loadavg: ${info.loadavg.join(',')}`);
+  }).catch(err => {
+    console.error('获取 CPU 信息失败:', err);
+  });
+}

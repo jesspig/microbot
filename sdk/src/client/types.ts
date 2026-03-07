@@ -149,6 +149,10 @@ export interface KnowledgeConfig {
   chunkOverlap?: number;
   /** 检索数量限制 */
   searchLimit?: number;
+  /** 最大搜索结果数 */
+  maxSearchResults?: number;
+  /** 最小相似度阈值 */
+  minSimilarityScore?: number;
 }
 
 /** 运行时配置 */

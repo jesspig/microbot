@@ -26,3 +26,12 @@ export function getNetworkInfo(): NetworkInfo[] {
 
   return result;
 }
+
+// 直接执行时输出网络信息
+if (import.meta.main) {
+  const info = getNetworkInfo();
+  console.log('网络:');
+  info.forEach(n => {
+    console.log(`  ${n.interface}: ip=${n.ip}, mac=${n.mac}`);
+  });
+}

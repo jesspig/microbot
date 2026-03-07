@@ -62,3 +62,8 @@ export function getProcessInfoText(): string {
 
   return [header, separator, ...lines].join('\n');
 }
+
+// 直接执行时输出进程信息
+if (import.meta.main) {
+  console.log(getProcessInfoText());
+}

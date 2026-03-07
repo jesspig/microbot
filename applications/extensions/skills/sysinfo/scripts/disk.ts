@@ -53,3 +53,17 @@ export function getDiskInfo(): DiskInfo[] {
     return [{ total: '', used: '', free: '', usage: '', error: '无法获取磁盘信息' }];
   }
 }
+
+// 直接执行时输出磁盘信息
+if (import.meta.main) {
+  const info = getDiskInfo();
+  console.log('磁盘:');
+  info.forEach(d => {
+    if (d.error) {
+      console.log(`  错误: ${d.error}`);
+    } else {
+      const drive = d.drive || d.filesystem || '';
+      console.log(`  ${drive}: total=${d.total}, used=${d.used}, free=${d.free}, usage=${d.usage}`);
+    }
+  });
+}

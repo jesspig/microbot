@@ -204,11 +204,15 @@ export class MessageRouter {
         if (chunk.type === 'text') {
           fullContent += chunk.content;
         } else if (chunk.type === 'done') {
-          // 发送完整响应
-          await this.sendToChannel(msg.channelType, msg.chatId, {
-            type: 'text',
-            text: fullContent,
-          }, true);
+          // 发送完整响应（检查空内容）
+          if (fullContent.trim()) {
+            await this.sendToChannel(msg.channelType, msg.chatId, {
+              type: 'text',
+              text: fullContent,
+            }, true);
+          } else {
+            console.warn('[MessageRouter] LLM 返回空响应，跳过发送');
+          }
         } else if (chunk.type === 'error') {
           // 发送错误消息
           await this.sendToChannel(msg.channelType, msg.chatId, {
@@ -220,11 +224,14 @@ export class MessageRouter {
     } catch (error) {
       console.error('[MessageRouter] 处理消息失败:', error);
       
-      // 发送错误响应
-      await this.sendToChannel(msg.channelType, msg.chatId, {
-        type: 'text',
-        text: `处理消息时发生错误: ${(error as Error).message}`,
-      }, true);
+      // 发送错误响应（检查错误消息是否有效）
+      const errorText = `处理消息时发生错误: ${(error as Error).message}`;
+      if (errorText.trim()) {
+        await this.sendToChannel(msg.channelType, msg.chatId, {
+          type: 'text',
+          text: errorText,
+        }, true);
+      }
     }
   }
 

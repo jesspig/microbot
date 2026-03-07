@@ -25,13 +25,13 @@ agents:
   # │ chat     │ 对话模型，处理常规对话          │ 必填                      │
   # │ tool     │ 工具调用模型，执行工具          │ 可选，默认用 chat         │
   # │ embed    │ 嵌入模型，向量检索              │ 可选，禁用则用全文检索    │
-  # │ vision   │ 视觉模型，处理图片识别          │ 可选，默认用 chat         │
+  # │ vision   │ 视觉模型，处理图片识别          │ 可选，不配置则禁用视觉    │
   # │ coder    │ 编程模型，处理代码编写          │ 可选，默认用 chat         │
   # │ intent   │ 意图识别模型，判断任务类型      │ 可选，默认用 chat         │
   # └──────────┴─────────────────────────────────┴───────────────────────────┘
   # ─────────────────────────────────────────────────────────────────────────
   models:
-    # chat: ollama/qwen3        # 必填，格式：<provider>/<model>
+    chat: ollama/qwen3.5:0.8b   # 必填，格式：<provider>/<model>
     # tool: ollama/qwen3        # 可选，工具调用模型
     # embed: openai/text-embedding-3-small  # 可选，嵌入模型
     # vision: ollama/qwen3-vl   # 可选，视觉模型
@@ -90,11 +90,11 @@ providers:
   # 安装：https://ollama.ai
   # 特点：无需 apiKey，本地运行，隐私安全
   # ═════════════════════════════════════════════════════════════════════════
-  # ollama:
-  #   baseUrl: http://localhost:11434/v1
-  #   models:
-  #     - qwen3
-  #     - qwen3-vl
+  ollama:
+    baseUrl: http://localhost:11434/v1
+    models:
+      - qwen3.5:0.8b
+      - qwen3-embedding:0.6b
 
   # ═════════════════════════════════════════════════════════════════════════
   # 智谱 GLM（bigmodel.cn）

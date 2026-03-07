@@ -6,7 +6,7 @@
 
 import { homedir } from 'os';
 import { join, resolve, dirname } from 'path';
-import { loadConfig, createDefaultUserConfig } from '@micro-agent/sdk';
+import { loadConfig, createDefaultUserConfig, expandPath } from '@micro-agent/sdk';
 import { MessageRouter } from './modules/message-router';
 import { FeishuWrapper, type FeishuConfig as FeishuWrapperConfig } from './modules/feishu-wrapper';
 import { AgentClientImpl } from './modules/agent-client';
@@ -23,7 +23,7 @@ import { getProviderConfigs, parseDefaultModelInfo } from './modules/providers-i
 import { getMemorySystemConfig, getSearchModeDescription, getEmbeddingModelInfo } from './modules/memory-init';
 import { ensureUserConfigFiles, loadSystemPrompt } from './modules/system-prompt';
 import { getLogger } from '@logtape/logtape';
-import { existsSync, watch, type FSWatcher } from 'fs';
+import { existsSync, mkdirSync, watch, type FSWatcher } from 'fs';
 import { fileURLToPath } from 'url';
 
 const log = getLogger(['cli', 'app']);
@@ -77,6 +77,19 @@ class CLIApp implements App {
     }
 
     try {
+      // 0. 切换工作目录到配置的工作区
+      const workspacePath = this.settings.agents?.workspace
+        ? expandPath(this.settings.agents.workspace)
+        : join(homedir(), '.micro-agent', 'workspace');
+      
+      // 确保工作区目录存在
+      if (!existsSync(workspacePath)) {
+        mkdirSync(workspacePath, { recursive: true });
+      }
+      
+      process.chdir(workspacePath);
+      log.info('工作区已切换', { path: workspacePath });
+
       // 1. 确保用户配置文件存在
       this.ensureUserConfigFiles();
 
@@ -199,18 +212,27 @@ class CLIApp implements App {
       }
 
       // 5. 配置知识库
-      if (this.settings.agents?.workspace) {
+      {
         // 获取嵌入模型信息
         const embedModelInfo = getEmbeddingModelInfo(this.settings as any);
         
+        // 知识库路径：优先使用配置的 basePath，否则默认 ~/.micro-agent/knowledge
+        const knowledgeBasePath = this.settings.knowledgeBase?.basePath
+          ? expandPath(this.settings.knowledgeBase.basePath)
+          : join(homedir(), '.micro-agent', 'knowledge');
+        
         await this.agentClient.configureKnowledge({
-          enabled: true,
-          basePath: resolve(this.settings.agents.workspace, '.knowledge'),
-          embedModel: this.settings.agents.models?.embed,
+          enabled: this.settings.knowledgeBase?.enabled ?? true,
+          basePath: knowledgeBasePath,
+          chunkSize: this.settings.knowledgeBase?.chunkSize,
+          chunkOverlap: this.settings.knowledgeBase?.chunkOverlap,
+          maxSearchResults: this.settings.knowledgeBase?.maxSearchResults,
+          minSimilarityScore: this.settings.knowledgeBase?.minSimilarityScore,
+          embedModel: this.settings.knowledgeBase?.embedModel ?? this.settings.agents?.models?.embed,
           embedBaseUrl: embedModelInfo?.baseUrl,
           embedApiKey: embedModelInfo?.apiKey,
         });
-        log.info('知识库已配置', { hasEmbedding: !!embedModelInfo?.baseUrl });
+        log.info('知识库已配置', { basePath: knowledgeBasePath, hasEmbedding: !!embedModelInfo?.baseUrl });
       }
 
       log.info('Agent Service 配置完成');
@@ -267,7 +289,7 @@ class CLIApp implements App {
       log.info('已创建提示词文件', { files: created });
     }
 
-    // 创建默认 settings.yaml（如果不存在）
+    // 创建默认 settings.json（如果不存在）
     const templatesPath = this.getTemplatesPath();
     createDefaultUserConfig(templatesPath);
   }
@@ -276,7 +298,7 @@ class CLIApp implements App {
    * 获取模板路径
    */
   private getTemplatesPath(): string {
-    // 模板目录包含 settings.example.yaml
+    // 模板目录包含 settings.example.json
     // 路径：applications/templates/configs/ 或 templates/configs/
     const possiblePaths = [
       resolve(import.meta.dir, '../../templates/configs'), // applications/templates/configs
@@ -284,7 +306,7 @@ class CLIApp implements App {
     ];
 
     for (const path of possiblePaths) {
-      const settingsExample = join(path, 'settings.example.yaml');
+      const settingsExample = join(path, 'settings.example.json');
       if (existsSync(settingsExample)) {
         return path;
       }
@@ -608,13 +630,9 @@ class CLIApp implements App {
    */
   private getUserConfigPath(): string | null {
     const configDir = join(homedir(), '.micro-agent');
-    const configFiles = ['settings.yaml', 'settings.yml', 'settings.json'];
-
-    for (const file of configFiles) {
-      const path = join(configDir, file);
-      if (existsSync(path)) {
-        return path;
-      }
+    const path = join(configDir, 'settings.yaml');
+    if (existsSync(path)) {
+      return path;
     }
     return null;
   }
@@ -734,6 +752,15 @@ interface Settings {
   }>;
   channels?: {
     feishu?: FeishuChannelConfig;
+  };
+  knowledgeBase?: {
+    enabled?: boolean;
+    basePath?: string;
+    chunkSize?: number;
+    chunkOverlap?: number;
+    maxSearchResults?: number;
+    minSimilarityScore?: number;
+    embedModel?: string;
   };
 }
 

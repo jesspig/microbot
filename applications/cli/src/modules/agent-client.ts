@@ -82,26 +82,39 @@ export class AgentClientImpl implements AgentClient {
         console.log(`\x1b[36m[用户]\x1b[0m ${String(props.content)}`);
         log.info(message, props);
       }
-      // LLM 思考过程: 前台显示（简化版）
+      // LLM 思考过程: 前台显示
       else if (isLLMThinking) {
         const iteration = props.iteration as number;
         const toolCalls = props.toolCalls as string[] | undefined;
+        const reasoning = props.reasoning as string | undefined;
         const content = props.content as string | undefined;
         
+        // 推理内容（深度思考模型）
+        if (reasoning) {
+          const display = reasoning.length > 150 ? `${reasoning.slice(0, 150)}...` : reasoning;
+          console.log(`\x1b[33m[思考中 #${iteration}]\x1b[0m ${display}`);
+        }
+        
+        // 大模型输出（非最终回答）
+        if (content && content.trim()) {
+          const display = content.length > 100 ? `${content.slice(0, 100)}...` : content;
+          console.log(`\x1b[35m[大模型 #${iteration}]\x1b[0m ${display}`);
+        }
+        
+        // 准备调用工具
         if (toolCalls && toolCalls.length > 0) {
-          console.log(`\x1b[33m[思考 #${iteration}]\x1b[0m 准备调用: ${toolCalls.join(', ')}`);
-        } else if (content) {
-          console.log(`\x1b[33m[思考 #${iteration}]\x1b[0m ${content.slice(0, 100)}...`);
+          console.log(`\x1b[34m[工具]\x1b[0m 准备调用: ${toolCalls.join(', ')}`);
         }
         log.info(message, props);
       }
-      // LLM 响应: 前台显示
-      else if (isLLMResponse && props.content) {
-        const content = String(props.content);
-        if (content.length > 300) {
-          console.log(`\x1b[35m[LLM]\x1b[0m ${content.slice(0, 300)}...`);
-        } else {
-          console.log(`\x1b[35m[LLM]\x1b[0m ${content}`);
+      // LLM 响应: 最终回答
+      else if (isLLMResponse) {
+        const content = props.content ? String(props.content) : '';
+        
+        // 显示最终回答（reasoning 已在迭代过程中显示，不重复）
+        if (content && content.trim()) {
+          const display = content.length > 300 ? `${content.slice(0, 300)}...` : content;
+          console.log(`\x1b[32m[回复]\x1b[0m ${display}`);
         }
         log.info(message, props);
       }
