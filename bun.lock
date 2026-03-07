@@ -9,7 +9,7 @@
         "@larksuiteoapi/node-sdk": "^1.59.0",
         "@logtape/logtape": "^2.0.4",
         "@logtape/pretty": "^2.0.4",
-        "@micro-agent/sdk": "workspace:*",
+        "@micro-agent/client-sdk": "workspace:*",
         "ai": "^6.0.106",
         "gray-matter": "^4.0.3",
         "js-yaml": "^4.1.1",
@@ -22,111 +22,23 @@
         "@types/bun": "latest",
         "@types/js-yaml": "^4.0.9",
         "@types/node": "^25.3.3",
+        "bun-types": "^1.3.10",
         "typescript": "^5.9.3",
       },
     },
-    "apps/cli": {
-      "name": "@micro-agent/cli",
-      "version": "0.2.1",
-      "bin": {
-        "micro-agent": "./src/cli.ts",
-      },
+    "agent-service": {
+      "name": "@micro-agent/agent-service",
+      "version": "0.3.0",
       "dependencies": {
-        "@larksuiteoapi/node-sdk": "^1.59.0",
+        "@lancedb/lancedb": "^0.26.2",
         "@logtape/logtape": "^2.0.4",
         "@logtape/pretty": "^2.0.4",
-        "@micro-agent/config": "workspace:*",
-        "@micro-agent/extension-system": "workspace:*",
-        "@micro-agent/providers": "workspace:*",
-        "@micro-agent/runtime": "workspace:*",
-        "@micro-agent/sdk": "workspace:*",
-        "@micro-agent/server": "workspace:*",
-        "@micro-agent/storage": "workspace:*",
-        "@micro-agent/types": "workspace:*",
-        "js-yaml": "^4.1.1",
-        "zod": "^4.3.6",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-        "@types/js-yaml": "^4.0.9",
-        "typescript": "^5.9.3",
-      },
-    },
-    "packages/config": {
-      "name": "@micro-agent/config",
-      "version": "0.2.1",
-      "dependencies": {
-        "@logtape/logtape": "^2.0.4",
-        "@logtape/pretty": "^2.0.4",
-        "@micro-agent/types": "workspace:*",
-        "gray-matter": "^4.0.3",
-        "js-yaml": "^4.1.1",
-        "zod": "^4.3.6",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-        "@types/js-yaml": "^4.0.9",
-        "typescript": "^5.9.3",
-      },
-    },
-    "packages/extension-system": {
-      "name": "@micro-agent/extension-system",
-      "version": "0.2.1",
-      "dependencies": {
-        "@logtape/logtape": "^2.0.4",
-        "@micro-agent/types": "workspace:*",
-        "js-yaml": "^4.1.1",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-        "typescript": "^5.9.3",
-      },
-    },
-    "packages/providers": {
-      "name": "@micro-agent/providers",
-      "version": "0.2.1",
-      "dependencies": {
-        "@logtape/logtape": "^2.0.4",
-        "@micro-agent/config": "workspace:*",
-        "@micro-agent/types": "workspace:*",
         "ai": "^6.0.106",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-        "typescript": "^5.9.3",
-      },
-    },
-    "packages/runtime": {
-      "name": "@micro-agent/runtime",
-      "version": "0.2.1",
-      "dependencies": {
-        "@logtape/file": "^2.0.4",
-        "@logtape/logtape": "^2.0.4",
-        "@micro-agent/config": "workspace:*",
-        "@micro-agent/providers": "workspace:*",
-        "@micro-agent/types": "workspace:*",
+        "gray-matter": "^4.0.3",
         "mammoth": "^1.11.0",
         "mitt": "^3.0.1",
         "pdf-parse": "^2.4.5",
         "xlsx": "^0.18.5",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-        "typescript": "^5.9.3",
-      },
-    },
-    "packages/sdk": {
-      "name": "@micro-agent/sdk",
-      "version": "0.2.1",
-      "dependencies": {
-        "@logtape/logtape": "^2.0.4",
-        "@micro-agent/config": "workspace:*",
-        "@micro-agent/extension-system": "workspace:*",
-        "@micro-agent/providers": "workspace:*",
-        "@micro-agent/runtime": "workspace:*",
-        "@micro-agent/storage": "workspace:*",
-        "@micro-agent/types": "workspace:*",
-        "mitt": "^3.0.1",
         "zod": "^4.3.6",
       },
       "devDependencies": {
@@ -134,36 +46,34 @@
         "typescript": "^5.9.3",
       },
     },
-    "packages/server": {
-      "name": "@micro-agent/server",
-      "version": "0.2.1",
+    "applications/cli": {
+      "name": "@micro-agent/cli-app",
+      "version": "0.3.0",
+      "bin": {
+        "micro-agent": "./src/index.ts",
+      },
       "dependencies": {
-        "@logtape/logtape": "^2.0.4",
-        "@micro-agent/providers": "workspace:*",
-        "@micro-agent/runtime": "workspace:*",
-        "@micro-agent/sdk": "workspace:*",
-        "@micro-agent/types": "workspace:*",
+        "@larksuiteoapi/node-sdk": "^1.59.0",
       },
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.9.3",
       },
     },
-    "packages/storage": {
-      "name": "@micro-agent/storage",
-      "version": "0.2.1",
-      "dependencies": {
-        "@logtape/logtape": "^2.0.4",
-        "@micro-agent/types": "workspace:*",
-      },
+    "applications/web": {
+      "name": "@micro-agent/web",
+      "version": "0.3.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.9.3",
       },
     },
-    "packages/types": {
-      "name": "@micro-agent/types",
-      "version": "0.2.1",
+    "sdk": {
+      "name": "@micro-agent/client-sdk",
+      "version": "0.3.0",
+      "dependencies": {
+        "zod": "^4.3.6",
+      },
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.9.3",
@@ -174,11 +84,11 @@
     "@larksuiteoapi/node-sdk",
   ],
   "packages": {
-    "@ai-sdk/gateway": ["@ai-sdk/gateway@3.0.60", "", { "dependencies": { "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.16", "@vercel/oidc": "3.1.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-CUwcZRzJEGVhz68Ve7WY0YYbnNOnB6MkL8GcmgjU5hAZbUPaBWUmHOp3N6BRgNzAnwh1mtOLSC3e3+F5Dx+PKg=="],
+    "@ai-sdk/gateway": ["@ai-sdk/gateway@3.0.66", "", { "dependencies": { "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.19", "@vercel/oidc": "3.1.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-SIQ0YY0iMuv+07HLsZ+bB990zUJ6S4ujORAh+Jv1V2KGNn73qQKnGO0JBk+w+Res8YqOFSycwDoWcFlQrVxS4A=="],
 
     "@ai-sdk/provider": ["@ai-sdk/provider@3.0.8", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-oGMAgGoQdBXbZqNG0Ze56CHjDZ1IDYOwGYxYjO5KLSlz5HiNQ9udIXsPZ61VWaHGZ5XW/jyjmr6t2xz2jGVwbQ=="],
 
-    "@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@4.0.16", "", { "dependencies": { "@ai-sdk/provider": "3.0.8", "@standard-schema/spec": "^1.1.0", "eventsource-parser": "^3.0.6" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-kBvDqNkt5EwlzF9FujmNhhtl8FYg3e8FO8P5uneKliqfRThWemzBj+wfYr7ZCymAQhTRnwSSz1/SOqhOAwmx9g=="],
+    "@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@4.0.19", "", { "dependencies": { "@ai-sdk/provider": "3.0.8", "@standard-schema/spec": "^1.1.0", "eventsource-parser": "^3.0.6" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-3eG55CrSWCu2SXlqq2QCsFjo3+E7+Gmg7i/oRVoSZzIodTuDSfLb3MRje67xE9RFea73Zao7Lm4mADIfUETKGg=="],
 
     "@lancedb/lancedb": ["@lancedb/lancedb@0.26.2", "", { "dependencies": { "reflect-metadata": "^0.2.2" }, "optionalDependencies": { "@lancedb/lancedb-darwin-arm64": "0.26.2", "@lancedb/lancedb-linux-arm64-gnu": "0.26.2", "@lancedb/lancedb-linux-arm64-musl": "0.26.2", "@lancedb/lancedb-linux-x64-gnu": "0.26.2", "@lancedb/lancedb-linux-x64-musl": "0.26.2", "@lancedb/lancedb-win32-arm64-msvc": "0.26.2", "@lancedb/lancedb-win32-x64-msvc": "0.26.2" }, "peerDependencies": { "apache-arrow": ">=15.0.0 <=18.1.0" }, "os": [ "linux", "win32", "darwin", ], "cpu": [ "x64", "arm64", ] }, "sha512-umk4WMCTwJntLquwvUbpqE+TXREolcQVL9MHcxr8EhRjsha88+ATJ4QuS/hpyiE1CG3R/XcgrMgJAGkziPC/gA=="],
 
@@ -198,29 +108,17 @@
 
     "@larksuiteoapi/node-sdk": ["@larksuiteoapi/node-sdk@1.59.0", "", { "dependencies": { "axios": "~1.13.3", "lodash.identity": "^3.0.0", "lodash.merge": "^4.6.2", "lodash.pickby": "^4.6.0", "protobufjs": "^7.2.6", "qs": "^6.14.2", "ws": "^8.19.0" } }, "sha512-sBpkruTvZDOxnVtoTbepWKRX0j1Y1ZElQYu0x7+v088sI9pcpbVp6ZzCGn62dhrKPatzNyCJyzYCPXPYQWccrA=="],
 
-    "@logtape/file": ["@logtape/file@2.0.4", "", { "peerDependencies": { "@logtape/logtape": "^2.0.4" } }, "sha512-T4ajSQR19kae/MLic4dLXehsB5nfMSUdNAIgQcdgToog9E8PGaYT0IINw+v4clD25AYogeCmn30V7/s2ieV3GA=="],
-
     "@logtape/logtape": ["@logtape/logtape@2.0.4", "", {}, "sha512-Z4COeAMdedcBFuFkXaPFvDPOVuHoEom1hwNnPCIkSyojyikuNguplwPoSG+kZthWrS7GiOJo1USQyjWwIFfTKA=="],
 
     "@logtape/pretty": ["@logtape/pretty@2.0.4", "", { "peerDependencies": { "@logtape/logtape": "^2.0.4" } }, "sha512-y1nubV70avD9Gx8Q3gcWBlVUsVwpaBdHUntrkkpXIrC/UPRoHuWnBo+FNrtyvgjCEHSbKuxIaOgsE8rxTPEhzg=="],
 
-    "@micro-agent/cli": ["@micro-agent/cli@workspace:apps/cli"],
+    "@micro-agent/agent-service": ["@micro-agent/agent-service@workspace:agent-service"],
 
-    "@micro-agent/config": ["@micro-agent/config@workspace:packages/config"],
+    "@micro-agent/cli-app": ["@micro-agent/cli-app@workspace:applications/cli"],
 
-    "@micro-agent/extension-system": ["@micro-agent/extension-system@workspace:packages/extension-system"],
+    "@micro-agent/client-sdk": ["@micro-agent/client-sdk@workspace:sdk"],
 
-    "@micro-agent/providers": ["@micro-agent/providers@workspace:packages/providers"],
-
-    "@micro-agent/runtime": ["@micro-agent/runtime@workspace:packages/runtime"],
-
-    "@micro-agent/sdk": ["@micro-agent/sdk@workspace:packages/sdk"],
-
-    "@micro-agent/server": ["@micro-agent/server@workspace:packages/server"],
-
-    "@micro-agent/storage": ["@micro-agent/storage@workspace:packages/storage"],
-
-    "@micro-agent/types": ["@micro-agent/types@workspace:packages/types"],
+    "@micro-agent/web": ["@micro-agent/web@workspace:applications/web"],
 
     "@napi-rs/canvas": ["@napi-rs/canvas@0.1.80", "", { "optionalDependencies": { "@napi-rs/canvas-android-arm64": "0.1.80", "@napi-rs/canvas-darwin-arm64": "0.1.80", "@napi-rs/canvas-darwin-x64": "0.1.80", "@napi-rs/canvas-linux-arm-gnueabihf": "0.1.80", "@napi-rs/canvas-linux-arm64-gnu": "0.1.80", "@napi-rs/canvas-linux-arm64-musl": "0.1.80", "@napi-rs/canvas-linux-riscv64-gnu": "0.1.80", "@napi-rs/canvas-linux-x64-gnu": "0.1.80", "@napi-rs/canvas-linux-x64-musl": "0.1.80", "@napi-rs/canvas-win32-x64-msvc": "0.1.80" } }, "sha512-DxuT1ClnIPts1kQx8FBmkk4BQDTfI5kIzywAaMjQSXfNnra5UFU9PwurXrl+Je3bJ6BGsp/zmshVVFbCmyI+ww=="],
 
@@ -270,7 +168,7 @@
 
     "@swc/helpers": ["@swc/helpers@0.5.19", "", { "dependencies": { "tslib": "^2.8.0" } }, "sha512-QamiFeIK3txNjgUTNppE6MiG3p7TdninpZu0E0PbqVh1a9FNLT2FRhisaa4NcaX52XVhA5l7Pk58Ft7Sqi/2sA=="],
 
-    "@types/bun": ["@types/bun@1.3.9", "", { "dependencies": { "bun-types": "1.3.9" } }, "sha512-KQ571yULOdWJiMH+RIWIOZ7B2RXQGpL1YQrBtLIV3FqDcCu6FsbFUBwhdKUlCKUpS3PJDsHlJ1QKlpxoVR+xtw=="],
+    "@types/bun": ["@types/bun@1.3.10", "", { "dependencies": { "bun-types": "1.3.10" } }, "sha512-0+rlrUrOrTSskibryHbvQkDOWRJwJZqZlxrUs1u4oOoTln8+WIXBPmAuCF35SWB2z4Zl3E84Nl/D0P7803nigQ=="],
 
     "@types/command-line-args": ["@types/command-line-args@5.2.3", "", {}, "sha512-uv0aG6R0Y8WHZLTamZwtfsDLVRnOa+n+n5rEvFWL5Na5gZ8V2Teab/duDPFzIIIhs9qizDpcavCusCLJZu62Kw=="],
 
@@ -278,7 +176,7 @@
 
     "@types/js-yaml": ["@types/js-yaml@4.0.9", "", {}, "sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg=="],
 
-    "@types/node": ["@types/node@25.3.3", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-DpzbrH7wIcBaJibpKo9nnSQL0MTRdnWttGyE5haGwK86xgMOkFLp7vEyfQPGLOJh5wNYiJ3V9PmUMDhV9u8kkQ=="],
+    "@types/node": ["@types/node@25.3.5", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-oX8xrhvpiyRCQkG1MFchB09f+cXftgIXb3a7UUa4Y3wpmZPw5tyZGTLWhlESOLq1Rq6oDlc8npVU2/9xiCuXMA=="],
 
     "@vercel/oidc": ["@vercel/oidc@3.1.0", "", {}, "sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w=="],
 
@@ -286,7 +184,7 @@
 
     "adler-32": ["adler-32@1.3.1", "", {}, "sha512-ynZ4w/nUUv5rrsR8UUGoe1VC9hZj6V5hU9Qw1HlMDJGEJw5S7TfTErWTjMys6M7vr0YWcPqs3qAr4ss0nDfP+A=="],
 
-    "ai": ["ai@6.0.106", "", { "dependencies": { "@ai-sdk/gateway": "3.0.60", "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.16", "@opentelemetry/api": "1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-wAOLMLoVfTEN99FMwdqREi8tWeQCcns6DxkQg8kkzcTxc/ZTQaF7CRqgjI2OSQt2RlzKXPLcJBpZr7axc8cCgQ=="],
+    "ai": ["ai@6.0.116", "", { "dependencies": { "@ai-sdk/gateway": "3.0.66", "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.19", "@opentelemetry/api": "1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-7yM+cTmyRLeNIXwt4Vj+mrrJgVQ9RMIW5WO0ydoLoYkewIvsMcvUmqS4j2RJTUXaF1HphwmSKUMQ/HypNRGOmA=="],
 
     "ansi-styles": ["ansi-styles@4.3.0", "", { "dependencies": { "color-convert": "^2.0.1" } }, "sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg=="],
 
@@ -304,7 +202,7 @@
 
     "bluebird": ["bluebird@3.4.7", "", {}, "sha512-iD3898SR7sWVRHbiQv+sHUtHnMvC1o3nW5rAcqnq3uOn07DSAppZYUkIGslDz6gXC7HfunPe7YVBgoEJASPcHA=="],
 
-    "bun-types": ["bun-types@1.3.9", "", { "dependencies": { "@types/node": "*" } }, "sha512-+UBWWOakIP4Tswh0Bt0QD0alpTY8cb5hvgiYeWCMet9YukHbzuruIEeXC2D7nMJPB12kbh8C7XJykSexEqGKJg=="],
+    "bun-types": ["bun-types@1.3.10", "", { "dependencies": { "@types/node": "*" } }, "sha512-tcpfCCl6XWo6nCVnpcVrxQ+9AYN1iqMIzgrSKYMB/fjLtV2eyAVEg7AxQJuCq/26R6HpKWykQXuSOq/21RYcbg=="],
 
     "call-bind-apply-helpers": ["call-bind-apply-helpers@1.0.2", "", { "dependencies": { "es-errors": "^1.3.0", "function-bind": "^1.1.2" } }, "sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ=="],
 
@@ -326,7 +224,7 @@
 
     "command-line-args": ["command-line-args@5.2.1", "", { "dependencies": { "array-back": "^3.1.0", "find-replace": "^3.0.0", "lodash.camelcase": "^4.3.0", "typical": "^4.0.0" } }, "sha512-H4UfQhZyakIjC74I9d34fGYDwk3XpSr17QhEd0Q3I9Xq1CETHo4Hcuo87WyWHpAF1aSLjLRf5lD9ZGX2qStUvg=="],
 
-    "command-line-usage": ["command-line-usage@7.0.3", "", { "dependencies": { "array-back": "^6.2.2", "chalk-template": "^0.4.0", "table-layout": "^4.1.0", "typical": "^7.1.1" } }, "sha512-PqMLy5+YGwhMh1wS04mVG44oqDsgyLRSKJBdOo1bnYhMKBW65gZF1dRp2OZRhiTjgUHljy99qkO7bsctLaw35Q=="],
+    "command-line-usage": ["command-line-usage@7.0.4", "", { "dependencies": { "array-back": "^6.2.2", "chalk-template": "^0.4.0", "table-layout": "^4.1.1", "typical": "^7.3.0" } }, "sha512-85UdvzTNx/+s5CkSgBm/0hzP80RFHAa7PsfeADE5ezZF3uHz3/Tqj9gIKGT9PTtpycc3Ua64T0oVulGfKxzfqg=="],
 
     "core-util-is": ["core-util-is@1.0.3", "", {}, "sha512-ZQBvi1DcpJ4GDqanjucZ2Hj3wEO5pZDS89BWbkcrvdxksJorwUDDZamX9ldFkp9aw2lmBDLgkObEA4DWNJ9FYQ=="],
 
@@ -416,7 +314,7 @@
 
     "mammoth": ["mammoth@1.11.0", "", { "dependencies": { "@xmldom/xmldom": "^0.8.6", "argparse": "~1.0.3", "base64-js": "^1.5.1", "bluebird": "~3.4.0", "dingbat-to-unicode": "^1.0.1", "jszip": "^3.7.1", "lop": "^0.4.2", "path-is-absolute": "^1.0.0", "underscore": "^1.13.1", "xmlbuilder": "^10.0.0" }, "bin": { "mammoth": "bin/mammoth" } }, "sha512-BcEqqY/BOwIcI1iR5tqyVlqc3KIaMRa4egSoK83YAVrBf6+yqdAAbtUcFDCWX8Zef8/fgNZ6rl4VUv+vVX8ddQ=="],
 
-    "marked": ["marked@17.0.3", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-jt1v2ObpyOKR8p4XaUJVk3YWRJ5n+i4+rjQopxvV32rSndTJXvIzuUdWWIy/1pFQMkQmvTXawzDNqOH/CUmx6A=="],
+    "marked": ["marked@17.0.4", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-NOmVMM+KAokHMvjWmC5N/ZOvgmSWuqJB8FoYI019j4ogb/PeRMKoKIjReZ2w3376kkA8dSJIP8uD993Kxc0iRQ=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 
@@ -502,7 +400,7 @@
 
     "zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
 
-    "apache-arrow/@types/node": ["@types/node@20.19.35", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-Uarfe6J91b9HAUXxjvSOdiO2UPOKLm07Q1oh0JHxoZ1y8HoqxDAu3gVrsrOHeiio0kSsoVBt4wFrKOm0dKxVPQ=="],
+    "apache-arrow/@types/node": ["@types/node@20.19.37", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-8kzdPJ3FsNsVIurqBs7oodNnCEVbni9yUEkaHbgptDACOPW04jimGagZ51E6+lXUwJjgnBw+hyko/lkFWCldqw=="],
 
     "command-line-usage/array-back": ["array-back@6.2.2", "", {}, "sha512-gUAZ7HPyb4SJczXAMUXMGAvI976JoK3qEx9v1FTmeYuJj0IBiaKttG1ydtGKdkfqWkIkouke7nG8ufGy77+Cvw=="],
 
