@@ -5,6 +5,9 @@
 import type { EmbeddingService } from './types';
 import { getLogger } from '@logtape/logtape';
 
+// 重新导出类型供外部使用
+export type { EmbeddingService } from './types';
+
 const log = getLogger(['memory', 'embedding']);
 
 /**

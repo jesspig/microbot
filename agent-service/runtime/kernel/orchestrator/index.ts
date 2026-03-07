@@ -9,7 +9,7 @@ import type { LLMMessage, LLMProvider, GenerationConfig } from '../../../types/p
 import type { InboundMessage, OutboundMessage } from '../../../types/message';
 import type { ToolRegistry } from '../../capability/tool-system';
 import type { MemoryManager } from '../../capability/memory';
-import type { SessionStore } from '../../../infrastructure/database';
+import type { SessionStore } from '../../infrastructure/database';
 import type { KnowledgeRetriever } from '../../capability/knowledge';
 import type { ToolContext } from '../../../types/tool';
 import { getLogger } from '@logtape/logtape';
@@ -145,7 +145,7 @@ export class AgentOrchestrator {
         log.info('LLM 响应', { 
           sessionKey,
           content: result.answer.slice(0, 500),
-          toolCalls: result.toolCalls?.length ?? 0,
+          iterations: result.iterations,
         });
       }
 
@@ -202,8 +202,8 @@ export class AgentOrchestrator {
   private async getSessionHistory(sessionKey: string): Promise<LLMMessage[]> {
     if (this.sessionStore) {
       const session = this.sessionStore.getOrCreate(sessionKey);
-      return session.messages.map(m => ({
-        role: m.role,
+      return session.messages.map((m) => ({
+        role: m.role as 'system' | 'user' | 'assistant' | 'tool',
         content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
       }));
     }
@@ -309,7 +309,7 @@ export class AgentOrchestrator {
         messages.push({ role: 'assistant', content: '', toolCalls: [tc] });
         messages.push({
           role: 'tool',
-          content: result.content ? JSON.stringify(result.content) : result,
+          content: JSON.stringify(result.content),
           toolCallId: tc.id,
         });
       }

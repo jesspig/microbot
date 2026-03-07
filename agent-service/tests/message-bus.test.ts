@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { MessageBus } from '@micro-agent/sdk';
+import { MessageBus, type ChannelType } from '@micro-agent/sdk';
 
 describe('MessageBus', () => {
   let bus: MessageBus;
@@ -11,7 +11,7 @@ describe('MessageBus', () => {
   describe('inbound', () => {
     it('should publish and consume inbound message', async () => {
       const msg = {
-        channel: 'feishu' as const,
+        channel: 'feishu' as ChannelType,
         senderId: 'user-1',
         chatId: 'chat-1',
         content: 'hello',
@@ -27,8 +27,8 @@ describe('MessageBus', () => {
     });
 
     it('should maintain queue order', async () => {
-      await bus.publishInbound({ channel: 'feishu', senderId: '1', chatId: 'c', content: 'a', timestamp: new Date(), media: [], metadata: {} });
-      await bus.publishInbound({ channel: 'feishu', senderId: '2', chatId: 'c', content: 'b', timestamp: new Date(), media: [], metadata: {} });
+      await bus.publishInbound({ channel: 'feishu' as ChannelType, senderId: '1', chatId: 'c', content: 'a', timestamp: new Date(), media: [], metadata: {} });
+      await bus.publishInbound({ channel: 'feishu' as ChannelType, senderId: '2', chatId: 'c', content: 'b', timestamp: new Date(), media: [], metadata: {} });
 
       const first = await bus.consumeInbound();
       const second = await bus.consumeInbound();
@@ -40,7 +40,7 @@ describe('MessageBus', () => {
     it('should return correct queue length', async () => {
       expect(bus.inboundLength).toBe(0);
       
-      await bus.publishInbound({ channel: 'feishu', senderId: '1', chatId: 'c', content: 'a', timestamp: new Date(), media: [], metadata: {} });
+      await bus.publishInbound({ channel: 'feishu' as ChannelType, senderId: '1', chatId: 'c', content: 'a', timestamp: new Date(), media: [], metadata: {} });
       expect(bus.inboundLength).toBe(1);
       
       await bus.consumeInbound();
@@ -51,7 +51,7 @@ describe('MessageBus', () => {
   describe('outbound', () => {
     it('should publish and consume outbound message', async () => {
       const msg = {
-        channel: 'feishu' as const,
+        channel: 'feishu' as ChannelType,
         chatId: 'chat-1',
         content: 'reply',
         media: [],
@@ -75,7 +75,7 @@ describe('MessageBus', () => {
       expect(resolved).toBe(false);
       
       // 发布消息后，promise 应该 resolve
-      await bus.publishInbound({ channel: 'feishu', senderId: '1', chatId: 'c', content: 'a', timestamp: new Date(), media: [], metadata: {} });
+      await bus.publishInbound({ channel: 'feishu' as ChannelType, senderId: '1', chatId: 'c', content: 'a', timestamp: new Date(), media: [], metadata: {} });
       await promise;
       expect(resolved).toBe(true);
     });

@@ -99,7 +99,7 @@ export class ExtensionLoader {
   async loadExtension(descriptor: ExtensionDescriptor): Promise<boolean> {
     try {
       // 查找扩展路径
-      const extensionPath = this.findExtensionPath(descriptor);
+      const extensionPath = await this.findExtensionPath(descriptor);
       if (!extensionPath) {
         throw new Error(`未找到扩展: ${descriptor.id}`);
       }
@@ -176,7 +176,7 @@ export class ExtensionLoader {
   /**
    * 查找扩展路径
    */
-  private findExtensionPath(descriptor: ExtensionDescriptor): string | null {
+  private async findExtensionPath(descriptor: ExtensionDescriptor): Promise<string | null> {
     for (const searchPath of this.config.searchPaths) {
       // 尝试按 ID 查找
       const possiblePath = join(searchPath, descriptor.id);
@@ -186,7 +186,7 @@ export class ExtensionLoader {
       // 使用 Bun 的 API 检查文件是否存在
       try {
         const file = Bun.file(entryPath);
-        if (file.exists()) {
+        if (await file.exists()) {
           return entryPath;
         }
       } catch {

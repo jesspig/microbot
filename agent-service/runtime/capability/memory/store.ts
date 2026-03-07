@@ -200,25 +200,29 @@ export class MemoryStore {
   }): Promise<Array<{ entry: MemoryEntry; score: number }>> {
     await this.ensureInitialized();
 
-    if (!this.config.embeddingService?.isAvailable()) {
+    const embeddingService = this.config.embeddingService;
+    if (!embeddingService?.isAvailable()) {
       log.warn('嵌入服务不可用，无法进行向量检索');
       return [];
     }
 
-    const queryVector = await this.config.embeddingService.embed(query);
+    if (!this.table) {
+      return [];
+    }
+
+    const queryVector = await embeddingService.embed(query);
     const limit = options?.limit ?? this.config.defaultSearchLimit ?? 10;
 
     // 使用 LanceDB 向量检索
     const results = await this.table
-      ?.vectorSearch('vector')
-      .query(queryVector)
+      .vectorSearch(queryVector)
       .limit(limit)
-      .toArray();
+      .toArray() as Array<Record<string, unknown>>;
 
-    return results?.map(r => ({
+    return results.map((r) => ({
       entry: this.recordToEntry(r),
-      score: 1 - (r._distance as number ?? 0), // 转换距离为相似度
-    })) ?? [];
+      score: 1 - ((r._distance as number) ?? 0), // 转换距离为相似度
+    }));
   }
 
   /**

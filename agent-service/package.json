@@ -38,10 +38,13 @@
     "@lancedb/lancedb": "^0.26.2",
     "@logtape/logtape": "^2.0.4",
     "@logtape/pretty": "^2.0.4",
-    "@micro-agent/config": "workspace:*",
     "ai": "^6.0.106",
     "mitt": "^3.0.1",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "mammoth": "^1.11.0",
+    "xlsx": "^0.18.5",
+    "pdf-parse": "^2.4.5",
+    "gray-matter": "^4.0.3"
   },
   "devDependencies": {
     "@types/bun": "latest",

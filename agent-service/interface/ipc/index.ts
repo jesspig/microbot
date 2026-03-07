@@ -46,7 +46,7 @@ export async function createIPCServer(
       return new NamedPipeServer(config, eventBus);
     case 'stdio':
       const { StdioServer } = await import('./stdio');
-      return new StdioServer(eventBus);
+      return new StdioServer(config, eventBus);
     case 'tcp-loopback':
       const { TCPLoopbackServer } = await import('./tcp-loopback');
       return new TCPLoopbackServer(config, eventBus);

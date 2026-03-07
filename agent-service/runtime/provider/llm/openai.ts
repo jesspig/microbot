@@ -11,7 +11,10 @@ import type {
   GenerationConfig,
   ProviderCapabilities,
   ContentPart,
-} from '../../types';
+} from '../../../types';
+
+// 重新导出类型供外部使用
+export type { LLMProvider } from '../../../types';
 
 const log = getLogger(['provider', 'openai']);
 

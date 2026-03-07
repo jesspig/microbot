@@ -8,7 +8,7 @@
  * 2. 独立模式：作为独立服务运行，通过 TCP/Unix Socket 通信
  */
 
-import { loadConfig, type Config } from '@micro-agent/config';
+import { loadConfig, type Config } from '../runtime/infrastructure/config';
 import { OpenAICompatibleProvider, type LLMProvider } from '../runtime/provider/llm/openai';
 import { ToolRegistry, type ToolContext } from '../runtime/capability/tool-system/registry';
 import { SkillRegistry, type SkillDefinition } from '../runtime/capability/skill-system/registry';
@@ -27,9 +27,10 @@ import {
   createExecTool,
   WebFetchTool,
   MessageTool,
-} from '../../extensions/tool';
+} from '../../applications/extensions/tool';
 import type { Tool } from '../types';
 import type { InboundMessage } from '../types/message';
+import type { ChannelType } from '../types/interfaces';
 import {
   KnowledgeBaseManager,
   KnowledgeRetriever,
@@ -89,7 +90,7 @@ function logServiceLifecycle(
     error: options?.error,
   };
   
-  log.info('📢 服务生命周期', entry);
+  log.info('📢 服务生命周期', entry as unknown as Record<string, unknown>);
 }
 
 /**
@@ -113,7 +114,7 @@ function logSessionLifecycle(
     user,
   };
   
-  log.info('📱 会话生命周期', entry);
+  log.info('📱 会话生命周期', entry as unknown as Record<string, unknown>);
 }
 
 /**
@@ -137,7 +138,7 @@ function logIPCMessage(
     size: options?.size,
   };
   
-  log.debug('📨 IPC 消息', entry);
+  log.debug('📨 IPC 消息', entry as unknown as Record<string, unknown>);
 }
 
 /**
@@ -320,8 +321,8 @@ class AgentServiceImpl {
    */
   private getBuiltinSkillsPath(): string {
     const currentDir = dirname(fileURLToPath(import.meta.url));
-    // 从 agent-service/src 向上到达项目根目录，然后进入 extensions/skills
-    return resolve(currentDir, '../../../extensions/skills');
+    // 从 agent-service/src 向上到达项目根目录，然后进入 applications/extensions/skills
+    return resolve(currentDir, '../../../applications/extensions/skills');
   }
   
   /**
@@ -708,7 +709,7 @@ class AgentServiceImpl {
     const { createIPCServer } = await import('../interface/ipc');
 
     const ipcConfig = {
-      type: process.platform === 'win32' ? 'tcp-loopback' : 'unix-socket' as const,
+      type: (process.platform === 'win32' ? 'tcp-loopback' : 'unix-socket') as 'tcp-loopback' | 'unix-socket',
       path: '/tmp/micro-agent.sock',
       port: 3927,
     };
@@ -718,15 +719,16 @@ class AgentServiceImpl {
       on: () => {},
     } as any);
 
-    if ('registerMethod' in ipcServer) {
+    if ('registerMethod' in ipcServer && ipcServer.registerMethod) {
       ipcServer.registerMethod('ping', async () => ({ pong: true }));
       ipcServer.registerMethod('status', async () => this.getStatus());
-      ipcServer.registerMethod('execute', async (params) => this.execute(params));
+      ipcServer.registerMethod('execute', async (params: unknown) => this.execute(params));
     }
 
-    if ('registerStreamMethod' in ipcServer) {
-      ipcServer.registerStreamMethod('chat', async (params, context) => {
-        await this.handleChatStreamToCallback(params, context.sendChunk);
+    if ('registerStreamMethod' in ipcServer && ipcServer.registerStreamMethod) {
+      ipcServer.registerStreamMethod('chat', async (params: unknown, context: unknown) => {
+        const ctx = context as { sendChunk: (chunk: { delta?: string; done: boolean }) => void };
+        await this.handleChatStreamToCallback(params, ctx.sendChunk);
       });
     }
 
@@ -841,7 +843,7 @@ class AgentServiceImpl {
 
     // 构建入站消息
     const msg: InboundMessage = {
-      channel: 'ipc',
+      channel: 'ipc' as ChannelType,
       senderId: requestId,
       chatId: sessionId,
       content: userMessage,
@@ -942,8 +944,18 @@ class AgentServiceImpl {
 
     const tools = this.toolRegistry?.getDefinitions() || [];
 
+    // 将 ToolDefinition 转换为 LLMToolDefinition 格式
+    const llmTools = tools.length > 0 ? tools.map(t => ({
+      type: 'function' as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.inputSchema as Record<string, unknown>,
+      },
+    })) : undefined;
+
     try {
-      const response = await this.llmProvider.chat(messages, tools.length > 0 ? tools : undefined);
+      const response = await this.llmProvider.chat(messages, llmTools);
       const elapsed = Date.now() - startTime;
 
       // 记录 LLM 调用
@@ -1666,7 +1678,8 @@ class AgentServiceImpl {
       
       // 如果提供了新的嵌入服务配置，检查是否需要创建新服务
       if (config.embedModel && config.embedBaseUrl && config.embedApiKey) {
-        const needsNewService = !this.embeddingService || !this.embeddingService.isAvailable();
+        const existingService = this.embeddingService;
+        const needsNewService = !existingService || !existingService.isAvailable();
         
         if (needsNewService) {
           const slashIndex = config.embedModel.indexOf('/');
@@ -1683,9 +1696,9 @@ class AgentServiceImpl {
             model: config.embedModel, 
             available: this.embeddingService.isAvailable() 
           });
-        } else {
+        } else if (existingService) {
           log.info('复用已有嵌入服务', { 
-            available: this.embeddingService.isAvailable() 
+            available: existingService.isAvailable() 
           });
         }
       }

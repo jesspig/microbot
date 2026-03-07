@@ -4,10 +4,28 @@
  * 支持优先级的钩子执行，用于在关键节点插入自定义逻辑。
  */
 
-import type { HookType } from '@micro-agent/types';
+import type { HookType } from '../../types';
 
 /** 钩子函数 */
-export type Hook<T> = (context: T) => T | Promise<T>;
+export type Hook<T = unknown> = (context: HookContext<T>) => HookResult<T> | Promise<HookResult<T>>;
+
+/** 钩子上下文 */
+export interface HookContext<T = unknown> {
+  /** 钩子类型 */
+  type: HookType;
+  /** 数据 */
+  data: T;
+  /** 元数据 */
+  metadata?: Record<string, unknown>;
+}
+
+/** 钩子结果 */
+export interface HookResult<T = unknown> {
+  /** 处理后的数据 */
+  data: T;
+  /** 是否停止后续钩子执行 */
+  stop?: boolean;
+}
 
 /** 钩子注册项 */
 interface HookEntry<T> {
@@ -48,11 +66,15 @@ export class HookSystem {
       return context;
     }
 
-    let result = context;
+    let result: HookResult<T> = { data: context };
     for (const entry of entries) {
-      result = await (entry.hook as Hook<T>)(result);
+      const hookResult = await (entry.hook as Hook<T>)({ type, data: result.data });
+      result = hookResult;
+      if (result.stop) {
+        break;
+      }
     }
-    return result;
+    return result.data;
   }
 
   /** 清除指定类型的所有钩子 */

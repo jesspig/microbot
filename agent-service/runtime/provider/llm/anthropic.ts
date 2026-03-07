@@ -11,7 +11,7 @@ import type {
   GenerationConfig,
   ProviderCapabilities,
   ContentPart,
-} from '../../types';
+} from '../../../types';
 
 const log = getLogger(['provider', 'anthropic']);
 

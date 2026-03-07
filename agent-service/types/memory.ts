@@ -16,6 +16,65 @@ export type MemoryType =
 /** 记忆类型字符串（用于序列化） */
 export type MemoryTypeString = MemoryType;
 
+/** 记忆元数据 */
+export interface MemoryMetadata {
+  /** 来源通道 */
+  channel?: string;
+  /** 提及的实体 */
+  entities?: string[];
+  /** 标签 */
+  tags?: string[];
+  /** 重要性评分 (0-1) */
+  importance?: number;
+  /** 过期时间 */
+  expiresAt?: Date;
+  /** 分类信息 */
+  classification?: {
+    confidence: number;
+    matchedPatterns: string[];
+  };
+  /** 文档 ID（知识库来源） */
+  documentId?: string;
+  /** 文档路径（知识库来源） */
+  documentPath?: string;
+  /** 文件类型（知识库来源） */
+  fileType?: string;
+  /** 文档标题 */
+  documentTitle?: string;
+  /** 分块索引 */
+  chunkIndex?: number;
+  /** 分块起始位置 */
+  chunkStart?: number;
+  /** 分块结束位置 */
+  chunkEnd?: number;
+  /** 相似度分数 */
+  score?: number;
+  /** 页码 */
+  pageNumber?: number;
+  /** 章节名称 */
+  section?: string;
+  /** 置信度 (0-1) */
+  confidence?: number;
+  /** 字符范围 [start, end] */
+  charRange?: [number, number];
+  /** 原始消息数量（用于摘要） */
+  originalMessageCount?: number;
+}
+
+/** 记忆统计信息 */
+export interface MemoryStats {
+  /** 总条目数 */
+  totalEntries: number;
+  /** 总会话数 */
+  totalSessions: number;
+  /** 总存储大小（字节） */
+  totalSize: number;
+  /** 最早条目时间 */
+  oldestEntry: Date | null;
+  /** 最新条目时间 */
+  newestEntry: Date | null;
+}
+
 /** 记忆条目 */
 export interface MemoryEntry {
   /** 记忆 ID */
@@ -37,7 +96,7 @@ export interface MemoryEntry {
   /** 关联的会话键 */
   sessionKey?: string;
   /** 元数据 */
-  metadata?: Record<string, unknown>;
+  metadata?: MemoryMetadata;
 }
 
 /** 记忆检索结果 */
@@ -72,6 +131,23 @@ export interface MemorySearchOptions {
   types?: MemoryType[];
   /** 过滤会话键 */
   sessionKey?: string;
+  /** 搜索模式 */
+  mode?: 'auto' | 'vector' | 'fulltext' | 'hybrid';
+  /** 过滤条件 */
+  filter?: MemoryFilter;
+}
+
+/** 记忆过滤条件 */
+export interface MemoryFilter {
+  /** 按类型过滤 */
+  types?: MemoryType[];
+  /** 按会话过滤 */
+  sessionKey?: string;
+  /** 时间范围 */
+  timeRange?: {
+    start?: Date;
+    end?: Date;
+  };
 }
 
 /** 记忆管理器配置 */

@@ -2,6 +2,18 @@
  * 记忆系统模块入口
  */
 
+// 从类型定义导出
+export type {
+  MemoryType,
+  MemoryTypeString,
+  MemoryEntry,
+  MemorySearchResult,
+  MemorySearchOptions,
+  MemoryMetadata,
+  MemoryStats,
+  MemoryFilter,
+} from '../../../types/memory';
+
 // Types
 export type {
   VectorColumnName,
@@ -15,7 +27,6 @@ export type {
   SearchMode,
   CleanupResult,
   EmbeddingService,
-  MemoryFilter,
   SearchOptions,
 } from './types';
 

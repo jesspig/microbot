@@ -5,7 +5,7 @@
  */
 
 import type { LLMMessage, SessionKey } from '../../../types/message';
-import type { SessionStore } from '../../../infrastructure/database';
+import type { SessionStore } from '../../infrastructure/database';
 import { TokenBudget } from './token-budget';
 import { ContextBuilder } from './context-builder';
 import { getLogger } from '@logtape/logtape';
@@ -55,7 +55,7 @@ export class ContextManager {
       context: 0,
       rag: 0,
     });
-    this.contextBuilder = new ContextBuilder(config.maxHistoryMessages);
+    this.contextBuilder = new ContextBuilder({ maxHistoryMessages: config.maxHistoryMessages });
   }
 
   /**
@@ -142,11 +142,15 @@ export class ContextManager {
   private async loadMessages(sessionKey: SessionKey): Promise<LLMMessage[]> {
     if (this.sessionStore) {
       const session = this.sessionStore.getOrCreate(sessionKey);
-      return session.messages.map(m => ({
-        role: m.role,
+      return session.messages.map((m) => ({
+        role: m.role as 'system' | 'user' | 'assistant' | 'tool',
         content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
         toolCallId: m.tool_call_id,
-        toolCalls: m.tool_calls,
+        toolCalls: m.tool_calls?.map(tc => ({
+          id: tc.id,
+          name: tc.name,
+          arguments: tc.arguments,
+        })),
       }));
     }
     return [];

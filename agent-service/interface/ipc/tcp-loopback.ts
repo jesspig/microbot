@@ -47,23 +47,30 @@ interface JSONRPCStreamEvent {
 /** 方法处理器 */
 type MethodHandler = (
   params: unknown,
-  context: { socket: Bun.Socket; requestId: string }
+  context: { socket: Bun.Socket<undefined>; requestId: string }
 ) => Promise<unknown> | unknown;
 
 /** 流式方法处理器 */
 type StreamMethodHandler = (
   params: unknown,
-  context: { socket: Bun.Socket; requestId: string; sendChunk: (chunk: JSONRPCStreamEvent['params']) => void }
+  context: { socket: Bun.Socket<undefined>; requestId: string; sendChunk: (chunk: JSONRPCStreamEvent['params']) => void }
 ) => Promise<void>;
 
 /** 默认端口 */
 const DEFAULT_PORT = 3927;
 
+/** TCP 服务器类型 */
+type TCPServer = {
+  port: number;
+  stop: () => void;
+};
+
 export class TCPLoopbackServer implements IPCServer {
   private config: IPCConfig;
   private eventBus: EventBus;
-  private server: Bun.Server | null = null;
-  private clients = new Set<Bun.Socket>();
+  // 使用简化的类型定义
+  private server: TCPServer | null = null;
+  private clients = new Set<Bun.Socket<undefined>>();
   private methodHandlers = new Map<string, MethodHandler>();
   private streamHandlers = new Map<string, StreamMethodHandler>();
 
@@ -110,7 +117,7 @@ export class TCPLoopbackServer implements IPCServer {
   async start(): Promise<void> {
     const port = this.config.port ?? DEFAULT_PORT;
 
-    this.server = Bun.listen({
+    const listener = Bun.listen({
       hostname: '127.0.0.1',
       port,
       socket: {
@@ -130,6 +137,12 @@ export class TCPLoopbackServer implements IPCServer {
         },
       },
     });
+
+    // 使用类型断言
+    this.server = {
+      port: (listener as unknown as { port: number }).port,
+      stop: () => (listener as unknown as { stop: () => void }).stop(),
+    };
 
     console.log(`[IPC] TCP Loopback 服务启动: 127.0.0.1:${port}`);
   }
@@ -160,7 +173,7 @@ export class TCPLoopbackServer implements IPCServer {
   /**
    * 处理接收到的数据
    */
-  private handleData(socket: Bun.Socket, data: Buffer): void {
+  private handleData(socket: Bun.Socket<undefined>, data: Buffer): void {
     const text = data.toString();
     const lines = text.split('\n');
 
@@ -173,7 +186,7 @@ export class TCPLoopbackServer implements IPCServer {
   /**
    * 处理单行数据
    */
-  private processLine(socket: Bun.Socket, line: string): void {
+  private processLine(socket: Bun.Socket<undefined>, line: string): void {
     let request: JSONRPCRequest;
 
     try {
@@ -198,7 +211,7 @@ export class TCPLoopbackServer implements IPCServer {
   /**
    * 处理 JSON-RPC 请求
    */
-  private async handleRequest(socket: Bun.Socket, request: JSONRPCRequest): Promise<void> {
+  private async handleRequest(socket: Bun.Socket<undefined>, request: JSONRPCRequest): Promise<void> {
     const { id, method, params } = request;
 
     // 检查是否为流式方法
@@ -236,7 +249,7 @@ export class TCPLoopbackServer implements IPCServer {
   /**
    * 发送成功响应
    */
-  private sendResult(socket: Bun.Socket, id: string, result: unknown): void {
+  private sendResult(socket: Bun.Socket<undefined>, id: string, result: unknown): void {
     const response: JSONRPCResponse = {
       jsonrpc: '2.0',
       id,
@@ -249,7 +262,7 @@ export class TCPLoopbackServer implements IPCServer {
    * 发送错误响应
    */
   private sendError(
-    socket: Bun.Socket,
+    socket: Bun.Socket<undefined>,
     id: string,
     code: number,
     message: string,
@@ -267,7 +280,7 @@ export class TCPLoopbackServer implements IPCServer {
    * 发送流式事件
    */
   private sendStreamEvent(
-    socket: Bun.Socket,
+    socket: Bun.Socket<undefined>,
     id: string,
     params: JSONRPCStreamEvent['params']
   ): void {

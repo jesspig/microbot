@@ -4,8 +4,10 @@
  * 实现 Reasoning + Acting 循环逻辑。
  */
 
-import type { LLMMessage, LLMResponse, ToolCall } from '../../../types/provider';
+import type { LLMMessage, LLMResponse } from '../../../types/provider';
+import type { ToolCall, ToolDefinition } from '../../../types/tool';
 import type { ToolRegistry } from '../../capability/tool-system';
+import type { ToolContext } from '../../../types/tool';
 import { getLogger } from '@logtape/logtape';
 
 const log = getLogger(['kernel', 'react-loop']);
@@ -52,8 +54,8 @@ export class ReActLoop {
    */
   async execute(
     messages: LLMMessage[],
-    llmCall: (msgs: LLMMessage[], tools: ToolCall[]) => Promise<LLMResponse>,
-    toolContext: Record<string, unknown>
+    llmCall: (msgs: LLMMessage[], tools: ToolDefinition[]) => Promise<LLMResponse>,
+    toolContext: ToolContext
   ): Promise<ReActLoopResult> {
     const steps: ReActStep[] = [];
     let completed = false;
@@ -92,7 +94,7 @@ export class ReActLoop {
         });
 
         try {
-          const result = await this.tools.execute(tc.name, tc.arguments, toolContext as Parameters<typeof this.tools.execute>[2]);
+          const result = await this.tools.execute(tc.name, tc.arguments, toolContext);
           const resultText = result.content ? JSON.stringify(result.content) : JSON.stringify(result);
 
           steps.push({

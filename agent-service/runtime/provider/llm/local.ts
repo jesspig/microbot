@@ -10,7 +10,7 @@ import type {
   LLMToolDefinition,
   GenerationConfig,
   ProviderCapabilities,
-} from '../../types';
+} from '../../../types';
 import { OpenAICompatibleProvider, type OpenAICompatibleConfig } from './openai';
 
 const log = getLogger(['provider', 'local']);

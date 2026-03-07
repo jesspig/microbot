@@ -26,7 +26,8 @@ export type StateTransitionEvent =
   | 'execute'
   | 'wait'
   | 'complete'
-  | 'error';
+  | 'error'
+  | 'reset';
 
 /** 状态转换监听器 */
 export type StateTransitionListener = (
@@ -108,7 +109,7 @@ export class AgentStateMachine {
    * 获取下一个状态
    */
   private getNextState(current: AgentState, event: StateTransitionEvent): AgentState {
-    const transitions: Record<AgentState, Record<StateTransitionEvent, AgentState>> = {
+    const transitions: Record<AgentState, Partial<Record<StateTransitionEvent, AgentState>>> = {
       idle: {
         start: 'thinking',
       },

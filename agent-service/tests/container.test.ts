@@ -13,16 +13,16 @@ describe('Container', () => {
       let count = 0;
       container.register('counter', () => ++count);
 
-      expect(container.resolve('counter')).toBe(1);
-      expect(container.resolve('counter')).toBe(2);
+      expect(container.resolve<number>('counter')).toBe(1);
+      expect(container.resolve<number>('counter')).toBe(2);
     });
 
     it('should register different tokens', () => {
       container.register('a', () => 'value-a');
       container.register('b', () => 'value-b');
 
-      expect(container.resolve('a')).toBe('value-a');
-      expect(container.resolve('b')).toBe('value-b');
+      expect(container.resolve<string>('a')).toBe('value-a');
+      expect(container.resolve<string>('b')).toBe('value-b');
     });
   });
 
@@ -31,8 +31,8 @@ describe('Container', () => {
       const obj = { value: 1 };
       container.singleton('obj', () => obj);
 
-      expect(container.resolve('obj')).toBe(obj);
-      expect(container.resolve('obj')).toBe(obj);
+      expect(container.resolve<{ value: number }>('obj')).toBe(obj);
+      expect(container.resolve<{ value: number }>('obj')).toBe(obj);
     });
 
     it('should call factory only once', () => {

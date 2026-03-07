@@ -2,4 +2,4 @@
  * 总线模块入口
  */
 
-export { MessageBus } from './queue';
+export { MessageBus } from './publisher';

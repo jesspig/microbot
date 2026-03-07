@@ -3,7 +3,11 @@
  */
 
 import type { LLMMessage, LLMResponse } from './message';
-import type { LLMToolDefinition } from './tool';
+import type { LLMToolDefinition, ToolCall } from './tool';
+
+// 重新导出 LLM 相关类型，方便外部使用
+export type { LLMMessage, LLMResponse } from './message';
+export type { ToolCall, LLMToolDefinition } from './tool';
 
 /** Provider 类型 */
 export type ProviderType = 'llm' | 'acp' | 'a2a' | 'mcp';

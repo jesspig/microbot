@@ -19,4 +19,4 @@ export { LocalProvider, createLocalProvider } from './local';
 export type { LocalProviderConfig } from './local';
 
 // 重新导出类型
-export type { LLMProvider, GenerationConfig, ProviderCapabilities } from '../../types';
+export type { LLMProvider, GenerationConfig, ProviderCapabilities } from '../../../types';

@@ -2,6 +2,7 @@
  * LanceDB Vector Database Provider
  */
 
+import * as lancedb from '@lancedb/lancedb';
 import { getLogger } from '@logtape/logtape';
 
 const log = getLogger(['provider', 'vector-db', 'lancedb']);
@@ -67,8 +68,8 @@ export interface LanceDBConfig {
  */
 export class LanceDBProvider implements VectorDBProvider {
   readonly name = 'lancedb';
-  private db: Awaited<ReturnType<typeof import('@lancedb/lancedb').connect>> | null = null;
-  private table: Awaited<ReturnType<typeof this.db['openTable']>> | null = null;
+  private db: lancedb.Connection | null = null;
+  private table: lancedb.Table | null = null;
   private initialized = false;
 
   constructor(private config: LanceDBConfig) {}
@@ -77,7 +78,6 @@ export class LanceDBProvider implements VectorDBProvider {
     if (this.initialized) return;
 
     try {
-      const lancedb = await import('@lancedb/lancedb');
       this.db = await lancedb.connect(this.config.dbPath);
       
       // 尝试打开已存在的表，否则创建新表

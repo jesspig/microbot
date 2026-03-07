@@ -128,7 +128,7 @@ export class Tracer {
     const ctx = this.createContext(category, method);
     const startTime = Date.now();
 
-    return withContext(ctx, async () => {
+    return withContext(ctx as unknown as Record<string, unknown>, async () => {
       try {
         this.logger.debug('→ 进入方法', {
           category,
@@ -274,4 +274,48 @@ export function getTracer(): Tracer {
  */
 export function setTracer(tracer: Tracer): void {
   globalTracer = tracer;
+}
+
+/**
+ * 追踪方法装饰器
+ * 用于包装异步方法，自动记录入参、输出和耗时
+ */
+export function traceMethod(
+  category: string,
+  method: string
+): <T extends (...args: unknown[]) => Promise<unknown>>(
+  target: object,
+  propertyKey: string | symbol,
+  descriptor: TypedPropertyDescriptor<T>
+) => TypedPropertyDescriptor<T> {
+  return <T extends (...args: unknown[]) => Promise<unknown>>(
+    _target: object,
+    _propertyKey: string | symbol,
+    descriptor: TypedPropertyDescriptor<T>
+  ): TypedPropertyDescriptor<T> => {
+    const originalMethod = descriptor.value;
+    if (!originalMethod) return descriptor;
+
+    descriptor.value = (async (...args: Parameters<T>) => {
+      const tracer = getTracer();
+      return tracer.traceAsync(category, method, { args: args as unknown[] }, () =>
+        originalMethod(...args)
+      );
+    }) as T;
+
+    return descriptor;
+  };
+}
+
+/**
+ * 追踪函数包装器
+ * 用于包装普通函数，自动记录入参、输出和耗时
+ */
+export function traced<T>(
+  category: string,
+  method: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const tracer = getTracer();
+  return tracer.traceAsync(category, method, {}, fn);
 }

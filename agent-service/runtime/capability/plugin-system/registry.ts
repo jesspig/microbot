@@ -11,7 +11,6 @@ import type {
   ExtensionContext,
   LoadedExtension,
   ExtensionType,
-  RegistryConfig,
 } from './types';
 
 const log = getLogger(['extension', 'registry']);

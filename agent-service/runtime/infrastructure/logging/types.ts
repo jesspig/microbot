@@ -75,7 +75,9 @@ export type LogType =
   | 'knowledge_op'        // 知识库操作
   | 'ipc_message'         // IPC 消息
   | 'error'               // 错误
-  | 'metric';             // 指标
+  | 'metric'              // 指标
+  | 'method_call'         // 方法调用
+  | 'event';              // 事件
 
 /** 基础日志条目 */
 export interface BaseLogEntry {
@@ -255,3 +257,41 @@ export type LogEntry =
 
 /** 日志事件监听器 */
 export type LogEventListener = (entry: LogEntry) => void;
+
+/** 方法调用日志（用于追踪） */
+export interface MethodCallLog extends BaseLogEntry {
+  _type: 'method_call';
+  /** 方法名 */
+  method: string;
+  /** 类别 */
+  category: string;
+  /** 入参 */
+  input?: Record<string, unknown>;
+  /** 输出 */
+  output?: unknown;
+  /** 执行耗时（毫秒） */
+  duration: number;
+  /** 是否成功 */
+  success: boolean;
+  /** 错误信息 */
+  error?: string;
+}
+
+/** 事件日志 */
+export interface EventLog extends BaseLogEntry {
+  _type: 'event';
+  /** 事件名称 */
+  eventName: string;
+  /** 事件数据 */
+  data?: Record<string, unknown>;
+}
+
+/** 追踪器选项 */
+export interface TracerOptions {
+  /** 是否启用追踪 */
+  enabled: boolean;
+  /** 敏感字段列表 */
+  sensitiveFields: string[];
+  /** 最大深度 */
+  maxDepth: number;
+}

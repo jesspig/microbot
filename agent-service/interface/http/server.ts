@@ -5,7 +5,6 @@
  */
 
 import type { EventBus } from '../../runtime/infrastructure/event-bus';
-import type { RuntimeConfig } from '../../types';
 
 export interface HTTPServerConfig {
   port?: number;
@@ -16,7 +15,7 @@ export interface HTTPServerConfig {
 export class HTTPServer {
   private config: HTTPServerConfig;
   private eventBus: EventBus;
-  private server: Bun.Server | null = null;
+  private server: Bun.Server<undefined> | null = null;
 
   constructor(config: HTTPServerConfig, eventBus: EventBus) {
     this.config = config;
@@ -144,7 +143,7 @@ export class HTTPServer {
     return Response.json({ tools });
   }
 
-  private corsHeaders(): HeadersInit {
+  private corsHeaders(): Record<string, string> {
     return {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',

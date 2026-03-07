@@ -5,7 +5,10 @@
  */
 
 import { getLogger } from '@logtape/logtape';
-import type { Tool, ToolDefinition, ToolContext, ToolResult } from '../../types';
+import type { Tool, ToolDefinition, ToolContext, ToolResult } from '../../../types';
+
+// 重新导出类型供外部使用
+export type { ToolContext } from '../../../types';
 
 const log = getLogger(['tool', 'registry']);
 

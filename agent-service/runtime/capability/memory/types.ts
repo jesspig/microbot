@@ -2,6 +2,12 @@
  * 记忆系统类型定义
  */
 
+// 从上级类型文件导入
+import type { MemoryFilter } from '../../../types/memory';
+
+// 重新导出 MemoryFilter 以便使用
+export type { MemoryFilter };
+
 /** 向量列名（动态生成格式：vector_<provider>_<model>） */
 export type VectorColumnName = `vector_${string}_${string}`;
 
@@ -130,19 +136,6 @@ export interface EmbeddingService {
   embed(text: string): Promise<number[]>;
   /** 批量生成嵌入向量 */
   embedBatch(texts: string[]): Promise<number[][]>;
-}
-
-/** 记忆过滤条件 */
-export interface MemoryFilter {
-  /** 按类型过滤 */
-  types?: import('../../../types/memory').MemoryType[];
-  /** 按会话过滤 */
-  sessionKey?: string;
-  /** 时间范围 */
-  timeRange?: {
-    start?: Date;
-    end?: Date;
-  };
 }
 
 /** 搜索选项 */

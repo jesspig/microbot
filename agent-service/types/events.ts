@@ -66,6 +66,27 @@ export const SYSTEM_EVENT_TYPES = [
 /** 系统事件类型 */
 export type SystemEventType = typeof SYSTEM_EVENT_TYPES[number];
 
+/** HTTP 事件类型常量 */
+export const HTTP_EVENT_TYPES = [
+  'http:rpc',
+  'http:stream',
+  'http:listTools',
+] as const;
+
+/** HTTP 事件类型 */
+export type HTTPEventType = typeof HTTP_EVENT_TYPES[number];
+
+/** IPC 事件类型常量 */
+export const IPC_EVENT_TYPES = [
+  'ipc:message',
+  'ipc:request',
+  'ipc:response',
+  'ipc:shutdown',
+] as const;
+
+/** IPC 事件类型 */
+export type IPCEventType = typeof IPC_EVENT_TYPES[number];
+
 /** 所有事件类型常量 */
 export const EVENT_TYPES = [
   ...MESSAGE_EVENT_TYPES,
@@ -73,6 +94,8 @@ export const EVENT_TYPES = [
   ...LLM_EVENT_TYPES,
   ...CHANNEL_EVENT_TYPES,
   ...SYSTEM_EVENT_TYPES,
+  ...HTTP_EVENT_TYPES,
+  ...IPC_EVENT_TYPES,
 ] as const;
 
 /** 所有事件类型 */

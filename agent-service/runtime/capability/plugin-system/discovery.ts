@@ -36,7 +36,7 @@ export class ExtensionDiscovery {
   /**
    * 发现所有扩展
    */
-  discover(): ExtensionDiscoveryResult {
+  async discover(): Promise<ExtensionDiscoveryResult> {
     const descriptors: ExtensionDescriptor[] = [];
     const errors: Array<{ path: string; error: Error }> = [];
     let scannedDirs = 0;
@@ -240,12 +240,12 @@ export class ExtensionDiscovery {
   /**
    * 查找入口文件
    */
-  private findEntryFile(extensionPath: string): string {
+  private async findEntryFile(extensionPath: string): Promise<string> {
     for (const name of ENTRY_FILES) {
       const path = join(extensionPath, name);
       try {
         const file = Bun.file(path);
-        if (file.exists()) {
+        if (await file.exists()) {
           return name;
         }
       } catch {

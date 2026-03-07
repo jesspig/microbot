@@ -256,7 +256,7 @@ function jsonLinesFormatter(record: LogRecord, config: LoggingConfig): string {
   }
 
   // 发布日志事件供 CLI 订阅
-  emitLogEvent(entry as LogEntry);
+  emitLogEvent(entry as unknown as LogEntry);
 
   return JSON.stringify(entry) + '\n';
 }
@@ -446,7 +446,7 @@ export function withTraceContext<T>(
   context: TraceContext,
   fn: () => Promise<T>
 ): Promise<T> {
-  return withContext(context, fn);
+  return withContext(context as unknown as Record<string, unknown>, fn);
 }
 
 /**

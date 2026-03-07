@@ -39,7 +39,7 @@ export class ToolExecutor {
     const toolContext = this.createToolContext(context);
 
     // 执行工具
-    const result = await this.tools.executeTool(toolCall.name, toolCall.arguments, toolContext);
+    const result = await this.tools.execute(toolCall.name, toolCall.arguments, toolContext);
 
     return this.handleResult(result);
   }

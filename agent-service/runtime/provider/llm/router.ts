@@ -8,7 +8,7 @@
  */
 
 import { getLogger } from '@logtape/logtape';
-import type { TaskType, ProviderCapabilities } from '../../types';
+import type { TaskType, ProviderCapabilities } from '../../../types';
 
 const log = getLogger(['router']);
 

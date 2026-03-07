@@ -10,7 +10,7 @@ import type { IPCConfig, IPCServer } from './index';
 export class NamedPipeServer implements IPCServer {
   private config: IPCConfig;
   private eventBus: EventBus;
-  private server: Bun.Server | null = null;
+  private server: Bun.Server<undefined> | null = null;
 
   constructor(config: IPCConfig, eventBus: EventBus) {
     this.config = config;

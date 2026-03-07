@@ -14,11 +14,27 @@ export * from './events';
 // 工具类型（MCP 兼容）
 export * from './tool';
 
-// 消息类型
+// 消息类型（包含 SessionKey）
 export * from './message';
 
-// Provider 类型（包含意图识别类型）
-export * from './provider';
+// Provider 类型（包含意图识别类型，排除 MemoryTypeString 以避免重复）
+export type {
+  ProviderType,
+  GenerationConfig,
+  ProviderCapabilities,
+  ModelInfo,
+  Provider,
+  LLMProvider,
+  ACPProvider,
+  A2AProvider,
+  MCPProvider,
+  PreflightResult,
+  HistoryEntry,
+  PreflightPromptBuilder,
+  TaskType,
+  RoutingResult,
+  IntentResult,
+} from './provider';
 
 // Agent 类型
 export * from './agent';
@@ -29,8 +45,14 @@ export * from './extension';
 // 配置类型
 export * from './config';
 
-// 会话类型
-export * from './session';
+// 会话类型（排除 SessionKey 以避免重复）
+export type {
+  SessionId,
+  SessionState,
+  SessionMetadata,
+  SessionSnapshot,
+  SessionStore,
+} from './session';
 
 // 记忆类型
 export * from './memory';

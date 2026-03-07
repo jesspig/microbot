@@ -53,7 +53,7 @@ export class ContextBuilder {
     const recentMessages = conversationMessages.slice(-preservedRecent);
 
     // 计算可保留的旧消息数量
-    const availableTokens = maxTokens - this.estimateTokens(recentMessages);
+    const availableTokens = maxTokens - this.estimateTokensBatch(recentMessages);
     const oldMessages = this.selectOldMessages(
       conversationMessages.slice(0, -preservedRecent),
       availableTokens
@@ -100,6 +100,13 @@ export class ContextBuilder {
   private estimateTokens(message: LLMMessage): number {
     const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
     return Math.ceil(content.length / 4); // 假设 1 token ≈ 4 字符
+  }
+
+  /**
+   * 批量估算 Token 数量
+   */
+  private estimateTokensBatch(messages: LLMMessage[]): number {
+    return messages.reduce((sum, msg) => sum + this.estimateTokens(msg), 0);
   }
 
   /**

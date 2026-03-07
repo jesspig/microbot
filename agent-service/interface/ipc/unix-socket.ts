@@ -47,20 +47,20 @@ interface JSONRPCStreamEvent {
 /** 方法处理器 */
 type MethodHandler = (
   params: unknown,
-  context: { socket: Bun.Socket; requestId: string }
+  context: { socket: Bun.Socket<undefined>; requestId: string }
 ) => Promise<unknown> | unknown;
 
 /** 流式方法处理器 */
 type StreamMethodHandler = (
   params: unknown,
-  context: { socket: Bun.Socket; requestId: string; sendChunk: (chunk: JSONRPCStreamEvent['params']) => void }
+  context: { socket: Bun.Socket<undefined>; requestId: string; sendChunk: (chunk: JSONRPCStreamEvent['params']) => void }
 ) => Promise<void>;
 
 export class UnixSocketServer implements IPCServer {
   private config: IPCConfig;
   private eventBus: EventBus;
-  private socket: Bun.Socket | null = null;
-  private clients = new Set<Bun.Socket>();
+  private listener: Bun.UnixSocketListener<undefined> | null = null;
+  private clients = new Set<Bun.Socket<undefined>>();
   private methodHandlers = new Map<string, MethodHandler>();
   private streamHandlers = new Map<string, StreamMethodHandler>();
 
@@ -107,7 +107,7 @@ export class UnixSocketServer implements IPCServer {
   async start(): Promise<void> {
     const path = this.config.path ?? '/tmp/micro-agent.sock';
 
-    this.socket = Bun.listen({
+    this.listener = Bun.listen({
       unix: path,
       socket: {
         data: (socket, data) => {
@@ -136,9 +136,9 @@ export class UnixSocketServer implements IPCServer {
     }
     this.clients.clear();
 
-    if (this.socket) {
-      this.socket.stop();
-      this.socket = null;
+    if (this.listener) {
+      this.listener.stop();
+      this.listener = null;
     }
   }
 
@@ -156,7 +156,7 @@ export class UnixSocketServer implements IPCServer {
   /**
    * 处理接收到的数据
    */
-  private handleData(socket: Bun.Socket, data: Buffer): void {
+  private handleData(socket: Bun.Socket<undefined>, data: Buffer): void {
     const text = data.toString();
     const lines = text.split('\n');
 
@@ -169,7 +169,7 @@ export class UnixSocketServer implements IPCServer {
   /**
    * 处理单行数据
    */
-  private processLine(socket: Bun.Socket, line: string): void {
+  private processLine(socket: Bun.Socket<undefined>, line: string): void {
     let request: JSONRPCRequest;
 
     try {
@@ -194,7 +194,7 @@ export class UnixSocketServer implements IPCServer {
   /**
    * 处理 JSON-RPC 请求
    */
-  private async handleRequest(socket: Bun.Socket, request: JSONRPCRequest): Promise<void> {
+  private async handleRequest(socket: Bun.Socket<undefined>, request: JSONRPCRequest): Promise<void> {
     const { id, method, params } = request;
 
     // 检查是否为流式方法
@@ -232,7 +232,7 @@ export class UnixSocketServer implements IPCServer {
   /**
    * 发送成功响应
    */
-  private sendResult(socket: Bun.Socket, id: string, result: unknown): void {
+  private sendResult(socket: Bun.Socket<undefined>, id: string, result: unknown): void {
     const response: JSONRPCResponse = {
       jsonrpc: '2.0',
       id,
@@ -245,7 +245,7 @@ export class UnixSocketServer implements IPCServer {
    * 发送错误响应
    */
   private sendError(
-    socket: Bun.Socket,
+    socket: Bun.Socket<undefined>,
     id: string,
     code: number,
     message: string,
@@ -263,7 +263,7 @@ export class UnixSocketServer implements IPCServer {
    * 发送流式事件
    */
   private sendStreamEvent(
-    socket: Bun.Socket,
+    socket: Bun.Socket<undefined>,
     id: string,
     params: JSONRPCStreamEvent['params']
   ): void {

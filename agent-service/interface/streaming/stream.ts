@@ -9,7 +9,7 @@ export type { StreamChunk, StreamHandler } from './sse';
  * 创建响应流
  */
 export function createStream<T>(
-  handler: (yield: (chunk: T) => void) => Promise<void>
+  handler: (emit: (chunk: T) => void) => Promise<void>
 ): ReadableStream<T> {
   return new ReadableStream<T>({
     async start(controller) {
