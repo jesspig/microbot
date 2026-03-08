@@ -5,8 +5,8 @@
  * 此模块仅负责准备配置数据，不负责实际注册。
  */
 
-import type { Config, ProviderEntry, ModelConfig } from '@micro-agent/sdk';
-import { parseModelConfigs } from '@micro-agent/sdk';
+import type { Config, ProviderEntry, ModelConfig } from '@micro-agent/sdk/runtime';
+import { parseModelConfigs } from '@micro-agent/sdk/runtime';
 
 /**
  * Provider 配置接口

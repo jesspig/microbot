@@ -1,68 +1,105 @@
 /**
  * 工具初始化模块
  *
- * 为 Agent Service 准备工具配置数据。
- * 此模块仅负责准备配置数据，不负责实际注册。
+ * 提供十个核心工具：read、write、exec、glob、grep、edit、list_directory、todo_write、todo_read、ask_user
+ * 更高级的功能由 skills 和 MCP 提供。
  */
+
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import type { Tool, BuiltinToolProvider } from '@micro-agent/types';
+import {
+  coreTools,
+  ReadTool,
+  WriteTool,
+  ExecTool,
+  GlobTool,
+  GrepTool,
+  EditTool,
+  ListDirectoryTool,
+  TodoWriteTool,
+  TodoReadTool,
+  AskUserTool,
+} from '../builtin/tool';
+
+/**
+ * 获取内置工具目录路径
+ *
+ * 返回内置工具模块的绝对路径，用于 IPC 模式下 Agent Service 动态加载。
+ */
+export function getBuiltinToolsPath(): string {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  // 从 applications/cli/src/modules 到 applications/cli/src/builtin/tool
+  return resolve(currentDir, '../builtin/tool');
+}
 
 /**
  * 工具配置接口
  */
 export interface ToolConfig {
-  /** 工具名称 */
   name: string;
-  /** 工具描述 */
   description: string;
-  /** 是否启用 */
   enabled: boolean;
 }
 
 /**
- * 内置工具配置列表
- *
- * 包含所有内置工具的基本配置信息。
- * 与旧版 CLI 的 registerBuiltinTools 保持一致。
+ * 核心工具配置列表
  */
 const BUILTIN_TOOLS: ToolConfig[] = [
   {
-    name: 'read_file',
-    description: '读取文件内容。支持相对路径（相对于工作区）、~ 路径或绝对路径',
+    name: 'read',
+    description: '读取文件内容。支持分页读取大文件。',
     enabled: true,
   },
   {
-    name: 'write_file',
-    description: '创建或覆盖文件。支持相对路径（相对于工作区）、~ 路径或绝对路径',
-    enabled: true,
-  },
-  {
-    name: 'list_dir',
-    description: '列出目录内容。支持相对路径（相对于工作区）、~ 路径或绝对路径',
+    name: 'write',
+    description: '写入文件内容。目录不存在时自动创建。',
     enabled: true,
   },
   {
     name: 'exec',
-    description: '执行命令或脚本。支持 JS/TS 脚本、Shell 命令、Python 脚本',
+    description: '执行 Shell 命令。支持 JS/TS/Python 脚本。',
     enabled: true,
   },
   {
-    name: 'web_fetch',
-    description: '获取网页内容。仅允许 HTTP/HTTPS 协议',
+    name: 'glob',
+    description: '按 glob 模式查找文件。',
     enabled: true,
   },
   {
-    name: 'message',
-    description: '发送消息到指定通道',
+    name: 'grep',
+    description: '在文件内容中搜索正则表达式。',
+    enabled: true,
+  },
+  {
+    name: 'edit',
+    description: '精确编辑文件，查找并替换文本。',
+    enabled: true,
+  },
+  {
+    name: 'list_directory',
+    description: '列出目录内容，支持 ignore 和 gitignore。',
+    enabled: true,
+  },
+  {
+    name: 'todo_write',
+    description: '创建和管理任务列表。',
+    enabled: true,
+  },
+  {
+    name: 'todo_read',
+    description: '读取当前任务列表。',
+    enabled: true,
+  },
+  {
+    name: 'ask_user',
+    description: '向用户提问并获取选择。',
     enabled: true,
   },
 ];
 
 /**
  * 获取内置工具配置列表
- *
- * 返回所有内置工具的配置信息。
- * 配置将传递给 Agent Service 进行实际工具注册。
- *
- * @returns 内置工具配置数组
  */
 export function getBuiltinToolConfigs(): ToolConfig[] {
   return [...BUILTIN_TOOLS];
@@ -70,11 +107,6 @@ export function getBuiltinToolConfigs(): ToolConfig[] {
 
 /**
  * 获取启用的工具名称列表
- *
- * 返回所有 enabled=true 的工具名称。
- * 用于启动时显示已加载的工具列表。
- *
- * @returns 启用的工具名称数组
  */
 export function getEnabledTools(): string[] {
   return BUILTIN_TOOLS.filter(tool => tool.enabled).map(tool => tool.name);
@@ -82,8 +114,6 @@ export function getEnabledTools(): string[] {
 
 /**
  * 获取工具数量统计
- *
- * @returns 包含总数和启用数的统计对象
  */
 export function getToolStats(): { total: number; enabled: number } {
   return {
@@ -91,3 +121,40 @@ export function getToolStats(): { total: number; enabled: number } {
     enabled: BUILTIN_TOOLS.filter(tool => tool.enabled).length,
   };
 }
+
+/**
+ * CLI 工具提供者实现
+ */
+class CLIToolProvider implements BuiltinToolProvider {
+  getTools(_workspace: string): Tool[] {
+    return coreTools;
+  }
+
+  getToolsPath(): string | null {
+    return getBuiltinToolsPath();
+  }
+}
+
+/** 单例工具提供者实例 */
+const cliToolProvider = new CLIToolProvider();
+
+/**
+ * 获取 CLI 工具提供者
+ */
+export function getCLIToolProvider(): BuiltinToolProvider {
+  return cliToolProvider;
+}
+
+// 单独导出工具（供需要单独引用的场景）
+export {
+  ReadTool,
+  WriteTool,
+  ExecTool,
+  GlobTool,
+  GrepTool,
+  EditTool,
+  ListDirectoryTool,
+  TodoWriteTool,
+  TodoReadTool,
+  AskUserTool,
+};

@@ -4,8 +4,8 @@
  * 通过 IPC 与 Agent Service 通信。
  */
 
-import { MicroAgentClient } from '@micro-agent/sdk';
-import type { StreamChunk, ToolConfig, SkillConfig, MemoryConfig, KnowledgeConfig } from '@micro-agent/sdk';
+import { MicroAgentClient } from '@micro-agent/sdk/client';
+import type { StreamChunk, ToolConfig, SkillConfig, MemoryConfig, KnowledgeConfig } from '@micro-agent/sdk/client';
 import { getLogger } from '@logtape/logtape';
 import type { AgentClient, MessageContent } from './message-router';
 
@@ -69,6 +69,8 @@ export class AgentClientImpl implements AgentClient {
       const isLLMResponse = message.includes('LLM 响应');
       const isLLMThinking = message.includes('LLM 思考');
       const isToolCall = message.includes('执行工具调用') || message.includes('工具执行完成');
+      const isReActExecute = message.includes('ReAct 执行工具');
+      const isReActObserve = message.includes('ReAct 观察');
 
       // 前台显示逻辑（console.log 直接到控制台，不经过 logtape）
       // warn/error: 由 logtape 处理（consoleLevel=warn）
@@ -126,12 +128,40 @@ export class AgentClientImpl implements AgentClient {
           const argsStr = args ? ` (${JSON.stringify(args).slice(0, 60)}...)` : '';
           console.log(`\x1b[34m[工具]\x1b[0m 调用 \x1b[1m${toolName}\x1b[0m${argsStr}`);
         } else {
-          const resultLength = props.resultLength as number | undefined;
+          const result = props.result as string | undefined;
           const error = props.error as string | undefined;
           if (error) {
-            console.log(`\x1b[31m[工具]\x1b[0m ${toolName} \x1b[31m失败\x1b[0m: ${error.slice(0, 100)}`);
+            console.log(`\x1b[31m[工具]\x1b[0m ${toolName} \x1b[31m失败\x1b[0m: ${error.slice(0, 200)}`);
+          } else if (result) {
+            const display = result.length > 200 ? `${result.slice(0, 200)}...` : result;
+            console.log(`\x1b[32m[工具]\x1b[0m ${toolName} \x1b[32m完成\x1b[0m: ${display}`);
           } else {
-            console.log(`\x1b[32m[工具]\x1b[0m ${toolName} \x1b[32m完成\x1b[0m (${resultLength ?? '?'} bytes)`);
+            console.log(`\x1b[32m[工具]\x1b[0m ${toolName} \x1b[32m完成\x1b[0m`);
+          }
+        }
+        log.info(message, props);
+      }
+      // ReAct 执行工具
+      else if (isReActExecute) {
+        const tools = props.tools as string[] | undefined;
+        const reasoning = props.reasoning as string | undefined;
+        if (reasoning) {
+          const display = reasoning.length > 150 ? `${reasoning.slice(0, 150)}...` : reasoning;
+          console.log(`\x1b[33m[思考 #${props.iteration}]\x1b[0m ${display}`);
+        }
+        if (tools && tools.length > 0) {
+          console.log(`\x1b[34m[工具]\x1b[0m 准备调用: ${tools.join(', ')}`);
+        }
+        log.info(message, props);
+      }
+      // ReAct 观察
+      else if (isReActObserve) {
+        const toolResults = props.toolResults as Array<{ tool: string; success: boolean; result?: string }> | undefined;
+        if (toolResults) {
+          for (const tr of toolResults) {
+            const status = tr.success ? '\x1b[32m完成\x1b[0m' : '\x1b[31m失败\x1b[0m';
+            const result = tr.result ? `: ${tr.result.slice(0, 150)}` : '';
+            console.log(`\x1b[34m[工具]\x1b[0m ${tr.tool} ${status}${result}`);
           }
         }
         log.info(message, props);
@@ -242,13 +272,15 @@ export class AgentClientImpl implements AgentClient {
 
   /**
    * 注册工具
+   * 
+   * 支持传递工具路径供 IPC 模式动态加载
    */
-  async registerTools(tools: ToolConfig[]): Promise<{ count: number; tools: string[] }> {
+  async registerTools(tools: ToolConfig[], toolsPath?: string): Promise<{ count: number; tools: string[] }> {
     if (!this._connected) {
       throw new Error('未连接到 Agent Service');
     }
-    await this.client.config.registerTools(tools);
-    log.info('工具已注册', { count: tools.length });
+    await this.client.config.registerTools(tools, toolsPath);
+    log.info('工具已注册', { count: tools.length, toolsPath });
     return { count: tools.length, tools: tools.map(t => t.name) };
   }
 
