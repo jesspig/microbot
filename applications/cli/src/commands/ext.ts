@@ -44,10 +44,9 @@ const TYPE_ORDER: CliExtensionType[] = ['tool', 'channel', 'skills'];
  * 获取扩展扫描目录列表
  *
  * 按优先级返回扩展目录：
- * 1. 项目内置扩展目录（extensions/）
- * 2. 项目内置扩展目录（applications/extensions/）
- * 3. 用户级扩展目录（~/.micro-agent/extensions/）
- * 4. 项目级扩展目录（./.micro-agent/extensions/）
+ * 1. 项目内置扩展目录（cli/src/builtin/）
+ * 2. 用户级扩展目录（~/.micro-agent/extensions/）
+ * 3. 项目级扩展目录（./.micro-agent/extensions/）
  */
 function getExtensionDirs(): Array<{ path: string; label: string }> {
   const dirs: Array<{ path: string; label: string }> = [];
@@ -76,16 +75,10 @@ function getExtensionDirs(): Array<{ path: string; label: string }> {
     currentDir = parent;
   }
 
-  // 项目内置扩展目录 - 根目录
-  const builtinRoot = join(projectRoot, 'extensions');
-  if (existsSync(builtinRoot)) {
-    dirs.push({ path: builtinRoot, label: '内置' });
-  }
-
-  // 项目内置扩展目录 - applications 目录
-  const builtinApp = join(projectRoot, 'applications', 'extensions');
-  if (existsSync(builtinApp)) {
-    dirs.push({ path: builtinApp, label: '内置' });
+  // 项目内置扩展目录 - cli/src/builtin
+  const builtinDir = join(projectRoot, 'applications', 'cli', 'src', 'builtin');
+  if (existsSync(builtinDir)) {
+    dirs.push({ path: builtinDir, label: '内置' });
   }
 
   // 用户级扩展目录

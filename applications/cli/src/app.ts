@@ -6,7 +6,7 @@
 
 import { homedir } from 'os';
 import { join, resolve, dirname } from 'path';
-import { loadConfig, createDefaultUserConfig, expandPath } from '@micro-agent/sdk';
+import { loadConfig, createDefaultUserConfig, expandPath } from '@micro-agent/sdk/runtime';
 import { MessageRouter } from './modules/message-router';
 import { FeishuWrapper, type FeishuConfig as FeishuWrapperConfig } from './modules/feishu-wrapper';
 import { AgentClientImpl } from './modules/agent-client';
@@ -17,12 +17,13 @@ import {
   displayShutdownInfo,
   type StartupInfo,
 } from './modules/startup-info';
-import { getBuiltinToolConfigs } from './modules/tools-init';
-import { getBuiltinSkillConfigs, getSkillsBuiltinPath, SkillsLoader, type SkillConfig } from './modules/skills-init';
+import { getBuiltinToolConfigs, getCLIToolProvider, getBuiltinToolsPath } from './modules/tools-init';
+import { getBuiltinSkillConfigs, getSkillsBuiltinPath, SkillsLoader, type SkillConfig, getCLISkillProvider } from './modules/skills-init';
 import { getProviderConfigs, parseDefaultModelInfo } from './modules/providers-init';
 import { getMemorySystemConfig, getSearchModeDescription, getEmbeddingModelInfo } from './modules/memory-init';
 import { ensureUserConfigFiles, loadSystemPrompt } from './modules/system-prompt';
 import { getLogger } from '@logtape/logtape';
+import { registerBuiltinToolProvider, registerBuiltinSkillProvider } from '@micro-agent/sdk/runtime';
 import { existsSync, mkdirSync, watch, type FSWatcher } from 'fs';
 import { fileURLToPath } from 'url';
 
@@ -96,38 +97,47 @@ class CLIApp implements App {
       // 2. 初始化技能加载器
       this.initSkillsLoader();
 
-      // 3. 收集启动信息
+      // 3. 注册工具提供者（在创建 Agent 客户端之前）
+      // 这样 Agent Service 启动时就能获取工具实例
+      registerBuiltinToolProvider(getCLIToolProvider());
+      log.info('工具提供者已注册');
+
+      // 3.1 注册技能提供者
+      registerBuiltinSkillProvider(getCLISkillProvider());
+      log.info('技能提供者已注册');
+
+      // 4. 收集启动信息
       this.collectStartupInfo();
 
-      // 4. 创建 Agent 客户端
+      // 5. 创建 Agent 客户端
       this.agentClient = new AgentClientImpl({
         ipcPath: this.config.ipcPath,
         timeout: 60000,
       });
 
-      // 5. 创建消息路由器
+      // 6. 创建消息路由器
       this.router = new MessageRouter(this.agentClient);
 
-      // 6. 注册通道
+      // 7. 注册通道
       await this.registerChannels();
 
-      // 7. 启动路由器（连接到 Agent Service）
+      // 8. 启动路由器（连接到 Agent Service）
       await this.router.start();
 
-      // 8. 向 Agent Service 传递配置
+      // 9. 向 Agent Service 传递配置
       await this.configureAgentService();
 
       this.running = true;
 
-      // 9. 打印启动信息
+      // 10. 打印启动信息
       printStartupInfo(this.startupInfo);
 
       log.info('应用启动完成');
 
-      // 10. 启动配置热重载监听
+      // 11. 启动配置热重载监听
       this.startConfigWatcher();
 
-      // 11. 保持运行
+      // 12. 保持运行
       await this.keepAlive();
 
     } catch (error) {
@@ -170,12 +180,13 @@ class CLIApp implements App {
       await this.agentClient.setSystemPrompt(systemPrompt);
       log.info('系统提示词已传递', { length: systemPrompt.length });
 
-      // 2. 注册工具
+      // 2. 注册工具（IPC 模式：传递工具路径供动态加载）
       const tools = getBuiltinToolConfigs();
       const enabledTools = tools.filter(t => t.enabled !== false);
       if (enabledTools.length > 0) {
-        await this.agentClient.registerTools(enabledTools);
-        log.info('工具已注册', { count: enabledTools.length });
+        const toolsPath = getBuiltinToolsPath();
+        await this.agentClient.registerTools(enabledTools, toolsPath);
+        log.info('工具已注册', { count: enabledTools.length, toolsPath });
       }
 
       // 3. 加载技能（传递完整技能信息，包含路径）
@@ -298,22 +309,9 @@ class CLIApp implements App {
    * 获取模板路径
    */
   private getTemplatesPath(): string {
-    // 模板目录包含 settings.example.json
-    // 路径：applications/templates/configs/ 或 templates/configs/
-    const possiblePaths = [
-      resolve(import.meta.dir, '../../templates/configs'), // applications/templates/configs
-      resolve(import.meta.dir, '../../../templates/configs'), // 项目根目录 templates/configs
-    ];
-
-    for (const path of possiblePaths) {
-      const settingsExample = join(path, 'settings.example.json');
-      if (existsSync(settingsExample)) {
-        return path;
-      }
-    }
-
-    // 回退到 applications/templates/configs
-    return possiblePaths[0];
+    // 模板目录包含 settings.example.yaml
+    // 路径：applications/cli/src/templates/configs/
+    return resolve(import.meta.dir, 'templates/configs');
   }
 
   /**

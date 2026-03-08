@@ -38,12 +38,12 @@ export type SkillSource = 'builtin' | 'workspace' | 'user';
 /**
  * 内置技能目录路径
  *
- * 相对于此模块的位置：applications/cli/src/modules/ -> applications/extensions/skills/
+ * 相对于此模块的位置：applications/cli/src/modules/ -> applications/cli/src/builtin/skills/
  */
 function getBuiltinSkillsPath(): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
-  // 从 applications/cli/src/modules 向上 3 级到达 applications 目录
-  return resolve(currentDir, '../../../extensions/skills');
+  // 从 applications/cli/src/modules 到 applications/cli/src/builtin/skills
+  return resolve(currentDir, '../builtin/skills');
 }
 
 /**
@@ -354,6 +354,7 @@ export class SkillsLoader {
    * 构建 Always 技能内容
    *
    * 返回 always=true 的技能完整内容
+   * 会将 <skill-dir> 占位符替换为实际的技能路径
    */
   buildAlwaysSkillsContent(): string {
     const alwaysSkills = this.skills.filter(s => s.enabled && s.always);
@@ -367,7 +368,11 @@ export class SkillsLoader {
       const skillMdPath = join(skill.path, 'SKILL.md');
       if (existsSync(skillMdPath)) {
         try {
-          const content = readFileSync(skillMdPath, 'utf-8');
+          let content = readFileSync(skillMdPath, 'utf-8');
+          // 替换 <skill-dir> 占位符为实际路径
+          // 统一使用正斜杠，避免 Windows 反斜杠转义问题
+          const normalizedPath = skill.path.replace(/\\/g, '/');
+          content = content.replace(/<skill-dir>/g, normalizedPath);
           parts.push(`# 技能：${skill.name}\n\n${content}`);
         } catch {
           // 读取失败，跳过
@@ -377,5 +382,58 @@ export class SkillsLoader {
 
     return parts.join('\n\n---\n\n');
   }
+
+  /**
+   * 获取 Always 技能名称列表
+   *
+   * 返回 always=true 的技能名称，用于区分已注入和需读取的技能
+   */
+  getAlwaysSkillNames(): string[] {
+    return this.skills
+      .filter(s => s.enabled && s.always)
+      .map(s => s.name);
+  }
+
+  /**
+   * 获取非 Always 技能列表
+   *
+   * 返回需要按需读取的技能配置
+   */
+  getOnDemandSkills(): SkillConfig[] {
+    return this.skills.filter(s => s.enabled && !s.always);
+  }
+}
+
+// ============================================================================
+// BuiltinSkillProvider 实现
+// ============================================================================
+
+import type { BuiltinSkillProvider } from '@micro-agent/types';
+
+/**
+ * CLI 技能提供者实现
+ *
+ * 实现 BuiltinSkillProvider 接口，提供内置技能路径。
+ * 通过依赖注入机制，允许 Agent Service 获取技能目录路径。
+ */
+class CLISkillProvider implements BuiltinSkillProvider {
+  /**
+   * 获取内置技能路径
+   * @returns 内置技能目录路径
+   */
+  getSkillsPath(): string {
+    return getBuiltinSkillsPath();
+  }
+}
+
+/** 单例技能提供者实例 */
+const cliSkillProvider = new CLISkillProvider();
+
+/**
+ * 获取 CLI 技能提供者
+ * @returns 技能提供者实例
+ */
+export function getCLISkillProvider(): BuiltinSkillProvider {
+  return cliSkillProvider;
 }
 

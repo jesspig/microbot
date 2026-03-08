@@ -4,7 +4,7 @@
  * 负责将通道消息路由到 Agent，并将 Agent 响应路由回通道。
  */
 
-import type { StreamChunk } from '@micro-agent/sdk';
+import type { StreamChunk } from '@micro-agent/sdk/client';
 
 /**
  * 入站消息
@@ -95,7 +95,7 @@ export interface AgentClient {
   /** 设置系统提示词 */
   setSystemPrompt(prompt: string): Promise<void>;
   /** 注册工具 */
-  registerTools(tools: unknown[]): Promise<{ count: number; tools: string[] }>;
+  registerTools(tools: unknown[], toolsPath?: string): Promise<{ count: number; tools: string[] }>;
   /** 加载技能 */
   loadSkills(skills: unknown[]): Promise<{ count: number; skills: string[] }>;
   /** 配置记忆系统 */
