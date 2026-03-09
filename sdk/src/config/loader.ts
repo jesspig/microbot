@@ -4,15 +4,15 @@
 
 import { existsSync } from 'fs';
 import { resolve } from 'path';
-import { ConfigSchema, type Config } from './schema';
+import { ConfigSchema, type Config, type SchemaConfig } from './types';
 import { expandPath } from './workspace';
 import {
   deepMerge,
   findConfigFile,
   loadConfigFile,
   buildPathChain,
-  getBuiltinDefaults,
 } from './utils';
+import { getBuiltinDefaults } from './defaults';
 
 /** 配置层级（优先级从低到高） */
 export enum ConfigLevel {
@@ -197,7 +197,7 @@ export interface ConfigStatus {
 /**
  * 获取配置状态
  */
-export function getConfigStatus(config: Config): ConfigStatus {
+export function getConfigStatus(config: SchemaConfig): ConfigStatus {
   const missingRequired: string[] = [];
   
   // 检查 chat 模型

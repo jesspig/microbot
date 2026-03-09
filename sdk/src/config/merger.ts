@@ -5,10 +5,9 @@
  */
 
 import { existsSync, statSync } from 'fs';
-import { resolve } from 'path';
 import { deepMerge, loadConfigFile } from './utils';
 import { ConfigLevel } from './loader';
-import type { Config } from './schema';
+import type { SchemaConfig } from './types';
 
 /** 配置层级类型 */
 export type ConfigScope = 'user' | 'project' | 'directory';
@@ -28,7 +27,7 @@ export interface ConfigSource {
 /** 合并结果 */
 export interface MergedConfigResult {
   /** 合并后的配置 */
-  config: Config;
+  config: SchemaConfig;
   /** 配置来源列表（按优先级从低到高） */
   sources: ConfigSource[];
 }
@@ -65,7 +64,7 @@ export function mergeConfigs(
   }
 
   return {
-    config: merged as Config,
+    config: merged as unknown as SchemaConfig,
     sources,
   };
 }

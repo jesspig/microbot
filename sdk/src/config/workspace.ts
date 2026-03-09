@@ -1,14 +1,19 @@
-﻿/**
+/**
  * 工作区访问控制
  */
 
-import { resolve, dirname } from 'path';
+import { resolve, dirname, join } from 'path';
 import { homedir } from 'os';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
-import type { WorkspaceConfig } from './schema';
+import type { WorkspaceConfig } from './types';
+import {
+  USER_CONFIG_DIR,
+  USER_KNOWLEDGE_DIR,
+  USER_WORKSPACE_DIR,
+} from './defaults';
 
-/** 用户配置目录 */
-const USER_CONFIG_DIR = '~/.micro-agent';
+// 重新导出 USER_CONFIG_DIR 供外部使用
+export { USER_CONFIG_DIR } from './defaults';
 
 /**
  * 展开路径（支持 ~ 前缀）
@@ -50,18 +55,13 @@ export function validateWorkspaceAccess(
   config: AccessControlConfig = {}
 ): void {
   const normalizedTarget = resolve(expandPath(targetPath));
-  const userDir = expandPath(USER_CONFIG_DIR);
-
-  // 默认路径
-  const defaultWorkspace = resolve(userDir, 'workspace');
-  const defaultKnowledgeBase = resolve(userDir, 'knowledge');
 
   // 允许访问的路径
   const allowedPaths: string[] = [
     // 工作区
-    config.workspace ? expandPath(config.workspace) : defaultWorkspace,
+    config.workspace ? expandPath(config.workspace) : USER_WORKSPACE_DIR,
     // 知识库
-    config.knowledgeBase ? expandPath(config.knowledgeBase) : defaultKnowledgeBase,
+    config.knowledgeBase ? expandPath(config.knowledgeBase) : USER_KNOWLEDGE_DIR,
     // 额外配置的工作区
     ...(config.workspaces ? resolveWorkspacePaths(config.workspaces) : []),
   ];
@@ -106,9 +106,7 @@ const CONFIG_FILE_NAME = 'settings.yaml';
  * 获取用户配置文件路径
  */
 export function getUserConfigPath(): string {
-  const userDir = expandPath(USER_CONFIG_DIR);
-  const configPath = resolve(userDir, CONFIG_FILE_NAME);
-  return configPath;
+  return resolve(USER_CONFIG_DIR, CONFIG_FILE_NAME);
 }
 
 /**

@@ -4,11 +4,10 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { load } from 'js-yaml';
-import { resolve, dirname, join } from 'path';
-import { homedir } from 'os';
+import { resolve, dirname } from 'path';
 
-/** 用户配置目录（展开后） */
-const USER_CONFIG_DIR = join(homedir(), '.micro-agent');
+/** 配置文件名 */
+export const CONFIG_FILE_NAME = 'settings.yaml';
 
 /**
  * 深度合并对象
@@ -76,9 +75,6 @@ export function resolveEnvVars(obj: unknown): unknown {
   return obj;
 }
 
-/** 配置文件名 */
-export const CONFIG_FILE_NAME = 'settings.yaml';
-
 /**
  * 查找配置文件
  */
@@ -113,38 +109,4 @@ export function buildPathChain(workspace: string, currentDir: string): string[] 
   }
 
   return chain;
-}
-
-/**
- * 获取内置默认配置
- */
-export function getBuiltinDefaults(): Record<string, unknown> {
-  return {
-    agents: {
-      workspace: join(USER_CONFIG_DIR, 'workspace'),
-      maxTokens: 512,
-      temperature: 0.7,
-      executor: {
-        maxIterations: 20,
-      },
-      memory: {
-        enabled: true,
-        storagePath: join(USER_CONFIG_DIR, 'memory'),
-        autoSummarize: true,
-        summarizeThreshold: 20,
-        idleTimeout: 300000,
-        shortTermRetentionDays: 7,
-        searchLimit: 10,
-        multiEmbed: {
-          enabled: true,
-          maxModels: 3,
-          autoMigrate: true,
-          batchSize: 50,
-          migrateInterval: 0,
-        },
-      },
-    },
-    providers: {},
-    channels: {},
-  };
 }

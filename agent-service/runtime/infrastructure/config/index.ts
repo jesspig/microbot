@@ -1,8 +1,12 @@
 /**
  * Config 模块入口
+ *
+ * 从 SDK 重新导出高级配置功能，保留基础类型定义
  */
 
-// Schema
+// ============================================================
+// Schema - 基础类型定义（保留在 Agent Service）
+// ============================================================
 export {
   ConfigSchema,
   AgentConfigSchema,
@@ -33,18 +37,21 @@ export type {
   CitationConfig,
 } from './schema';
 
+// ============================================================
+// 高级功能（从 SDK 重新导出）
+// ============================================================
+
 // Loader
 export {
   loadConfig,
   getConfigStatus,
   ConfigLevel,
-} from './loader';
-
-export type { LoadConfigOptions, ConfigStatus } from './loader';
+} from '../../../../sdk/src/config/loader';
+export type { LoadConfigOptions, ConfigStatus } from '../../../../sdk/src/config/loader';
 
 // Merger
-export { mergeConfigs, getConfigDiff } from './merger';
-export type { ConfigScope, ConfigSource, MergedConfigResult } from './merger';
+export { mergeConfigs, getConfigDiff } from '../../../../sdk/src/config/merger';
+export type { ConfigScope, ConfigSource, MergedConfigResult } from '../../../../sdk/src/config/merger';
 
 // Utils
 export {
@@ -53,9 +60,14 @@ export {
   findConfigFile,
   loadConfigFile,
   buildPathChain,
-  getBuiltinDefaults,
   CONFIG_FILE_NAME,
-} from './utils';
+} from '../../../../sdk/src/config/utils';
+
+// Defaults
+export {
+  getBuiltinDefaults,
+  USER_CONFIG_DIR,
+} from '../../../../sdk/src/config/defaults';
 
 // Workspace
 export {
@@ -64,7 +76,7 @@ export {
   getUserConfigPath,
   createDefaultUserConfig,
   expandPath,
-} from './workspace';
+} from '../../../../sdk/src/config/workspace';
 
 // Template
 export {
@@ -72,4 +84,4 @@ export {
   findTemplateFile,
   loadTemplateFile,
   loadAllTemplateFiles,
-} from './template';
+} from '../../../../sdk/src/config/template';

@@ -1,12 +1,11 @@
 /**
  * 知识库管理器
  *
- * 管理文档索引和检索。
+ * 高级封装：管理文档索引和检索。
  */
 
 import { mkdir } from 'fs/promises';
 import { join } from 'path';
-import { homedir } from 'os';
 import { Database } from 'bun:sqlite';
 import type {
   KnowledgeBaseConfig,
@@ -15,14 +14,15 @@ import type {
   KnowledgeDocStatus,
   KnowledgeBaseStats,
 } from './types';
-import type { EmbeddingService } from '../memory/types';
+import type { EmbeddingServiceProvider } from './types';
 import { getLogger } from '@logtape/logtape';
+import { USER_KNOWLEDGE_DIR, USER_DATA_DIR } from '../config/defaults';
 
-const log = getLogger(['knowledge', 'manager']);
+const log = getLogger(['sdk', 'knowledge', 'manager']);
 
 /** 默认配置 */
 const DEFAULT_CONFIG: KnowledgeBaseConfig = {
-  basePath: join(homedir(), '.micro-agent', 'knowledge'),
+  basePath: USER_KNOWLEDGE_DIR,
   chunkSize: 1000,
   chunkOverlap: 200,
   maxSearchResults: 5,
@@ -37,17 +37,22 @@ const DEFAULT_CONFIG: KnowledgeBaseConfig = {
 
 /**
  * 知识库管理器
+ *
+ * 功能：
+ * - 文档生命周期管理
+ * - 数据库持久化
+ * - 统计信息查询
  */
 export class KnowledgeBaseManager {
   private config: KnowledgeBaseConfig;
   private documents: Map<string, KnowledgeDocument> = new Map();
-  private embeddingService?: EmbeddingService;
+  private embeddingService?: EmbeddingServiceProvider;
   private isInitialized = false;
   private db?: Database;
 
   constructor(
     config?: Partial<KnowledgeBaseConfig>,
-    embeddingService?: EmbeddingService
+    embeddingService?: EmbeddingServiceProvider
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.embeddingService = embeddingService;
@@ -159,13 +164,33 @@ export class KnowledgeBaseManager {
     log.info('索引重建完成');
   }
 
+  /**
+   * 设置嵌入服务
+   */
+  setEmbeddingService(service: EmbeddingServiceProvider): void {
+    this.embeddingService = service;
+  }
+
+  /**
+   * 获取嵌入服务
+   */
+  getEmbeddingService(): EmbeddingServiceProvider | undefined {
+    return this.embeddingService;
+  }
+
+  /**
+   * 检查是否已初始化
+   */
+  isReady(): boolean {
+    return this.isInitialized;
+  }
+
   // ========== 数据库管理 ==========
 
   private async initDatabase(): Promise<void> {
-    const dataDir = join(homedir(), '.micro-agent', 'data');
-    await mkdir(dataDir, { recursive: true });
+    await mkdir(USER_DATA_DIR, { recursive: true });
 
-    const dbPath = join(dataDir, 'knowledge.db');
+    const dbPath = join(USER_DATA_DIR, 'knowledge.db');
     this.db = new Database(dbPath);
 
     this.db.run(`
@@ -259,4 +284,14 @@ export function getKnowledgeBase(): KnowledgeBaseManager | null {
 
 export function setKnowledgeBase(manager: KnowledgeBaseManager): void {
   globalKnowledgeBase = manager;
+}
+
+/**
+ * 创建知识库管理器
+ */
+export function createKnowledgeBaseManager(
+  config?: Partial<KnowledgeBaseConfig>,
+  embeddingService?: EmbeddingServiceProvider
+): KnowledgeBaseManager {
+  return new KnowledgeBaseManager(config, embeddingService);
 }
