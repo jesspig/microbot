@@ -16,7 +16,7 @@ import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync, readdirSy
 import { resolve, isAbsolute, normalize, join, relative } from 'path';
 import { homedir, platform } from 'os';
 import { which } from 'bun';
-import { defineTool } from '@micro-agent/sdk';
+import { defineTool, TODO_STORAGE_PATH } from '@micro-agent/sdk';
 import type { Tool, JSONSchema, ToolContext } from '@micro-agent/types';
 import { createSuccessResult, createErrorResult } from '@micro-agent/types';
 
@@ -1079,8 +1079,7 @@ interface TodoStorage {
   };
 }
 
-/** 任务存储文件路径 */
-const TODO_STORAGE_PATH = join(homedir(), '.micro-agent', 'todos.json');
+// 注意：TODO_STORAGE_PATH 已从 @micro-agent/sdk 导入
 
 /** 读取任务存储 */
 function readTodoStorage(): TodoStorage {

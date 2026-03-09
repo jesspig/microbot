@@ -38,4 +38,5 @@ export type {
   ServiceLifecycleLog,
   SessionLifecycleLog,
   IPCMessageLog,
+  MemoryOpLog,
 } from './types';

@@ -1,0 +1,82 @@
+/**
+ * Agent Service 类型定义
+ *
+ * 定义服务层的核心类型和接口
+ */
+
+import type { Config } from '../runtime/infrastructure/config';
+import type { LLMProvider } from '../runtime/provider/llm';
+import type { ToolRegistry } from '../runtime/capability/tool-system';
+import type { SkillRegistry } from '../runtime/capability/skill-system';
+import type { AgentOrchestrator } from '../runtime/kernel/orchestrator';
+import type { KnowledgeRetriever, KnowledgeBaseConfig } from '../runtime/capability/knowledge';
+import type { SessionStore } from '../runtime/infrastructure/database/session/store';
+// 从 SDK 重导出高级封装
+import type { KnowledgeBaseManager } from '@micro-agent/sdk';
+import type { MemoryManager, EmbeddingService } from '../runtime/capability/memory';
+import {
+  USER_KNOWLEDGE_DIR,
+  DEFAULT_EXECUTOR_CONFIG,
+} from '@micro-agent/sdk';
+
+/** Agent Service 配置 */
+export interface AgentServiceConfig {
+  logLevel?: 'debug' | 'info' | 'warn' | 'error';
+  workspace?: string;
+  knowledgeBase?: string;
+  maxIterations?: number;
+}
+
+/** 默认配置 */
+export const DEFAULT_CONFIG: AgentServiceConfig = {
+  logLevel: 'info',
+  workspace: process.cwd(),
+  knowledgeBase: USER_KNOWLEDGE_DIR,
+  maxIterations: DEFAULT_EXECUTOR_CONFIG.maxIterations,
+};
+
+/** 技能配置 */
+export interface SkillConfig {
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  path?: string;
+  always?: boolean;
+  allowedTools?: string[];
+}
+
+/** 服务组件容器 */
+export interface ServiceComponents {
+  appConfig: Config | null;
+  llmProvider: LLMProvider | null;
+  toolRegistry: ToolRegistry | null;
+  skillRegistry: SkillRegistry | null;
+  orchestrator: AgentOrchestrator | null;
+  memoryManager: MemoryManager | null;
+  knowledgeBaseManager: KnowledgeBaseManager | null;
+  knowledgeRetriever: KnowledgeRetriever | null;
+  embeddingService: EmbeddingService | null;
+  knowledgeConfig: KnowledgeBaseConfig | null;
+  sessionStore: SessionStore | null;
+  defaultModel: string;
+  systemPrompt: string;
+}
+
+/** 会话数据 */
+export interface SessionData {
+  messages: Array<{ role: string; content: string }>;
+}
+
+/** 工具调用结果 */
+export interface ToolCallResult {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+/** 流式回调接口 */
+export interface StreamCallbacks {
+  onChunk: (chunk: string) => Promise<void>;
+  onComplete: () => Promise<void>;
+  onError: (error: Error) => Promise<void>;
+}

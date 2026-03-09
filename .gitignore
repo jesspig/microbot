@@ -1,6 +1,11 @@
+# ===========================================
+# MicroAgent .gitignore 配置
+# ===========================================
+
 # 依赖
 node_modules/
 .pnpm-store/
+bun.lock
 
 # 构建输出
 dist/
@@ -20,6 +25,8 @@ dist/
 # 系统文件
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # 日志
 *.log
@@ -28,25 +35,48 @@ logs/
 # 测试覆盖率
 coverage/
 
+# ===========================================
+# 测试相关
+# ===========================================
+
 # 测试输出文件
 test_output.txt
 test-output.txt
 test-error.txt
+test-results*.txt
 
-# 测试临时目录
-test-skills-temp/
-test-agent-workspace/
-test-fs-workspace/
-test-memory-workspace/
-test-watcher-dir/
-test-loader-dir/
-test-manager-dir/
-test-config-test/
-test-extensions-temp*/
+# 类型检查输出
+typecheck-errors*.txt
+typecheck-results.txt
 
+# 测试临时目录（通用模式）
+test-*-temp/
+test-*-workspace/
+test-*-dir/
+test-*-test/
+*-test-temp/
+*-test-workspace/
+
+# 测试数据库文件
+*.db
+*.db-journal
+*.db-wal
+
+# LanceDB 数据目录
+*.lance/
+.lancedb/
+
+# ===========================================
 # 运行时数据
+# ===========================================
+
+# 用户数据目录
 .micro-agent/
 .microbot/
+
+# ===========================================
+# AI 助手配置（开发工具）
+# ===========================================
 
 # AI 助手配置目录
 .agent/
@@ -62,4 +92,6 @@ GEMINI.md
 QWEN.md
 CLAUDE.md
 IFLOW.md
+
+# 规格和设计文档
 specs/

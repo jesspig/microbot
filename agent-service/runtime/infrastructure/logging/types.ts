@@ -174,15 +174,19 @@ export interface ToolCallLog extends BaseLogEntry {
 export interface MemoryOpLog extends BaseLogEntry {
   _type: 'memory_op';
   /** 操作类型 */
-  operation: 'store' | 'retrieve' | 'search' | 'delete' | 'clear';
+  operation: 'store' | 'retrieve' | 'search' | 'delete' | 'clear' | 'summarize' | 'migrate' | 'cleanup';
   /** 内存类型 */
   memoryType?: 'short_term' | 'long_term' | 'episodic';
+  /** 会话 ID */
+  sessionId?: string;
   /** 查询内容 */
   query?: string;
   /** 结果数量 */
   resultCount?: number;
   /** 执行耗时（毫秒） */
   duration?: number;
+  /** 错误信息 */
+  error?: string;
 }
 
 /** 知识库操作日志 */
@@ -253,7 +257,9 @@ export type LogEntry =
   | KnowledgeOpLog
   | IPCMessageLog
   | ErrorLog
-  | MetricLog;
+  | MetricLog
+  | EventLog
+  | MethodCallLog;
 
 /** 日志事件监听器 */
 export type LogEventListener = (entry: LogEntry) => void;

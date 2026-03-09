@@ -5,7 +5,7 @@
 import type { ChannelType } from './interfaces';
 import type { LLMMessage } from './message';
 import type { Tool, ToolResult } from './tool';
-import type { Blackboard } from './blackboard';
+import type { Blackboard, WorkingMemory } from './blackboard';
 
 /** 执行上下文配置 */
 export interface ExecutionContextConfig {
@@ -54,22 +54,24 @@ export interface ExecutionContext {
   readonly tools: Map<string, Tool>;
   /** 黑板（ReAct 多阶段数据共享） */
   readonly blackboard?: Blackboard;
-  
+  /** 工作记忆（活跃目标和任务上下文） */
+  readonly workingMemory?: WorkingMemory;
+
   /** 添加消息到历史 */
   addMessage(message: LLMMessage): void;
-  
+
   /** 执行工具 */
   executeTool(name: string, input: unknown): Promise<ToolResult>;
-  
+
   /** 发送消息到通道 */
   sendMessage(content: string, media?: string[]): Promise<void>;
-  
+
   /** 检查是否可以继续执行 */
   canContinue(): boolean;
-  
+
   /** 更新 Token 使用量 */
   updateTokenUsage(used: number): void;
-  
+
   /** 创建快照 */
   createSnapshot(): ExecutionContextSnapshot;
 }
@@ -80,6 +82,8 @@ export interface ExecutionContextSnapshot {
   config: ExecutionContextConfig;
   /** 状态快照 */
   state: ExecutionContextState;
+  /** 工作记忆快照 */
+  workingMemory?: WorkingMemory;
   /** 创建时间 */
   createdAt: Date;
 }

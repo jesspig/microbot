@@ -95,6 +95,12 @@ export interface MemoryConfig {
   searchLimit: number;
   /** 多嵌入模型配置 */
   multiEmbed?: MultiEmbedConfig;
+  /** 记忆整合配置 */
+  consolidation?: ConsolidationConfig;
+  /** 检索配置 */
+  retrieval?: RetrievalConfig;
+  /** 分块配置 */
+  chunking?: ChunkingConfig;
 }
 
 /** 引用溯源配置 */
@@ -149,6 +155,54 @@ export interface KnowledgeBaseConfig {
   embedModel?: string;
 }
 
+/** 记忆整合配置 */
+export interface ConsolidationConfig {
+  /** 触发整合的消息数阈值 */
+  messageThreshold: number;
+  /** 空闲超时时间（毫秒） */
+  idleTimeout: number;
+  /** 是否启用事件驱动整合 */
+  eventDriven: boolean;
+  /** 整合后保留原始消息的天数 */
+  retentionDays: number;
+  /** 最大摘要长度 */
+  maxSummaryLength: number;
+}
+
+/** 检索配置 */
+export interface RetrievalConfig {
+  /** 检索模式 */
+  mode: 'auto' | 'hybrid' | 'vector' | 'fulltext';
+  /** 默认返回数量 */
+  defaultLimit: number;
+  /** 最大返回数量 */
+  maxLimit: number;
+  /** 最小相似度阈值 */
+  minScore: number;
+  /** RRF 常数 K */
+  rrfK: number;
+  /** 向量检索权重 */
+  vectorWeight: number;
+  /** 全文检索权重 */
+  fulltextWeight: number;
+  /** 时间衰减半衰期（天） */
+  decayHalfLife: number;
+}
+
+/** 分块配置 */
+export interface ChunkingConfig {
+  /** 分块大小 */
+  chunkSize: number;
+  /** 分块重叠 */
+  chunkOverlap: number;
+  /** 分块策略 */
+  strategy: 'fixed' | 'recursive' | 'semantic';
+  /** 分隔符（用于 fixed 策略） */
+  separator?: string;
+  /** 递归分块的层级分隔符（用于 recursive 策略） */
+  separators?: string[];
+}
+
 /** 工作区配置 */
 export interface WorkspaceConfig {
   /** 工作区路径 */
@@ -183,24 +237,6 @@ export interface AgentFullConfig {
   frequencyPenalty: number;
 }
 
-/** 飞书通道配置 */
-export interface FeishuChannelConfig {
-  /** 是否启用 */
-  enabled: boolean;
-  /** 应用 ID */
-  appId?: string;
-  /** 应用密钥 */
-  appSecret?: string;
-  /** 允许的来源 */
-  allowFrom: string[];
-}
-
-/** 通道配置 */
-export interface ChannelConfig {
-  /** 飞书通道配置 */
-  feishu?: FeishuChannelConfig;
-}
-
 /** 完整配置 */
 export interface Config {
   /** Agent 配置 */
@@ -209,8 +245,6 @@ export interface Config {
   workspaces: Array<string | WorkspaceConfig>;
   /** Provider 配置 */
   providers: Record<string, ProviderEntry>;
-  /** 通道配置 */
-  channels: ChannelConfig;
   /** 知识库配置 */
   knowledgeBase?: KnowledgeBaseConfig;
 }

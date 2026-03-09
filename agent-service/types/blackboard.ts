@@ -120,8 +120,54 @@ export interface BlackboardSnapshot {
   sessionState: SessionState;
   /** 错误记录 */
   errors: ErrorRecord[];
+  /** 工作记忆 */
+  workingMemory: WorkingMemory;
   /** 快照创建时间 */
   snapshotTime: number;
+}
+
+/** 工作记忆目标 */
+export interface Goal {
+  /** 目标 ID */
+  id: string;
+  /** 目标描述 */
+  description: string;
+  /** 目标状态 */
+  status: 'active' | 'completed' | 'abandoned';
+  /** 优先级 */
+  priority: number;
+  /** 创建时间 */
+  createdAt: number;
+  /** 更新时间 */
+  updatedAt: number;
+}
+
+/** 工作记忆子任务 */
+export interface SubTask {
+  /** 子任务 ID */
+  id: string;
+  /** 关联的目标 ID */
+  goalId: string;
+  /** 子任务描述 */
+  description: string;
+  /** 子任务状态 */
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  /** 创建时间 */
+  createdAt: number;
+  /** 更新时间 */
+  updatedAt: number;
+}
+
+/** 工作记忆 */
+export interface WorkingMemory {
+  /** 活跃目标列表 */
+  goals: Goal[];
+  /** 当前执行的子任务 */
+  activeSubTasks: SubTask[];
+  /** 任务上下文（临时状态） */
+  context: Record<string, unknown>;
+  /** 最后更新时间 */
+  lastUpdated: number;
 }
 
 /** 黑板数据结构 */
@@ -140,6 +186,8 @@ export interface BlackboardData {
   sessionState: SessionState;
   /** 错误记录 */
   errors: ErrorRecord[];
+  /** 工作记忆 - 当前任务上下文 */
+  workingMemory: WorkingMemory;
 }
 
 /** 黑板操作接口 */

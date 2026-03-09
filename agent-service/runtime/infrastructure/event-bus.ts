@@ -5,7 +5,7 @@
  */
 
 import mitt from 'mitt';
-import type { EventType, EventHandler } from '@micro-agent/types';
+import type { EventType, EventHandler } from '../../types/events';
 
 /** 事件映射类型 */
 type EventMap = Record<EventType, unknown>;

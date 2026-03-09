@@ -17,10 +17,16 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@micro-agent/sdk": ["../sdk/src"],
+      "@micro-agent/sdk/*": ["../sdk/src/*"],
+      "@micro-agent/types": ["./types"],
+      "@micro-agent/types/*": ["./types/*"],
+      "@micro-agent/runtime": ["./runtime"],
+      "@micro-agent/runtime/*": ["./runtime/*"]
     },
     "types": ["bun-types"]
   },
-  "include": ["runtime/**/*", "types/**/*", "interface/**/*"],
+  "include": ["runtime/**/*", "types/**/*", "interface/**/*", "src/**/*"],
   "exclude": ["node_modules"]
 }

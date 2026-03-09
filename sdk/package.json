@@ -28,6 +28,38 @@
       "types": "./src/runtime.ts",
       "default": "./src/runtime.ts"
     },
+    "./memory": {
+      "types": "./src/memory/index.ts",
+      "default": "./src/memory/index.ts"
+    },
+    "./memory/manager": {
+      "types": "./src/memory/manager.ts",
+      "default": "./src/memory/manager.ts"
+    },
+    "./memory/classifiers/memory-classifier": {
+      "types": "./src/memory/classifiers/memory-classifier.ts",
+      "default": "./src/memory/classifiers/memory-classifier.ts"
+    },
+    "./memory/classifiers/preference-classifier": {
+      "types": "./src/memory/classifiers/preference-classifier.ts",
+      "default": "./src/memory/classifiers/preference-classifier.ts"
+    },
+    "./memory/scoring/importance-scorer": {
+      "types": "./src/memory/scoring/importance-scorer.ts",
+      "default": "./src/memory/scoring/importance-scorer.ts"
+    },
+    "./memory/handlers/preference-handler": {
+      "types": "./src/memory/handlers/preference-handler.ts",
+      "default": "./src/memory/handlers/preference-handler.ts"
+    },
+    "./memory/consolidation/summarizer": {
+      "types": "./src/memory/consolidation/summarizer.ts",
+      "default": "./src/memory/consolidation/summarizer.ts"
+    },
+    "./memory/forgetting": {
+      "types": "./src/memory/forgetting/index.ts",
+      "default": "./src/memory/forgetting/index.ts"
+    },
     "./tool": {
       "types": "./src/tool/index.ts",
       "default": "./src/tool/index.ts"

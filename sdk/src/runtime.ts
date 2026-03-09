@@ -24,9 +24,9 @@ export { MessageBus } from '../../agent-service/runtime/infrastructure/message-b
 export { SessionStore } from '../../agent-service/runtime/infrastructure/database';
 export type { Session, SessionMessage, SessionMetadata, SessionStoreConfig } from '../../agent-service/runtime/infrastructure/database';
 
-// Cache
-export { KVMemoryStore } from '../../agent-service/runtime/infrastructure/cache';
-export type { KVMemoryStoreConfig } from '../../agent-service/runtime/infrastructure/cache';
+// Memory Store (原 cache 模块)
+export { KVMemoryStore } from '../../agent-service/runtime/infrastructure/database';
+export type { KVMemoryStoreConfig } from '../../agent-service/runtime/infrastructure/database';
 
 // Config
 export {
@@ -71,6 +71,7 @@ export type {
   LogEntry,
   TracerOptions,
   LogEventListener,
+  MemoryOpLog,
 } from '../../agent-service/runtime/infrastructure/logging';
 
 // ============ Hook System ============
@@ -78,28 +79,36 @@ export { HookSystem, hookSystem } from '../../agent-service/runtime/hook-system'
 export type { Hook, HookContext, HookResult } from '../../agent-service/runtime/hook-system';
 
 // ============ Provider Layer ============
-// LLM Providers
+// LLM Providers - 从 SDK llm 模块导出（高级封装）
 export {
   ModelRouter,
   createModelRouter,
-  OpenAICompatibleProvider,
-  createOpenAICompatibleProvider,
+  createLLMProvider,
+  createProvider,
+  detectVendor,
+  getModelCapabilities,
+  supportsThinking,
+  type ModelConfig,
+  type ModelRouterConfig,
+  type RouteResult,
+  type LLMProviderConfig,
+  type Provider,
+  type LLMConfig,
+  type OpenAIConfig,
+  type DeepSeekConfig,
+  type GLMConfig,
+  type KimiConfig,
+  type MiniMaxConfig,
+  type OllamaConfig,
+  type OpenAICompatibleConfig,
+} from './llm';
+
+// Anthropic Provider - 保留在 agent-service 的独立实现
+export {
   AnthropicProvider,
   createAnthropicProvider,
-  LocalProvider,
-  createLocalProvider,
-} from '../../agent-service/runtime/provider/llm';
-export type {
-  ModelRouterConfig,
-  RouteResult,
-  ModelConfig,
-  OpenAICompatibleConfig,
-  AnthropicConfig,
-  LocalProviderConfig,
-  LLMProvider,
-  GenerationConfig,
-  ProviderCapabilities,
-} from '../../agent-service/runtime/provider/llm';
+} from '../../agent-service/runtime/provider/llm/anthropic';
+export type { AnthropicConfig } from '../../agent-service/runtime/provider/llm/anthropic';
 
 // Embedding Providers
 export {
@@ -165,38 +174,41 @@ export type {
   MCPToolResultContent,
 } from '../../agent-service/runtime/capability/mcp';
 
-// Memory System
+// Memory System - 基础能力
 export {
-  MemoryManager,
   MemoryStore,
   OpenAIEmbedding,
   NoEmbedding,
   createEmbeddingService,
   MemorySearcher,
-  ConversationSummarizer,
-  classifyMemory,
-  classifyMemoriesBatch,
+  forgettingCurve,
 } from '../../agent-service/runtime/capability/memory';
 export type {
-  MemoryManagerConfig,
   MemoryEntry,
   MemoryMetadata,
-  Summary,
   MemoryStats,
   SearchOptions,
   MemoryFilter,
-  EmbeddingService,
+} from '../../agent-service/runtime/capability/memory';
+
+// Memory System - SDK 高级封装
+export {
+  MemoryManager,
+  ConversationSummarizer,
+  classifyMemory,
+} from '../../agent-service/runtime/capability/memory';
+export type {
+  MemoryManagerConfig,
+  Summary,
   SummarizerConfig,
 } from '../../agent-service/runtime/capability/memory';
 
-// Knowledge System
+// Knowledge System - 基础能力
 export {
-  KnowledgeBaseManager,
   KnowledgeRetriever,
   createDocumentScanner,
   createDocumentIndexer,
   createRetriever,
-  setKnowledgeBase,
 } from '../../agent-service/runtime/capability/knowledge';
 export type {
   KnowledgeBaseConfig,
@@ -205,6 +217,13 @@ export type {
   KnowledgeSearchResult,
   RetrieverConfig,
 } from '../../agent-service/runtime/capability/knowledge';
+
+// Knowledge System - SDK 高级封装
+export {
+  KnowledgeBaseManager,
+  setKnowledgeBase,
+  getKnowledgeBase,
+} from './index';
 
 // Plugin System
 export {

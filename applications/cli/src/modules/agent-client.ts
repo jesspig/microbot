@@ -71,6 +71,12 @@ export class AgentClientImpl implements AgentClient {
       const isToolCall = message.includes('执行工具调用') || message.includes('工具执行完成');
       const isReActExecute = message.includes('ReAct 执行工具');
       const isReActObserve = message.includes('ReAct 观察');
+      
+      // 记忆相关日志
+      const isMemoryStored = message.includes('记忆已存储');
+      const isMemorySearch = message.includes('向量检索') || message.includes('全文检索');
+      const isMemoryVectorSearch = message.includes('向量检索') && !message.includes('不可用');
+      const isMemoryFulltextSearch = message.includes('全文检索') && !message.includes('未实现');
 
       // 前台显示逻辑（console.log 直接到控制台，不经过 logtape）
       // warn/error: 由 logtape 处理（consoleLevel=warn）
@@ -122,21 +128,21 @@ export class AgentClientImpl implements AgentClient {
       }
       // 工具调用: 前台显示
       else if (isToolCall) {
-        const toolName = props.name as string;
+        const toolName = props.tool as string;
         if (message.includes('执行工具调用')) {
           const args = props.arguments as Record<string, unknown> | undefined;
           const argsStr = args ? ` (${JSON.stringify(args).slice(0, 60)}...)` : '';
-          console.log(`\x1b[34m[工具]\x1b[0m 调用 \x1b[1m${toolName}\x1b[0m${argsStr}`);
+          console.log(`\x1b[34m[工具调用]\x1b[0m 调用 \x1b[1m${toolName}\x1b[0m${argsStr}`);
         } else {
           const result = props.result as string | undefined;
           const error = props.error as string | undefined;
           if (error) {
-            console.log(`\x1b[31m[工具]\x1b[0m ${toolName} \x1b[31m失败\x1b[0m: ${error.slice(0, 200)}`);
+            console.log(`\x1b[31m[工具调用]\x1b[0m ${toolName} \x1b[31m失败\x1b[0m: ${error.slice(0, 200)}`);
           } else if (result) {
             const display = result.length > 200 ? `${result.slice(0, 200)}...` : result;
-            console.log(`\x1b[32m[工具]\x1b[0m ${toolName} \x1b[32m完成\x1b[0m: ${display}`);
+            console.log(`\x1b[32m[工具调用]\x1b[0m ${toolName} \x1b[32m完成\x1b[0m: ${display}`);
           } else {
-            console.log(`\x1b[32m[工具]\x1b[0m ${toolName} \x1b[32m完成\x1b[0m`);
+            console.log(`\x1b[32m[工具调用]\x1b[0m ${toolName} \x1b[32m完成\x1b[0m`);
           }
         }
         log.info(message, props);
@@ -147,10 +153,10 @@ export class AgentClientImpl implements AgentClient {
         const reasoning = props.reasoning as string | undefined;
         if (reasoning) {
           const display = reasoning.length > 150 ? `${reasoning.slice(0, 150)}...` : reasoning;
-          console.log(`\x1b[33m[思考 #${props.iteration}]\x1b[0m ${display}`);
+          console.log(`\x1b[33m[思考中 #${props.iteration}]\x1b[0m ${display}`);
         }
         if (tools && tools.length > 0) {
-          console.log(`\x1b[34m[工具]\x1b[0m 准备调用: ${tools.join(', ')}`);
+          console.log(`\x1b[34m[工具调用]\x1b[0m 准备调用: ${tools.join(', ')}`);
         }
         log.info(message, props);
       }
@@ -161,9 +167,26 @@ export class AgentClientImpl implements AgentClient {
           for (const tr of toolResults) {
             const status = tr.success ? '\x1b[32m完成\x1b[0m' : '\x1b[31m失败\x1b[0m';
             const result = tr.result ? `: ${tr.result.slice(0, 150)}` : '';
-            console.log(`\x1b[34m[工具]\x1b[0m ${tr.tool} ${status}${result}`);
+            console.log(`\x1b[34m[工具调用]\x1b[0m ${tr.tool} ${status}${result}`);
           }
         }
+        log.info(message, props);
+      }
+      // 记忆存储
+      else if (isMemoryStored) {
+        const sessionKey = props.sessionKey as string | undefined;
+        const userMsgLength = props.userMsgLength as number | undefined;
+        const answerLength = props.answerLength as number | undefined;
+        console.log(`\x1b[36m[更新记忆]\x1b[0m 用户消息 ${userMsgLength ?? '?'} 字符, 回复 ${answerLength ?? '?'} 字符`);
+        log.info(message, props);
+      }
+      // 记忆检索
+      else if (isMemoryVectorSearch) {
+        console.log(`\x1b[36m[向量检索]\x1b[0m 正在搜索相关记忆...`);
+        log.info(message, props);
+      }
+      else if (isMemoryFulltextSearch) {
+        console.log(`\x1b[36m[全文检索]\x1b[0m 正在搜索相关记忆...`);
         log.info(message, props);
       }
       // 其他日志: verbose 模式下前台显示

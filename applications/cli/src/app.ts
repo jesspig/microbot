@@ -7,6 +7,11 @@
 import { homedir } from 'os';
 import { join, resolve, dirname } from 'path';
 import { loadConfig, createDefaultUserConfig, expandPath } from '@micro-agent/sdk/runtime';
+import {
+  USER_WORKSPACE_DIR,
+  USER_KNOWLEDGE_DIR,
+  USER_CONFIG_DIR,
+} from '@micro-agent/sdk';
 import { MessageRouter } from './modules/message-router';
 import { FeishuWrapper, type FeishuConfig as FeishuWrapperConfig } from './modules/feishu-wrapper';
 import { AgentClientImpl } from './modules/agent-client';
@@ -81,7 +86,7 @@ class CLIApp implements App {
       // 0. 切换工作目录到配置的工作区
       const workspacePath = this.settings.agents?.workspace
         ? expandPath(this.settings.agents.workspace)
-        : join(homedir(), '.micro-agent', 'workspace');
+        : USER_WORKSPACE_DIR;
       
       // 确保工作区目录存在
       if (!existsSync(workspacePath)) {
@@ -227,10 +232,10 @@ class CLIApp implements App {
         // 获取嵌入模型信息
         const embedModelInfo = getEmbeddingModelInfo(this.settings as any);
         
-        // 知识库路径：优先使用配置的 basePath，否则默认 ~/.micro-agent/knowledge
+        // 知识库路径：优先使用配置的 basePath，否则使用默认路径
         const knowledgeBasePath = this.settings.knowledgeBase?.basePath
           ? expandPath(this.settings.knowledgeBase.basePath)
-          : join(homedir(), '.micro-agent', 'knowledge');
+          : USER_KNOWLEDGE_DIR;
         
         await this.agentClient.configureKnowledge({
           enabled: this.settings.knowledgeBase?.enabled ?? true,
@@ -627,8 +632,7 @@ class CLIApp implements App {
    * 获取用户配置文件路径
    */
   private getUserConfigPath(): string | null {
-    const configDir = join(homedir(), '.micro-agent');
-    const path = join(configDir, 'settings.yaml');
+    const path = join(USER_CONFIG_DIR, 'settings.yaml');
     if (existsSync(path)) {
       return path;
     }

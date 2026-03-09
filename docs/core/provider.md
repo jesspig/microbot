@@ -84,9 +84,9 @@ interface LLMResponse {
 
 ## 内置 Provider
 
-### OpenAICompatibleProvider
+### createLLMProvider
 
-支持 OpenAI API 兼容的所有后端。
+统一的 Provider 创建函数，支持所有后端。
 
 ### 配置示例
 

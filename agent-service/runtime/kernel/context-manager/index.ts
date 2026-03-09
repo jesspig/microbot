@@ -199,3 +199,22 @@ export class ContextManager {
     return Math.ceil(content.length / 4); // 假设 1 token ≈ 4 字符
   }
 }
+
+// ========== 模块导出 ==========
+
+// Token Budget
+export { TokenBudget, type TokenBudgetConfig } from './token-budget';
+
+// Context Builder
+export { ContextBuilder, type ContextBuilderConfig } from './context-builder';
+
+// Preference Injector (T019)
+export {
+  PreferenceInjector,
+  PreferenceInjectorConfigSchema,
+  formatPreferences,
+  mergeWithSystemPrompt,
+  type PreferenceInjectorConfig,
+  type PreferenceForInjection,
+  type InjectionResult,
+} from './preference-injector';
