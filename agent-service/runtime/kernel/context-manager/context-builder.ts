@@ -6,6 +6,7 @@
 
 import type { LLMMessage } from '../../../types/message';
 import type { TokenBudget } from './token-budget';
+import { getTokenEstimator } from './token-estimator';
 import { getLogger } from '@logtape/logtape';
 
 const log = getLogger(['kernel', 'context-builder']);
@@ -96,10 +97,11 @@ export class ContextBuilder {
 
   /**
    * 估算 Token 数量
+   *
+   * 使用统一的 TokenEstimator 进行估算，支持中英文智能检测。
    */
   private estimateTokens(message: LLMMessage): number {
-    const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
-    return Math.ceil(content.length / 4); // 假设 1 token ≈ 4 字符
+    return getTokenEstimator().estimateMessage(message);
   }
 
   /**

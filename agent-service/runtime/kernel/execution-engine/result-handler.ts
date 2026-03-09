@@ -19,7 +19,7 @@ export interface ResultHandlerConfig {
  * 结果处理器
  */
 export class ResultHandler {
-  constructor(private config: ResultHandlerConfig = {}) {}
+  constructor(private _config: ResultHandlerConfig = {}) {}
 
   /**
    * 构建最终结果

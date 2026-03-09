@@ -7,9 +7,9 @@
  */
 
 import type { LLMMessage, LLMProvider, GenerationConfig } from '../../../types/provider';
-import type { InboundMessage, OutboundMessage } from '../../../types/message';
+import type { InboundMessage, OutboundMessage, SessionKey } from '../../../types/message';
 import type { ToolRegistry } from '../../capability/tool-system';
-import type { MemoryManager } from '../../capability/memory';
+import type { SimpleMemoryManager } from '../../capability/memory';
 import type { SessionStore } from '../../infrastructure/database';
 import type { KnowledgeRetriever } from '../../capability/knowledge';
 import type { ToolContext, ToolResult } from '../../../types/tool';
@@ -86,7 +86,7 @@ export class AgentOrchestrator {
   constructor(
     private config: OrchestratorConfig,
     private tools: ToolRegistry,
-    private memoryManager?: MemoryManager,
+    private memoryManager?: SimpleMemoryManager,
     private sessionStore?: SessionStore,
     private knowledgeRetriever?: KnowledgeRetriever
   ) {}
@@ -95,7 +95,7 @@ export class AgentOrchestrator {
    * 处理用户消息
    */
   async processMessage(msg: InboundMessage): Promise<OutboundMessage> {
-    const sessionKey = `${msg.channel}:${msg.chatId}`;
+    const sessionKey = `${msg.channel}:${msg.chatId}` as SessionKey;
 
     // 获取会话历史
     const history = await this.getSessionHistory(sessionKey);
@@ -148,7 +148,7 @@ export class AgentOrchestrator {
     toolContext?: Partial<ToolContext>,
     stateCallbacks?: StateChangeCallbacks
   ): Promise<void> {
-    const sessionKey = `${msg.channel}:${msg.chatId}`;
+    const sessionKey = `${msg.channel}:${msg.chatId}` as SessionKey;
 
     // 记录用户输入
     const userContent = typeof msg.content === 'string'
@@ -255,7 +255,7 @@ export class AgentOrchestrator {
   private async executeReActLoop(
     messages: LLMMessage[],
     msg: InboundMessage,
-    callbacks: StreamCallbacks,
+    _callbacks: StreamCallbacks,
     toolContext?: Partial<ToolContext>,
     stateCallbacks?: StateChangeCallbacks
   ): Promise<{ answer: string; iterations: number }> {
@@ -446,7 +446,7 @@ export class AgentOrchestrator {
     toolCall: { id: string; name: string; arguments: Record<string, unknown> },
     msg: InboundMessage,
     toolContext?: Partial<ToolContext>,
-    state?: ReActLoopState
+    _state?: ReActLoopState
   ): Promise<ToolResult> {
     const argsPreview = JSON.stringify(toolCall.arguments).slice(0, 200);
     log.info('执行工具调用', { 
@@ -568,7 +568,7 @@ export class AgentOrchestrator {
 
      */
 
-    private async getSessionHistory(sessionKey: string): Promise<LLMMessage[]> {
+    private async getSessionHistory(sessionKey: SessionKey): Promise<LLMMessage[]> {
 
       if (this.sessionStore) {
 
@@ -616,7 +616,7 @@ export class AgentOrchestrator {
 
      */
 
-    private async updateSessionHistory(sessionKey: string, messages: LLMMessage[]): Promise<void> {
+    private async updateSessionHistory(sessionKey: SessionKey, messages: LLMMessage[]): Promise<void> {
 
       if (this.sessionStore) {
 
@@ -709,7 +709,7 @@ export class AgentOrchestrator {
    * 清除会话
    */
   clearSession(channel: string, chatId: string): void {
-    const sessionKey = `${channel}:${chatId}`;
+    const sessionKey = `${channel}:${chatId}` as SessionKey;
     this.sessionStore?.delete(sessionKey);
     this.sessionHistory.delete(sessionKey);
     log.debug('会话已清除', { sessionKey });

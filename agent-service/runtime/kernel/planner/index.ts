@@ -4,7 +4,7 @@
  * 将复杂任务分解为可执行的子任务。
  */
 
-import type { LLMMessage, LLMProvider } from '../../../types/provider';
+import type { LLMProvider } from '../../../types/provider';
 import { TaskDecomposer } from './task-decomposer';
 import { PlanGenerator } from './plan-generator';
 import { getLogger } from '@logtape/logtape';
@@ -42,9 +42,9 @@ export class AgentPlanner {
   private taskDecomposer: TaskDecomposer;
   private planGenerator: PlanGenerator;
 
-  constructor(private config: PlannerConfig) {
-    this.taskDecomposer = new TaskDecomposer(config.llmProvider, config.defaultModel);
-    this.planGenerator = new PlanGenerator(config.llmProvider, config.defaultModel);
+  constructor(private _config: PlannerConfig) {
+    this.taskDecomposer = new TaskDecomposer(_config.llmProvider, _config.defaultModel);
+    this.planGenerator = new PlanGenerator(_config.llmProvider, _config.defaultModel);
   }
 
   /**

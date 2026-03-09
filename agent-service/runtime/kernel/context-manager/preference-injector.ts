@@ -9,7 +9,8 @@ import { z } from 'zod';
 import { getLogger } from '@logtape/logtape';
 import type { LLMMessage } from '../../../types/message';
 import type { TokenBudget } from './token-budget';
-import type { PreferenceType } from '@micro-agent/sdk';
+import type { PreferenceType } from '../../../types/preference';
+import { getTokenEstimator } from './token-estimator';
 
 const log = getLogger(['kernel', 'preference-injector']);
 
@@ -114,14 +115,14 @@ export class PreferenceInjector {
   }
 
   /**
-   * 注入偏好到消息列表
+   * 注入偏好到消息上下文
    *
-   * @param messages - 现有消息列表
+   * @param _messages - 现有消息列表
    * @param tokenBudget - Token 预算
    * @returns 注入结果
    */
   async inject(
-    messages: LLMMessage[],
+    _messages: LLMMessage[],
     tokenBudget?: TokenBudget
   ): Promise<InjectionResult> {
     if (!this.config.enabled) {
@@ -346,11 +347,11 @@ export class PreferenceInjector {
 
   /**
    * 估算 Token 数量
+   *
+   * 使用统一的 TokenEstimator 进行估算，支持中英文智能检测。
    */
   private estimateTokens(text: string): number {
-    // 简化实现：中文约 1.5 字符/token，英文约 4 字符/token
-    // 取折中值 3 字符/token
-    return Math.ceil(text.length / 3);
+    return getTokenEstimator().estimateText(text);
   }
 
   /**
