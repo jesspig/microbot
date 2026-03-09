@@ -142,20 +142,42 @@ export class IPCTransport {
 
   /**
    * 查找 Agent Service 路径
+   * 
+   * 通过 @micro-agent/agent-service 包解析入口点，支持独立安装场景
    */
   private findServicePath(): string {
-    const { cwd } = process;
-    
-    // 尝试常见路径（使用绝对路径）
-    const possiblePaths = [
-      // 相对于当前工作目录
-      `${cwd}/agent-service/src/index.ts`,
-      `${cwd}/src/index.ts`,
-      // 相对于 SDK 包位置（向上查找）
+    // 优先通过包解析找到 agent-service 入口
+    try {
+      // Bun.resolve 从包名解析到实际文件路径
+      const resolvedPath = Bun.resolveSync('@micro-agent/agent-service', process.cwd());
+      // 入口可能是 runtime/index.ts，需要找到 src/index.ts
+      const dir = resolvedPath.replace(/[/\\]runtime[/\\]index\.ts$/, '/src/index.ts');
+      const srcPath = resolvedPath.replace(/[/\\]runtime[/\\]index\.ts$/, '/src/index.ts');
+      
+      // 检查 src/index.ts 是否存在
+      try {
+        const file = Bun.file(srcPath);
+        if (file.size > 0) {
+          return srcPath;
+        }
+      } catch {}
+      
+      // 检查解析出的路径是否有效
+      try {
+        const file = Bun.file(resolvedPath);
+        if (file.size > 0) {
+          return resolvedPath;
+        }
+      } catch {}
+    } catch {}
+
+    // 回退：尝试相对于 SDK 包位置查找（monorepo 场景）
+    const fallbackPaths = [
       `${import.meta.dir}/../../../agent-service/src/index.ts`,
+      `${process.cwd()}/agent-service/src/index.ts`,
     ];
 
-    for (const path of possiblePaths) {
+    for (const path of fallbackPaths) {
       try {
         const file = Bun.file(path);
         if (file.size > 0) {
@@ -166,8 +188,7 @@ export class IPCTransport {
       }
     }
 
-    // 默认返回相对于工作目录的路径
-    return `${cwd}/agent-service/src/index.ts`;
+    throw new Error('无法找到 @micro-agent/agent-service 入口点，请确保已正确安装');
   }
 
   /**
