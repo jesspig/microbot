@@ -296,12 +296,19 @@ export interface LLMToolDefinition {
 /**
  * 内置工具提供者接口
  *
- * 用于依赖注入，允许上层应用（如 CLI）注册工具到 Agent Service。
- * 这解决了反向依赖问题：agent-service 不再直接导入 applications 中的工具。
+ * 【设计说明】
+ * 此接口用于依赖注入，允许上层应用（如 CLI）注册工具到 Agent Service。
+ * 这是解决反向依赖问题的正确设计模式：
+ *
+ * - 问题：agent-service 不应直接导入 applications 中的工具，否则违反分层架构
+ * - 解决：通过此接口，上层应用可以实现并注册自己的工具提供者
+ * - 原则：遵循依赖倒置原则（DIP），高层模块和低层模块都依赖抽象
  *
  * 支持两种模式：
  * 1. 嵌入式模式（同进程）：通过 getTools() 返回工具实例
  * 2. IPC 模式（多进程）：通过 getToolsPath() 返回工具模块路径，由 Agent Service 动态加载
+ *
+ * @see applications/cli/src/modules/tools-init.ts - CLI 中的实现示例
  */
 export interface BuiltinToolProvider {
   /**
@@ -321,8 +328,11 @@ export interface BuiltinToolProvider {
 /**
  * 内置技能提供者接口
  *
- * 用于依赖注入，允许上层应用（如 CLI）注册技能到 Agent Service。
- * 这解决了反向依赖问题：agent-service 不再直接导入 applications 中的技能。
+ * 【设计说明】
+ * 与 BuiltinToolProvider 类似，用于依赖注入解决反向依赖问题。
+ * 允许上层应用注册技能到 Agent Service，而无需 agent-service 直接导入 applications 模块。
+ *
+ * @see applications/cli/src/modules/skills-init.ts - CLI 中的实现示例
  */
 export interface BuiltinSkillProvider {
   /**

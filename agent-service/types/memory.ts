@@ -2,6 +2,8 @@
  * 记忆类型定义
  */
 
+import type { KnowledgeSourceMetadata } from './knowledge';
+
 /** 记忆类型 */
 export type MemoryType =
   | 'preference'
@@ -16,8 +18,11 @@ export type MemoryType =
 /** 记忆类型字符串（用于序列化） */
 export type MemoryTypeString = MemoryType;
 
+/** 记忆状态 */
+export type MemoryStatus = 'active' | 'archived' | 'protected' | 'deleted';
+
 /** 记忆元数据 */
-export interface MemoryMetadata {
+export interface MemoryMetadata extends Partial<KnowledgeSourceMetadata> {
   /** 来源通道 */
   channel?: string;
   /** 提及的实体 */
@@ -33,32 +38,15 @@ export interface MemoryMetadata {
     confidence: number;
     matchedPatterns: string[];
   };
-  /** 文档 ID（知识库来源） */
-  documentId?: string;
-  /** 文档路径（知识库来源） */
-  documentPath?: string;
-  /** 文件类型（知识库来源） */
-  fileType?: string;
-  /** 文档标题 */
-  documentTitle?: string;
-  /** 分块索引 */
-  chunkIndex?: number;
-  /** 分块起始位置 */
-  chunkStart?: number;
-  /** 分块结束位置 */
-  chunkEnd?: number;
-  /** 相似度分数 */
-  score?: number;
-  /** 页码 */
-  pageNumber?: number;
-  /** 章节名称 */
-  section?: string;
-  /** 置信度 (0-1) */
-  confidence?: number;
-  /** 字符范围 [start, end] */
-  charRange?: [number, number];
   /** 原始消息数量（用于摘要） */
   originalMessageCount?: number;
+  // ========== 偏好相关字段 ==========
+  /** 偏好类型（like/dislike/want/avoid/habit/style） */
+  preferenceType?: string;
+  /** 偏好主题 */
+  subject?: string;
+  /** 来源消息 */
+  sourceMessage?: string;
 }
 
 /** 记忆统计信息 */
@@ -93,6 +81,10 @@ export interface MemoryEntry {
   accessCount: number;
   /** 重要性分数（0-1） */
   importance: number;
+  /** 记忆稳定性/强度（0-1），基于 Ebbinghaus 遗忘曲线 */
+  stability: number;
+  /** 记忆状态 */
+  status: MemoryStatus;
   /** 关联的会话键 */
   sessionKey?: string;
   /** 元数据 */

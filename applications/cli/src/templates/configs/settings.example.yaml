@@ -31,9 +31,9 @@ agents:
   # └──────────┴─────────────────────────────────┴───────────────────────────┘
   # ─────────────────────────────────────────────────────────────────────────
   models:
-    chat: ollama/qwen3.5:0.8b   # 必填，格式：<provider>/<model>
+    chat: ollama/qwen3.5:0.8b # 必填，格式：<provider>/<model>
     # tool: ollama/qwen3        # 可选，工具调用模型
-    # embed: openai/text-embedding-3-small  # 可选，嵌入模型
+    embed: ollama/qwen3-embedding:0.6b # 可选，嵌入模型
     # vision: ollama/qwen3-vl   # 可选，视觉模型
     # coder: ollama/qwen3       # 可选，编程模型
     # intent: ollama/qwen3      # 可选，意图识别模型
@@ -41,22 +41,89 @@ agents:
   # ─────────────────────────────────────────────────────────────────────────
   # 记忆系统配置（可选）
   # 启用后 Agent 会记住历史对话，支持跨会话检索
+  #
+  # ┌─────────────────────┬─────────────────────────────────┬─────────────────┐
+  # │ 字段                │ 说明                            │ 默认值          │
+  # ├─────────────────────┼─────────────────────────────────┼─────────────────┤
+  # │ enabled             │ 是否启用                        │ false           │
+  # │ storagePath         │ 存储路径                        │ ~/.micro-agent/memory │
+  # │ shortTerm           │ 短期记忆配置                    │ 见下方          │
+  # │ longTerm            │ 长期记忆配置                    │ 见下方          │
+  # │ retrieval           │ 检索配置                        │ 见下方          │
+  # │ consolidation       │ 记忆整合配置                    │ 见下方          │
+  # │ multiEmbed          │ 多嵌入模型配置                  │ 见下方          │
+  # └─────────────────────┴─────────────────────────────────┴─────────────────┘
   # ─────────────────────────────────────────────────────────────────────────
   memory:
-    enabled: true                    # 是否启用记忆系统
-    # storagePath: ~/.micro-agent/memory   # 存储路径
-    # autoSummarize: true               # 自动摘要
-    # summarizeThreshold: 20            # 触发摘要的消息阈值
-    # idleTimeout: 300000               # 空闲超时触发摘要（毫秒）
-    # shortTermRetentionDays: 7         # 短期记忆保留天数
-    # searchLimit: 10                   # 检索结果数量限制（1-50）
+    enabled: true
+    # storagePath: ~/.micro-agent/memory
+
+    # 短期记忆：会话历史、近期操作
+    # shortTerm:
+    #   maxMessages: 100           # 最大消息数
+    #   retentionDays: 7           # 保留天数
+    #   compressThreshold: 50      # 触发压缩的消息阈值
+    #   idleTimeoutMs: 300000      # 空闲超时（毫秒）
+
+    # 长期记忆：偏好、事实、决策
+    # longTerm:
+    #   vectorStore: lancedb       # 向量存储后端
+    #   forgettingHalfLife: 30     # 遗忘半衰期（天）
+    #   importanceThreshold: 0.3   # 重要性阈值
+
+    # 检索配置：向量+全文混合检索
+    # retrieval:
+    #   mode: auto                 # 模式：auto(自适应)/vector/fulltext/hybrid
+    #                              # auto: 根据embed配置自动选择，未配置用全文检索
+    #   defaultLimit: 10           # 默认返回数量
+    #   maxLimit: 50               # 最大返回数量
+    #   minScore: 0.0              # 最小相似度阈值
+    #   vectorWeight: 1.0          # 向量检索权重（hybrid模式）
+    #   fulltextWeight: 1.0        # 全文检索权重（hybrid模式）
+    #   rrfK: 60                   # RRF 融合常数 K
+    #   decayHalfLife: 30          # 时间衰减半衰期（天）
+
+    # 记忆整合：短期→长期自动转化
+    # consolidation:
+    #   messageThreshold: 20       # 触发整合的消息阈值
+    #   idleTimeout: 300000        # 空闲超时触发（毫秒）
+    #   eventDriven: true          # 是否启用事件驱动整合
+    #   retentionDays: 30          # 整合后保留原始消息的天数
+    #   maxSummaryLength: 500      # 最大摘要长度
+
+    # 分块配置：文档分块策略
+    # chunking:
+    #   chunkSize: 1500            # 分块大小
+    #   chunkOverlap: 150          # 分块重叠
+    #   strategy: recursive        # 分块策略：fixed/recursive/semantic
+    #   separators:                # 递归分块分隔符（recursive模式）
+    #     - "\n\n"
+    #     - "\n"
+    #     - " "
+    #     - ""
+
+    # 多嵌入模型配置：支持模型切换和向量迁移
+    # multiEmbed:
+    #   enabled: false             # 是否启用多模型支持
+    #   maxModels: 3               # 最大保留模型数
+    #   autoMigrate: true          # 切换模型时自动迁移向量
+    #   batchSize: 100             # 迁移批次大小
+    #   migrateInterval: 1000      # 迁移批次间隔（毫秒）
+
+    # 会话上下文管理
+    # session:
+    #   contextInjection: auto     # 上下文注入模式：auto/manual/disabled
+    #   maxHistoryMessages: 20     # 最大注入历史消息数
+    #   maxRelatedSessions: 3      # 最大注入相关会话数
+    #   autoTitle: true            # 自动生成会话标题
+    #   retentionDays: 30          # 会话保留天数
 
   # ─────────────────────────────────────────────────────────────────────────
   # 引用溯源配置（可选）
   # 知识库检索时标注来源，帮助用户追溯信息出处
   # ─────────────────────────────────────────────────────────────────────────
   citation:
-    enabled: true                    # 是否启用引用溯源
+    enabled: true # 是否启用引用溯源
     # minConfidence: 0.5              # 最小置信度阈值 (0-1)，低于此值不生成引用
     # maxCitations: 5                 # 最大引用数量
     # format: numbered                # 引用格式: numbered(编号), bracket(方括号), footnote(脚注)

@@ -5,3 +5,5 @@
  */
 
 export { runExtCommand } from './ext';
+export { runMemoryCommand } from './memory';
+export { runSessionCommand } from './session';

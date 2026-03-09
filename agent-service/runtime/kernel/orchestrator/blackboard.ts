@@ -16,6 +16,7 @@ import type {
   SessionState,
   ErrorRecord,
   ReActState,
+  WorkingMemory,
 } from '../../../types/blackboard';
 import type { ToolResult, ToolCall } from '../../../types/tool';
 
@@ -38,6 +39,7 @@ export class BlackboardImpl implements Blackboard {
   toolResults: Map<string, ToolResult> = new Map();
   sessionState: SessionState;
   errors: ErrorRecord[] = [];
+  workingMemory: WorkingMemory;
 
   constructor(maxIterations: number = 10) {
     this.id = generateId();
@@ -46,6 +48,12 @@ export class BlackboardImpl implements Blackboard {
       maxIterations,
       startTime: Date.now(),
       lastUpdateTime: Date.now(),
+    };
+    this.workingMemory = {
+      goals: [],
+      activeSubTasks: [],
+      context: {},
+      lastUpdated: Date.now(),
     };
   }
 
@@ -212,6 +220,12 @@ export class BlackboardImpl implements Blackboard {
       currentPlan: this.currentPlan,
       sessionState: { ...this.sessionState },
       errors: [...this.errors],
+      workingMemory: {
+        goals: [...this.workingMemory.goals],
+        activeSubTasks: [...this.workingMemory.activeSubTasks],
+        context: { ...this.workingMemory.context },
+        lastUpdated: this.workingMemory.lastUpdated,
+      },
       snapshotTime: Date.now(),
     };
   }
@@ -223,6 +237,12 @@ export class BlackboardImpl implements Blackboard {
     this.currentPlan = snapshot.currentPlan;
     this.sessionState = { ...snapshot.sessionState };
     this.errors = [...snapshot.errors];
+    this.workingMemory = {
+      goals: [...snapshot.workingMemory.goals],
+      activeSubTasks: [...snapshot.workingMemory.activeSubTasks],
+      context: { ...snapshot.workingMemory.context },
+      lastUpdated: snapshot.workingMemory.lastUpdated,
+    };
 
     // 重建工具结果缓存
     this.toolResults.clear();
@@ -260,6 +280,12 @@ export class BlackboardImpl implements Blackboard {
       maxIterations: this.sessionState.maxIterations,
       startTime: Date.now(),
       lastUpdateTime: Date.now(),
+    };
+    this.workingMemory = {
+      goals: [],
+      activeSubTasks: [],
+      context: {},
+      lastUpdated: Date.now(),
     };
   }
 

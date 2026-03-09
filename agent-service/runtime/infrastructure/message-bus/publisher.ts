@@ -2,7 +2,7 @@
  * 消息总线
  */
 
-import type { InboundMessage, OutboundMessage } from '@micro-agent/types';
+import type { InboundMessage, OutboundMessage } from '../../../types/message';
 
 /**
  * 消息总线

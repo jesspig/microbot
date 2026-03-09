@@ -26,6 +26,8 @@ export interface GenerationConfig {
   frequencyPenalty?: number;
   /** 是否启用思考/推理模式 */
   enableThinking?: boolean;
+  /** 响应格式配置 */
+  responseFormat?: { type: 'text' | 'json_object' };
 }
 
 /** Provider 厂商类型 */

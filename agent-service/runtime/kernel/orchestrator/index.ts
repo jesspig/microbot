@@ -125,6 +125,8 @@ export class AgentOrchestrator {
         content: msg.content,
         sessionKey,
         importance: 0.5,
+        stability: 1.0,
+        status: 'active',
       });
     }
 
@@ -198,14 +200,31 @@ export class AgentOrchestrator {
       messages.push({ role: 'assistant', content: result.answer });
       await this.updateSessionHistory(sessionKey, messages);
 
-      // 存储记忆
+      // 存储记忆：同时保存用户输入和 AI 回复
       if (this.memoryManager && result.answer) {
-        await this.memoryManager.save({
-          type: 'conversation',
-          content: msg.content,
-          sessionKey,
-          importance: 0.5,
-        });
+        try {
+          // 保存用户输入
+          await this.memoryManager.save({
+            type: 'conversation',
+            content: `用户: ${msg.content}`,
+            sessionKey,
+            importance: 0.5,
+            stability: 1.0,
+            status: 'active',
+          });
+          // 保存 AI 回复
+          await this.memoryManager.save({
+            type: 'conversation',
+            content: `助手: ${result.answer.slice(0, 500)}`,
+            sessionKey,
+            importance: 0.6,
+            stability: 1.0,
+            status: 'active',
+          });
+          log.info('记忆已存储', { sessionKey, userMsgLength: msg.content.length, answerLength: result.answer.length });
+        } catch (error) {
+          log.warn('记忆存储失败', { error: (error as Error).message });
+        }
       }
 
       // 发送响应内容到客户端
@@ -287,7 +306,8 @@ export class AgentOrchestrator {
         // === 判断是否需要工具调用 ===
         if (!response.hasToolCalls || !response.toolCalls?.length) {
           // 没有工具调用，返回最终答案
-          const answer = response.content || '抱歉，我无法生成有效的响应。';
+          // 优先使用 content，如果为空则使用 reasoning
+          const answer = response.content || response.reasoning || '抱歉，我无法生成有效的响应。';
           log.info('ReAct 完成', { 
             iteration: state.iterations, 
             answer: answer.slice(0, 1000),
@@ -542,37 +562,105 @@ export class AgentOrchestrator {
     }
   }
 
-  /**
-   * 获取会话历史
-   */
-  private async getSessionHistory(sessionKey: string): Promise<LLMMessage[]> {
-    if (this.sessionStore) {
-      const session = this.sessionStore.getOrCreate(sessionKey);
-      return session.messages.map((m) => ({
-        role: m.role as 'system' | 'user' | 'assistant' | 'tool',
-        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-      }));
-    }
-    return this.sessionHistory.get(sessionKey) ?? [];
-  }
+    /**
 
-  /**
-   * 更新会话历史
-   */
-  private async updateSessionHistory(sessionKey: string, messages: LLMMessage[]): Promise<void> {
-    if (this.sessionStore) {
-      const newMessages = messages.slice((this.sessionStore.get(sessionKey)?.messages.length ?? 0));
-      for (const msg of newMessages) {
-        this.sessionStore.appendMessage(sessionKey, {
-          role: msg.role as 'user' | 'assistant',
-          content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-          timestamp: Date.now(),
-        });
+     * 获取会话历史
+
+     */
+
+    private async getSessionHistory(sessionKey: string): Promise<LLMMessage[]> {
+
+      if (this.sessionStore) {
+
+        const session = this.sessionStore.getOrCreate(sessionKey);
+
+        const messages = session.messages.map((m) => ({
+
+          role: m.role as 'system' | 'user' | 'assistant' | 'tool',
+
+          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+
+          toolCallId: m.tool_call_id,
+
+          toolCalls: m.tool_calls?.map(tc => ({
+
+            id: tc.id,
+
+            name: tc.name,
+
+            arguments: tc.arguments,
+
+          })),
+
+        }));
+
+        log.info('会话历史已加载', { sessionKey, messageCount: messages.length, updatedAt: session.updatedAt.toISOString() });
+
+        return messages;
+
       }
-    } else {
-      this.sessionHistory.set(sessionKey, messages);
+
+      const memHistory = this.sessionHistory.get(sessionKey) ?? [];
+
+      log.info('会话历史从内存加载', { sessionKey, messageCount: memHistory.length });
+
+      return memHistory;
+
     }
-  }
+
+  
+
+    /**
+
+     * 更新会话历史
+
+     */
+
+    private async updateSessionHistory(sessionKey: string, messages: LLMMessage[]): Promise<void> {
+
+      if (this.sessionStore) {
+
+        const existingCount = this.sessionStore.get(sessionKey)?.messages.length ?? 0;
+
+        const newMessages = messages.slice(existingCount);
+
+        for (const msg of newMessages) {
+
+          this.sessionStore.appendMessage(sessionKey, {
+
+            role: msg.role as 'user' | 'assistant' | 'system' | 'tool',
+
+            content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+
+            timestamp: Date.now(),
+
+            tool_call_id: msg.toolCallId,
+
+            tool_calls: msg.toolCalls?.map(tc => ({
+
+              id: tc.id,
+
+              name: tc.name,
+
+              arguments: tc.arguments,
+
+            })),
+
+          });
+
+        }
+
+        log.info('会话历史已更新', { sessionKey, existingCount, newCount: newMessages.length, total: messages.length });
+
+      } else {
+
+        this.sessionHistory.set(sessionKey, messages);
+
+        log.info('会话历史已保存到内存', { sessionKey, messageCount: messages.length });
+
+      }
+
+    }
 
   /**
    * 构建上下文

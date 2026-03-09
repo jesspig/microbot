@@ -18,9 +18,9 @@ export { MessageBus } from './infrastructure/message-bus';
 export { SessionStore } from './infrastructure/database';
 export type { Session, SessionMessage, SessionMetadata, SessionStoreConfig } from './infrastructure/database';
 
-// Cache
-export { KVMemoryStore } from './infrastructure/cache';
-export type { KVMemoryStoreConfig } from './infrastructure/cache';
+// Memory Store (原 cache 模块)
+export { KVMemoryStore } from './infrastructure/database';
+export type { KVMemoryStoreConfig } from './infrastructure/database';
 
 // Config
 export {
@@ -84,20 +84,16 @@ export type { Hook, HookContext, HookResult } from './hook-system';
 export {
   ModelRouter,
   createModelRouter,
-  OpenAICompatibleProvider,
-  createOpenAICompatibleProvider,
+  createLLMProvider,
   AnthropicProvider,
   createAnthropicProvider,
-  LocalProvider,
-  createLocalProvider,
 } from './provider/llm';
 export type {
   ModelRouterConfig,
   RouteResult,
   ModelConfig as LLMModelConfig,
-  OpenAICompatibleConfig,
+  LLMProviderConfig,
   AnthropicConfig,
-  LocalProviderConfig,
   LLMProvider,
   GenerationConfig,
   ProviderCapabilities,
@@ -164,38 +160,39 @@ export type {
   MCPClientCapabilities,
 } from './capability/mcp';
 
-// Memory System
+// Memory System - 基础能力
 export {
-  MemoryManager,
   MemoryStore,
   OpenAIEmbedding,
   NoEmbedding,
   createEmbeddingService,
   MemorySearcher,
-  ConversationSummarizer,
-  classifyMemory,
-  classifyMemoriesBatch,
+  forgettingCurve,
 } from './capability/memory';
 export type {
-  MemoryManagerConfig,
   MemoryEntry,
   MemoryMetadata,
-  Summary,
   MemoryStats,
   SearchOptions,
   MemoryFilter,
-  EmbeddingService,
-  SummarizerConfig,
 } from './capability/memory';
 
-// Knowledge System
+// Memory System - SDK 高级封装（重导出）
 export {
-  KnowledgeBaseManager,
+  MemoryManager,
+  ConversationSummarizer,
+  classifyMemory,
+  type MemoryManagerConfig,
+  type Summary,
+  type SummarizerConfig,
+} from './capability/memory';
+
+// Knowledge System - 基础能力
+export {
   KnowledgeRetriever,
   createDocumentScanner,
   createDocumentIndexer,
   createRetriever,
-  setKnowledgeBase,
 } from './capability/knowledge';
 export type {
   KnowledgeBaseConfig,
@@ -204,6 +201,13 @@ export type {
   KnowledgeSearchResult,
   RetrieverConfig,
 } from './capability/knowledge';
+
+// Knowledge System - SDK 高级封装（重导出）
+export {
+  KnowledgeBaseManager,
+  setKnowledgeBase,
+  getKnowledgeBase,
+} from '@micro-agent/sdk';
 
 // Plugin System
 export {

@@ -144,18 +144,18 @@ curl -X GET http://127.0.0.1:3000/v1/models \
 ## Provider 模块
 
 ```typescript
-import { OpenAICompatibleProvider } from '@micro-agent/sdk/providers';
+import { createLLMProvider } from '@micro-agent/sdk/providers';
 
-const provider = new OpenAICompatibleProvider({
+const provider = createLLMProvider({
   baseUrl: 'https://api.deepseek.com/v1',
   apiKey: 'your-key',
-  model: 'deepseek-chat',
+  vendor: 'deepseek',
 });
 
 // 聊天
 const response = await provider.chat([
   { role: 'user', content: 'Hello' }
-]);
+], undefined, 'deepseek-chat');
 ```
 
 ## Storage 模块
