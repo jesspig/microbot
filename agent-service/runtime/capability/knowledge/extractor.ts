@@ -6,8 +6,6 @@ import { readFile } from 'fs/promises';
 import { basename, extname } from 'path';
 import type { KnowledgeDocType } from './types';
 
-// getLogger 已导入但 log 变量未使用，此处保留 getLogger 供将来使用
-// import { getLogger } from '@logtape/logtape';
 
 /**
  * 提取文档内容
