@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "types": ["bun-types"]
+  },
+  "include": ["src/**/*", "../extensions/tool/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
