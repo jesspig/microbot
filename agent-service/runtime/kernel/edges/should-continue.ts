@@ -5,10 +5,16 @@
  * 1. 检查是否有错误需要终止
  * 2. 检查是否达到最大迭代
  * 3. 检查是否需要执行工具
+ * 4. 检查执行计划状态
  */
 
 import { END } from "@langchain/langgraph";
 import type { AgentState } from "../state";
+import {
+  hasExecutionPlan,
+  isPlanCompleted,
+  getPlanProgress,
+} from "../state";
 
 /** 路由决策类型 */
 export type RouteDecision = "tools" | "end" | "error";
@@ -30,22 +36,35 @@ export function createShouldContinueEdge(config?: { maxConsecutiveErrors?: numbe
       return "error";
     }
 
-    // 3. 达到最大迭代
+    // 3. 执行计划状态检测
+    if (hasExecutionPlan(state)) {
+      // 计划已完成
+      if (isPlanCompleted(state)) {
+        return "end";
+      }
+      // 失败任务过多（超过2个）
+      const progress = getPlanProgress(state);
+      if (progress.failed >= 2) {
+        return "error";
+      }
+    }
+
+    // 4. 达到最大迭代
     if (state.iterations >= state.maxIterations) {
       return "end";
     }
 
-    // 4. 已完成状态
+    // 5. 已完成状态
     if (state.reactState === "completed") {
       return "end";
     }
 
-    // 5. 检查是否有待执行的工具调用
+    // 6. 检查是否有待执行的工具调用
     if (state.pendingToolCalls.length > 0) {
       return "tools";
     }
 
-    // 6. 没有工具调用，结束
+    // 7. 没有工具调用，结束
     return "end";
   };
 }

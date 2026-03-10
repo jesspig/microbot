@@ -441,9 +441,11 @@ export function createPlannerNode(config: LangGraphAgentConfig) {
         levels: executionOrder.length,
       });
 
-      // 返回状态更新（添加到 metadata）
+      // 返回状态更新
       return {
-        metadata: { executionPlan: plan },
+        executionPlan: plan,
+        completedTasks: [],
+        failedTasks: [],
         reactState: "thinking",
       };
     } catch (error) {

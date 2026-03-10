@@ -11,7 +11,8 @@
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { AgentState, AgentStateUpdate } from "../state";
-import type { LangGraphAgentConfig, LLMMessage, ToolCall, ReActState } from "../types";
+import type { LangGraphAgentConfig, ToolCall, ReActState } from "../types";
+import type { LLMMessage } from "../../../types/message";
 
 /**
  * 将 LangGraph 消息转换为 LLM 消息格式

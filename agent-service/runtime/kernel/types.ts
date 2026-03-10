@@ -131,13 +131,8 @@ export interface ToolResult {
 // 消息类型
 // ============================================================================
 
-/** LLM 消息格式（内部使用） */
-export interface LLMMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string;
-  toolCalls?: ToolCall[];
-  toolCallId?: string;
-}
+/** LLM 消息格式（重导出自 types/message，支持多模态） */
+export type { LLMMessage } from "../../types/message";
 
 /** 记忆条目 */
 export interface MemoryEntry {

@@ -9,7 +9,8 @@
 
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { AgentState, AgentStateUpdate } from "../state";
-import type { LangGraphAgentConfig, LLMMessage, MemoryEntry, KnowledgeSearchResult } from "../types";
+import type { LangGraphAgentConfig, MemoryEntry, KnowledgeSearchResult } from "../types";
+import type { LLMMessage } from "../../../types/message";
 
 /** 记忆管理器接口 */
 interface MemoryManagerLike {

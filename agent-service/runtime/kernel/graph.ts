@@ -12,6 +12,7 @@ import {
   createThinkingNode,
   createToolsNode,
   createObserveNode,
+  createPlannerNode,
 } from "./nodes";
 import { createShouldContinueEdge, type RouteDecision } from "./edges/should-continue";
 import type { LangGraphAgentConfig, InboundMessage, StreamCallbacks, StateChangeCallbacks } from "./types";
@@ -22,6 +23,7 @@ import type { LangGraphAgentConfig, InboundMessage, StreamCallbacks, StateChange
 export function createAgentGraph(config: LangGraphAgentConfig) {
   // 创建节点
   const contextNode = createBuildContextNode(config);
+  const plannerNode = createPlannerNode(config);
   const thinkingNode = createThinkingNode(config);
   const toolsNode = createToolsNode(config);
   const observeNode = createObserveNode();
@@ -35,13 +37,15 @@ export function createAgentGraph(config: LangGraphAgentConfig) {
   const graph = new StateGraph(ReActAgentState)
     // 添加节点
     .addNode("context", contextNode)
+    .addNode("planner", plannerNode)
     .addNode("thinking", thinkingNode)
     .addNode("tools", toolsNode)
     .addNode("observe", observeNode)
 
     // 添加边
     .addEdge(START, "context")
-    .addEdge("context", "thinking")
+    .addEdge("context", "planner")
+    .addEdge("planner", "thinking")
     .addConditionalEdges(
       "thinking",
       shouldContinue,
