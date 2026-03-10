@@ -8,6 +8,7 @@ import type { LLMMessage, SessionKey } from '../../../types/message';
 import type { SessionStore } from '../../infrastructure/database';
 import { TokenBudget } from './token-budget';
 import { ContextBuilder } from './context-builder';
+import { getTokenEstimator } from './token-estimator';
 import { getLogger } from '@logtape/logtape';
 
 const log = getLogger(['kernel', 'context-manager']);
@@ -45,17 +46,17 @@ export class ContextManager {
   private contextBuilder: ContextBuilder;
 
   constructor(
-    private config: ContextManagerConfig,
+    private _config: ContextManagerConfig,
     private sessionStore?: SessionStore
   ) {
     this.tokenBudget = new TokenBudget({
-      total: config.maxTokens,
-      system: config.systemPromptTokens ?? 1000,
-      tools: config.toolsTokens ?? 500,
+      total: _config.maxTokens,
+      system: _config.systemPromptTokens ?? 1000,
+      tools: _config.toolsTokens ?? 500,
       context: 0,
       rag: 0,
     });
-    this.contextBuilder = new ContextBuilder({ maxHistoryMessages: config.maxHistoryMessages });
+    this.contextBuilder = new ContextBuilder({ maxHistoryMessages: _config.maxHistoryMessages });
   }
 
   /**
@@ -192,11 +193,11 @@ export class ContextManager {
 
   /**
    * 估算 Token 数量
+   *
+   * 使用统一的 TokenEstimator 进行估算，支持中英文智能检测。
    */
   private estimateTokens(message: LLMMessage): number {
-    // 简化实现：按字符数估算
-    const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
-    return Math.ceil(content.length / 4); // 假设 1 token ≈ 4 字符
+    return getTokenEstimator().estimateMessage(message);
   }
 }
 
@@ -204,6 +205,17 @@ export class ContextManager {
 
 // Token Budget
 export { TokenBudget, type TokenBudgetConfig } from './token-budget';
+
+// Token Estimator
+export {
+  TokenEstimator,
+  getTokenEstimator,
+  configureTokenEstimator,
+  resetTokenEstimator,
+  TokenEstimatorConfigSchema,
+  DEFAULT_TOKEN_ESTIMATOR_CONFIG,
+  type TokenEstimatorConfig,
+} from './token-estimator';
 
 // Context Builder
 export { ContextBuilder, type ContextBuilderConfig } from './context-builder';

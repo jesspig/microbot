@@ -4,7 +4,7 @@
  * 将复杂任务分解为可执行的子任务。
  */
 
-import type { LLMProvider, LLMMessage } from '../../../types/provider';
+import type { LLMProvider } from '../../../types/provider';
 import { getLogger } from '@logtape/logtape';
 
 const log = getLogger(['kernel', 'task-decomposer']);

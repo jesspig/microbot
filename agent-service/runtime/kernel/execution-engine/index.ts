@@ -4,7 +4,6 @@
  * 协调工具执行和结果处理。
  */
 
-import type { SubTask } from '../planner/task-decomposer';
 import type { ToolRegistry } from '../../capability/tool-system';
 import type { PlanResult } from '../planner';
 import { ToolExecutor } from './tool-executor';
@@ -38,6 +37,16 @@ export interface ExecutionResult {
   finalResult?: unknown;
   /** 错误信息 */
   error?: string;
+  /** 是否被中止 */
+  aborted?: boolean;
+}
+
+/** 中止执行错误 */
+class _AbortError extends Error {
+  constructor() {
+    super('执行已中止');
+    this.name = 'AbortError';
+  }
 }
 
 /**
@@ -46,12 +55,13 @@ export interface ExecutionResult {
 export class ExecutionEngine {
   private toolExecutor: ToolExecutor;
   private resultHandler: ResultHandler;
+  private isAborted = false;
 
   constructor(
-    private config: ExecutionEngineConfig,
-    private tools: ToolRegistry
+    private _config: ExecutionEngineConfig,
+    private _tools: ToolRegistry
   ) {
-    this.toolExecutor = new ToolExecutor(tools, config);
+    this.toolExecutor = new ToolExecutor(_tools, _config);
     this.resultHandler = new ResultHandler();
   }
 
@@ -65,11 +75,24 @@ export class ExecutionEngine {
       steps: plan.executionOrder.length,
     });
 
+    // 重置中止状态
+    this.isAborted = false;
     const executedTasks: ExecutionResult['executedTasks'] = [];
     let hasError = false;
 
     // 按执行顺序执行任务
     for (const level of plan.executionOrder) {
+      // 检查是否被中止
+      if (this.isAborted) {
+        log.info('[ExecutionEngine] 执行已被中止');
+        return {
+          success: false,
+          executedTasks,
+          error: '执行已中止',
+          aborted: true,
+        };
+      }
+
       // 检查是否有任务失败
       if (hasError) {
         log.warn('[ExecutionEngine] 检测到错误，停止执行');
@@ -93,6 +116,17 @@ export class ExecutionEngine {
       const results = await Promise.allSettled(
         level.map(taskId => this.executeTask(taskId, plan, context))
       );
+
+      // 检查是否在执行过程中被中止
+      if (this.isAborted) {
+        log.info('[ExecutionEngine] 执行已被中止');
+        return {
+          success: false,
+          executedTasks,
+          error: '执行已中止',
+          aborted: true,
+        };
+      }
 
       for (const result of results) {
         if (result.status === 'fulfilled') {
@@ -129,6 +163,15 @@ export class ExecutionEngine {
     plan: PlanResult,
     context?: Record<string, unknown>
   ): Promise<ExecutionResult['executedTasks'][0]> {
+    // 检查是否被中止
+    if (this.isAborted) {
+      return {
+        taskId,
+        success: false,
+        error: '执行已中止',
+      };
+    }
+
     const task = plan.subTasks.find(t => t.id === taskId);
     if (!task) {
       return {
@@ -142,12 +185,31 @@ export class ExecutionEngine {
 
     try {
       const result = await this.toolExecutor.execute(task, context);
+
+      // 执行完成后再次检查中止状态
+      if (this.isAborted) {
+        return {
+          taskId,
+          success: false,
+          error: '执行已中止',
+        };
+      }
+
       return {
         taskId,
         success: true,
         result,
       };
     } catch (error) {
+      // 如果是中止错误
+      if (error instanceof Error && error.name === 'AbortError') {
+        return {
+          taskId,
+          success: false,
+          error: '执行已中止',
+        };
+      }
+
       const errorMsg = error instanceof Error ? error.message : String(error);
       log.error('[ExecutionEngine] 任务执行失败', { taskId, error: errorMsg });
       return {
@@ -160,9 +222,23 @@ export class ExecutionEngine {
 
   /**
    * 中止执行
+   *
+   * 调用此方法会：
+   * 1. 设置中止标志，停止后续任务执行
+   * 2. 中止当前正在执行的工具
    */
   abort(): void {
     log.info('[ExecutionEngine] 中止执行');
-    // TODO: 实现中止逻辑
+    this.isAborted = true;
+
+    // 中止工具执行器中正在执行的任务
+    this.toolExecutor.abort();
+  }
+
+  /**
+   * 检查是否已中止
+   */
+  get isExecutionAborted(): boolean {
+    return this.isAborted;
   }
 }

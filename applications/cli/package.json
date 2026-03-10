@@ -20,7 +20,8 @@
     "start": "bun run src/index.ts start"
   },
   "dependencies": {
-    "@larksuiteoapi/node-sdk": "^1.59.0"
+    "@larksuiteoapi/node-sdk": "^1.59.0",
+    "@micro-agent/client-sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

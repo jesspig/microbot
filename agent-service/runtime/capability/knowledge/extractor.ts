@@ -5,9 +5,7 @@
 import { readFile } from 'fs/promises';
 import { basename, extname } from 'path';
 import type { KnowledgeDocType } from './types';
-import { getLogger } from '@logtape/logtape';
 
-const log = getLogger(['knowledge', 'extractor']);
 
 /**
  * 提取文档内容

@@ -4,7 +4,7 @@
  * 根据子任务生成执行顺序。
  */
 
-import type { LLMProvider, LLMMessage } from '../../../types/provider';
+import type { LLMProvider } from '../../../types/provider';
 import type { SubTask } from './task-decomposer';
 import { getLogger } from '@logtape/logtape';
 
@@ -15,8 +15,8 @@ const log = getLogger(['kernel', 'plan-generator']);
  */
 export class PlanGenerator {
   constructor(
-    private llmProvider: LLMProvider,
-    private model: string
+    private _llmProvider: LLMProvider,
+    private _model: string
   ) {}
 
   /**
@@ -26,8 +26,6 @@ export class PlanGenerator {
     // 简单的拓扑排序
     const visited = new Set<string>();
     const visiting = new Set<string>();
-    const result: string[][] = [];
-    const currentLevel: string[] = [];
 
     const visit = (taskId: string) => {
       if (visited.has(taskId)) return;
@@ -40,14 +38,13 @@ export class PlanGenerator {
 
       const task = subTasks.find(t => t.id === taskId);
       if (task) {
-        for (const depId of task.dependencies) {
-          visit(depId);
+        for (const _depId of task.dependencies) {
+          visit(_depId);
         }
       }
 
       visiting.delete(taskId);
       visited.add(taskId);
-      currentLevel.push(taskId);
     };
 
     // 计算每个任务的入度
@@ -56,7 +53,7 @@ export class PlanGenerator {
       inDegree.set(task.id, 0);
     }
     for (const task of subTasks) {
-      for (const depId of task.dependencies) {
+      for (const _depId of task.dependencies) {
         inDegree.set(task.id, (inDegree.get(task.id) || 0) + 1);
       }
     }

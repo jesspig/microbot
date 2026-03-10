@@ -73,6 +73,7 @@
     "src"
   ],
   "dependencies": {
+    "@micro-agent/agent-service": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {
