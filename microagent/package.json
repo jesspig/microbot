@@ -1,0 +1,28 @@
+{
+  "name": "microagent",
+  "version": "0.1.0",
+  "description": "MicroAgent - 基于 Bun + TypeScript 的超轻量级个人 AI 助手框架",
+  "type": "module",
+  "main": "./runtime/index.ts",
+  "types": "./runtime/index.ts",
+  "scripts": {
+    "dev": "bun --watch ./runtime/index.ts",
+    "build": "bun build ./runtime/index.ts --outdir ./dist --target bun --minify",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "agent",
+    "ai",
+    "llm",
+    "microagent",
+    "assistant"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "@types/bun": "latest"
+  }
+}

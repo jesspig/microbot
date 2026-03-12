@@ -16,7 +16,7 @@ import {
   TimeoutError,
   MaxIterationsError,
   RegistryError,
-} from "../../microagent/runtime/src/errors";
+} from "../../microagent/runtime/errors";
 
 describe("MicroAgentError", () => {
   test("创建基础错误实例", () => {

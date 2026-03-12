@@ -5,12 +5,12 @@
  */
 
 import { test, expect, describe, beforeEach, mock } from "bun:test";
-import { Skill, BaseSkillLoader } from "../../microagent/runtime/src/skill/loader.js";
-import { SkillRegistry } from "../../microagent/runtime/src/skill/registry.js";
-import type { ISkillExtended, ISkillLoaderExtended } from "../../microagent/runtime/src/skill/contract.js";
-import type { SkillConfig, SkillSummary } from "../../microagent/runtime/src/skill/types.js";
-import type { SkillMeta } from "../../microagent/runtime/src/types.js";
-import { RegistryError } from "../../microagent/runtime/src/errors.js";
+import { Skill, BaseSkillLoader } from "../../microagent/runtime/skill/loader";
+import { SkillRegistry } from "../../microagent/runtime/skill/registry";
+import type { ISkillExtended, ISkillLoaderExtended } from "../../microagent/runtime/skill/contract";
+import type { SkillConfig, SkillSummary } from "../../microagent/runtime/skill/types";
+import type { SkillMeta } from "../../microagent/runtime/types";
+import { RegistryError } from "../../microagent/runtime/errors";
 
 // ============================================================================
 // 测试辅助函数和 Mock 实现

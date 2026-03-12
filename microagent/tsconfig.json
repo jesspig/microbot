@@ -12,7 +12,6 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./src",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": false,
@@ -24,9 +23,10 @@
     "noUncheckedIndexedAccess": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@runtime/*": ["./runtime/*"],
+      "@applications/*": ["./applications/*"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["runtime/**/*", "applications/**/*"],
   "exclude": ["node_modules", "dist"]
 }

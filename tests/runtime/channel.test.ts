@@ -5,9 +5,9 @@
  */
 
 import { test, expect, describe, beforeEach, mock } from "bun:test";
-import { BaseChannel } from "../../microagent/runtime/src/channel/base.js";
-import { ChannelManager } from "../../microagent/runtime/src/channel/manager.js";
-import { RegistryError } from "../../microagent/runtime/src/errors.js";
+import { BaseChannel } from "../../microagent/runtime/channel/base";
+import { ChannelManager } from "../../microagent/runtime/channel/manager";
+import { RegistryError } from "../../microagent/runtime/errors";
 import type { 
   ChannelType, 
   ChannelConfig, 
@@ -15,8 +15,8 @@ import type {
   InboundMessage,
   OutboundMessage,
   SendResult 
-} from "../../microagent/runtime/src/channel/types.js";
-import type { ChannelCapabilities, MessageHandler } from "../../microagent/runtime/src/channel/contract.js";
+} from "../../microagent/runtime/channel/types";
+import type { ChannelCapabilities, MessageHandler } from "../../microagent/runtime/channel/contract";
 
 // ============================================================================
 // 测试辅助类
