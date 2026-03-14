@@ -139,29 +139,36 @@ export class DingTalkChannel extends BaseChannel {
 
     const self = this;
 
-    // 创建钉钉 Stream 客户端并链式调用
-    // 注意：connect() 不返回 Promise，需要通过事件监听确认连接成功
-    this.client = new DWClient({
-      clientId,
-      clientSecret,
-    });
+    try {
+      // 创建钉钉 Stream 客户端并链式调用
+      // 注意：connect() 不返回 Promise，需要通过事件监听确认连接成功
+      this.client = new DWClient({
+        clientId,
+        clientSecret,
+      });
 
-    // 注册机器人消息回调（链式调用）
-    this.client
-      .registerCallbackListener(
-        "/v1.0/im/bot/messages/get",
-        async (res: DWClientDownStream) => {
-          console.log("[钉钉] 收到回调消息");
-          await self.handleBotMessage(res);
-        }
-      )
-      .connect();
+      // 注册机器人消息回调（链式调用）
+      this.client
+        .registerCallbackListener(
+          "/v1.0/im/bot/messages/get",
+          async (res: DWClientDownStream) => {
+            console.log("[钉钉] 收到回调消息");
+            await self.handleBotMessage(res);
+          }
+        )
+        .connect();
 
-    console.log("[钉钉] Stream SDK 已启动");
-    this.setConnected(true);
+      console.log("[钉钉] Stream SDK 已启动");
+      this.setConnected(true);
 
-    // 启动定时清理（每小时清理一次过期消息 ID）
-    this.cleanupTimer = setInterval(() => this.cleanupProcessedIds(), 60 * 60 * 1000);
+      // 启动定时清理（每小时清理一次过期消息 ID）
+      this.cleanupTimer = setInterval(() => this.cleanupProcessedIds(), 60 * 60 * 1000);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[钉钉] Stream SDK 启动失败: ${errMsg}`);
+      this.setConnected(false, errMsg);
+      // 不抛出异常，允许其他 Channel 正常启动
+    }
   }
 
   async stop(): Promise<void> {

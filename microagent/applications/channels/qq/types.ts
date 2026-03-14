@@ -20,6 +20,7 @@ export const OP = {
   IDENTIFY: 2,
   RESUME: 6,
   RECONNECT: 7,
+  INVALID_SESSION: 9,
   HELLO: 10,
   HEARTBEAT_ACK: 11,
 } as const;
@@ -52,14 +53,14 @@ export interface QQApiResponse {
 
 /**
  * QQ 频道机器人配置
+ * 
+ * 注意：个人助理场景强制使用沙箱环境，不暴露在公共域
  */
 export interface QQBotConfig extends ChannelConfig {
   /** AppID（机器人ID） */
   appId: string;
   /** ClientSecret（机器人密钥） */
   clientSecret: string;
-  /** 是否沙箱环境 */
-  sandbox?: boolean | undefined;
   /** 允许发送消息的频道列表 */
   allowChannels?: string[] | undefined;
   /** 允许发送消息的用户列表 */

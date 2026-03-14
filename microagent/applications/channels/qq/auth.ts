@@ -5,10 +5,12 @@
  */
 
 import type { QQBotConfig, AccessTokenResponse, GatewayResponse } from "./types.js";
-import { TOKEN_URL, API_BASE, SANDBOX_API_BASE } from "./types.js";
+import { TOKEN_URL, SANDBOX_API_BASE } from "./types.js";
 
 /**
  * QQ 认证管理器
+ * 
+ * 注意：个人助理场景强制使用沙箱环境
  */
 export class QQAuth {
   private accessToken: string | null = null;
@@ -17,10 +19,10 @@ export class QQAuth {
   constructor(private config: QQBotConfig) {}
 
   /**
-   * 获取 API 基础地址
+   * API 基础地址（强制沙箱环境）
    */
   get apiBase(): string {
-    return this.config.sandbox ? SANDBOX_API_BASE : API_BASE;
+    return SANDBOX_API_BASE;
   }
 
   /**

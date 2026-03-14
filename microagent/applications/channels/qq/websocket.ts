@@ -97,6 +97,20 @@ export class QQWebSocket {
         this.reconnect();
         break;
 
+      case OP.INVALID_SESSION:
+        // OP 9 表示会话无效，需要重新 IDENTIFY
+        console.log("[QQ] 收到 INVALID_SESSION，可能原因：");
+        console.log("  1. intents 参数包含未开通权限的事件");
+        console.log("  2. token 无效或已过期");
+        console.log("  3. 沙箱环境权限受限");
+        console.log(`  原始数据: ${JSON.stringify(msg.d)}`);
+        // 清除 token 缓存，下次重新获取
+        this.auth.clear();
+        // 不重连，等待人工检查配置
+        this.running = false;
+        this.onConnectionChange?.(false, "INVALID_SESSION: 请检查 QQ 开放平台的 Intents 权限配置");
+        break;
+
       case OP.HEARTBEAT_ACK:
         // 心跳确认（静默）
         break;
@@ -107,7 +121,7 @@ export class QQWebSocket {
         break;
 
       default:
-        console.log(`[QQ] 收到未知 OP: ${msg.op}`);
+        console.log(`[QQ] 收到未知 OP: ${msg.op}, 数据: ${JSON.stringify(msg.d)}`);
         break;
     }
   }
@@ -142,8 +156,15 @@ export class QQWebSocket {
   private async sendIdentify(): Promise<void> {
     const token = await this.auth.getAccessToken();
 
-    // QQ 开放平台 intents
-    const intents = (1 << 0) | (1 << 1) | (1 << 9) | (1 << 12) | (1 << 25) | (1 << 30);
+    // QQ 开放平台 intents 配置
+    // 文档: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html
+    //
+    // 私域机器人 intents:
+    // - GUILD_MESSAGES (1 << 9): 频道全部消息（私域机器人专用）
+    // - GROUP_AND_C2C_EVENT (1 << 25): 群聊和单聊消息
+    const GUILD_MESSAGES = 1 << 9;
+    const GROUP_AND_C2C_EVENT = 1 << 25;
+    const intents = GUILD_MESSAGES | GROUP_AND_C2C_EVENT;
 
     const identify = {
       op: OP.IDENTIFY,
@@ -159,7 +180,7 @@ export class QQWebSocket {
       },
     };
 
-    console.log(`[QQ] 发送 IDENTIFY, intents: ${intents}`);
+    console.log(`[QQ] 发送 IDENTIFY, intents: ${intents} (私域机器人)`);
     this.ws?.send(JSON.stringify(identify));
   }
 
