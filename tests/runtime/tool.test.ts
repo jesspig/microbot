@@ -5,12 +5,12 @@
  */
 
 import { test, expect, describe, beforeEach } from "bun:test";
-import { BaseTool } from "../../microagent/runtime/src/tool/base.js";
-import { ToolRegistry, TOOL_GROUPS } from "../../microagent/runtime/src/tool/registry.js";
-import type { IToolExtended } from "../../microagent/runtime/src/tool/contract.js";
-import type { ToolParameterSchema, ToolResult } from "../../microagent/runtime/src/tool/types.js";
-import type { ITool } from "../../microagent/runtime/src/contracts.js";
-import { RegistryError, ToolInputError } from "../../microagent/runtime/src/errors.js";
+import { BaseTool } from "../../microagent/runtime/tool/base";
+import { ToolRegistry, TOOL_GROUPS } from "../../microagent/runtime/tool/registry";
+import type { IToolExtended } from "../../microagent/runtime/tool/contract";
+import type { ToolParameterSchema, ToolResult } from "../../microagent/runtime/tool/types";
+import type { ITool } from "../../microagent/runtime/contracts";
+import { RegistryError, ToolInputError } from "../../microagent/runtime/errors";
 
 // ============================================================================
 // 测试工具类

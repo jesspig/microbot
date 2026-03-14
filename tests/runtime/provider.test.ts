@@ -5,16 +5,16 @@
  */
 
 import { test, expect, describe, beforeEach, mock } from "bun:test";
-import { BaseProvider } from "../../microagent/runtime/src/provider/base.js";
-import { ProviderRegistry } from "../../microagent/runtime/src/provider/registry.js";
-import type { IProviderExtended } from "../../microagent/runtime/src/provider/contract.js";
+import { BaseProvider } from "../../microagent/runtime/provider/base";
+import { ProviderRegistry } from "../../microagent/runtime/provider/registry";
+import type { IProviderExtended } from "../../microagent/runtime/provider/contract";
 import type {
   ProviderConfig,
   ProviderCapabilities,
   ProviderStatus,
-} from "../../microagent/runtime/src/provider/types.js";
-import type { ChatRequest, ChatResponse } from "../../microagent/runtime/src/types.js";
-import { RegistryError } from "../../microagent/runtime/src/errors.js";
+} from "../../microagent/runtime/provider/types";
+import type { ChatRequest, ChatResponse } from "../../microagent/runtime/types";
+import { RegistryError } from "../../microagent/runtime/errors";
 
 // ============================================================================
 // Mock 实现

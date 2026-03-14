@@ -5,11 +5,11 @@
  */
 
 import { test, expect, describe, beforeEach, mock, fn } from "bun:test";
-import type { ChatRequest, ChatResponse, ToolDefinition, ToolCall } from "../../microagent/runtime/src/types";
-import type { IProvider, ITool } from "../../microagent/runtime/src/contracts";
-import { ToolRegistry } from "../../microagent/runtime/src/tool/registry";
-import { AgentLoop } from "../../microagent/runtime/src/kernel/agent-loop";
-import type { AgentConfig, AgentState, AgentEvent, AgentResult } from "../../microagent/runtime/src/kernel/types";
+import type { ChatRequest, ChatResponse, ToolDefinition, ToolCall } from "../../microagent/runtime/types";
+import type { IProvider, ITool } from "../../microagent/runtime/contracts";
+import { ToolRegistry } from "../../microagent/runtime/tool/registry";
+import { AgentLoop } from "../../microagent/runtime/kernel/agent-loop";
+import type { AgentConfig, AgentState, AgentEvent, AgentResult } from "../../microagent/runtime/kernel/types";
 
 // ============================================================================
 // Mock 工具

@@ -5,14 +5,14 @@
  */
 
 import { test, expect, describe, beforeEach } from "bun:test";
-import type { Message, SessionMetadata, SkillMeta } from "../../microagent/runtime/src/types";
-import type { IMemoryExtended, ISkillExtended } from "../../microagent/runtime/src/contracts";
-import type { MemoryConfig, MemorySearchResult, MemoryEntry } from "../../microagent/runtime/src/memory/types";
-import type { SkillConfig, SkillSummary } from "../../microagent/runtime/src/skill/types";
-import type { SessionConfig, SessionState, SessionSnapshot, ContextBuildOptions } from "../../microagent/runtime/src/session/types";
-import { Session, SessionManager } from "../../microagent/runtime/src/session/manager";
-import { ContextBuilder } from "../../microagent/runtime/src/session/context-builder";
-import { SessionError } from "../../microagent/runtime/src/errors";
+import type { Message, SessionMetadata, SkillMeta } from "../../microagent/runtime/types";
+import type { IMemoryExtended, ISkillExtended } from "../../microagent/runtime/contracts";
+import type { MemoryConfig, MemorySearchResult, MemoryEntry } from "../../microagent/runtime/memory/types";
+import type { SkillConfig, SkillSummary } from "../../microagent/runtime/skill/types";
+import type { SessionConfig, SessionState, SessionSnapshot, ContextBuildOptions } from "../../microagent/runtime/session/types";
+import { Session, SessionManager } from "../../microagent/runtime/session/manager";
+import { ContextBuilder } from "../../microagent/runtime/session/context-builder";
+import { SessionError } from "../../microagent/runtime/errors";
 
 // ============================================================================
 // Mock 实现

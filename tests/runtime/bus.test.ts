@@ -5,8 +5,8 @@
  */
 
 import { test, expect, describe, beforeEach, afterEach, mock } from "bun:test";
-import { EventBus, createEventBus, EventMap } from "../../microagent/runtime/src/bus/events.js";
-import { AsyncQueue, createMessageQueue } from "../../microagent/runtime/src/bus/queue.js";
+import { EventBus, createEventBus, EventMap } from "../../microagent/runtime/bus/events";
+import { AsyncQueue, createMessageQueue } from "../../microagent/runtime/bus/queue";
 
 // ============================================================================
 // EventBus 测试

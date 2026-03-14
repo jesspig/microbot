@@ -11,8 +11,8 @@ import {
   type MemoryConfig,
   type MemoryEntry,
   type MemorySearchResult,
-} from "../../microagent/runtime/src/memory/index.js";
-import type { Message } from "../../microagent/runtime/src/types.js";
+} from "../../microagent/runtime/memory";
+import type { Message } from "../../microagent/runtime/types";
 
 // ============================================================================
 // 测试辅助类：BaseMemory 具体实现
