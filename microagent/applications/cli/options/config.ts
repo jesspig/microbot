@@ -17,6 +17,15 @@ import {
   HISTORY_DIR,
   SKILLS_DIR,
 } from "../../shared/constants.js";
+import {
+  cliLogger,
+  createTimer,
+  logMethodCall,
+  logMethodReturn,
+  logMethodError,
+} from "../../shared/logger.js";
+
+const logger = cliLogger();
 
 // ============================================================================
 // 常量定义
@@ -57,11 +66,16 @@ const ROOT_TEMPLATE_FILES: Array<{ src: string; dest: string }> = [
  * @returns 是否成功复制
  */
 async function copyFile(src: string, dest: string): Promise<boolean> {
+  const timer = createTimer();
+  logMethodCall(logger, { method: "copyFile", module: "CLI", params: { src, dest } });
+
   try {
     const srcFile = Bun.file(src);
     const exists = await srcFile.exists();
 
     if (!exists) {
+      logger.debug("源文件不存在", { src });
+      logMethodReturn(logger, { method: "copyFile", module: "CLI", result: { success: false, reason: "src_not_found" }, duration: timer() });
       return false;
     }
 
@@ -69,6 +83,8 @@ async function copyFile(src: string, dest: string): Promise<boolean> {
     const destExists = await destFile.exists();
 
     if (destExists) {
+      logger.debug("目标文件已存在", { dest });
+      logMethodReturn(logger, { method: "copyFile", module: "CLI", result: { success: false, reason: "dest_exists" }, duration: timer() });
       return false;
     }
 
@@ -76,8 +92,18 @@ async function copyFile(src: string, dest: string): Promise<boolean> {
     const content = await srcFile.text();
     await Bun.write(dest, content);
 
+    logger.debug("文件复制成功", { src, dest });
+    logMethodReturn(logger, { method: "copyFile", module: "CLI", result: { success: true }, duration: timer() });
     return true;
-  } catch (error) {
+  } catch (err) {
+    const error = err as Error;
+    logMethodError(logger, {
+      method: "copyFile",
+      module: "CLI",
+      error: { name: error.name, message: error.message },
+      params: { src, dest },
+      duration: timer(),
+    });
     return false;
   }
 }
@@ -119,6 +145,9 @@ export interface ConfigResult {
 export async function configCommand(
   options: ConfigOptions = {}
 ): Promise<ConfigResult> {
+  const timer = createTimer();
+  logMethodCall(logger, { method: "configCommand", module: "CLI", params: { force: options.force, dryRun: options.dryRun } });
+
   const result: ConfigResult = {
     directories: [],
     files: [],
@@ -126,98 +155,124 @@ export async function configCommand(
     errors: [],
   };
 
-  // 1. 创建目录结构
-  const directories = [
-    MICRO_AGENT_DIR,
-    WORKSPACE_DIR,
-    AGENT_DIR,
-    SESSIONS_DIR,
-    LOGS_DIR,
-    HISTORY_DIR,
-    SKILLS_DIR,
-  ];
+  try {
+    // 1. 创建目录结构
+    logger.debug("创建目录结构");
+    const directories = [
+      MICRO_AGENT_DIR,
+      WORKSPACE_DIR,
+      AGENT_DIR,
+      SESSIONS_DIR,
+      LOGS_DIR,
+      HISTORY_DIR,
+      SKILLS_DIR,
+    ];
 
-  for (const dir of directories) {
-    const exists = existsSync(dir);
+    for (const dir of directories) {
+      const exists = existsSync(dir);
 
-    if (!exists) {
-      if (options.dryRun) {
-        result.directories.push(dir);
-      } else {
-        try {
-          mkdirSync(dir, { recursive: true });
+      if (!exists) {
+        if (options.dryRun) {
           result.directories.push(dir);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          result.errors.push(`目录创建失败: ${dir} - ${message}`);
+        } else {
+          try {
+            mkdirSync(dir, { recursive: true });
+            result.directories.push(dir);
+            logger.debug("目录创建成功", { dir });
+          } catch (err) {
+            const error = err as Error;
+            const message = error.message;
+            result.errors.push(`目录创建失败: ${dir} - ${message}`);
+            logger.error("目录创建失败", { dir, error: message });
+          }
         }
+      } else {
+        result.skipped.push(dir);
       }
-    } else {
-      result.skipped.push(dir);
     }
-  }
 
-  // 2. 复制 Agent 目录模板文件
-  for (const { src: srcFile, dest: destFile } of AGENT_TEMPLATE_FILES) {
-    const src = join(TEMPLATES_DIR, srcFile);
-    const dest = join(AGENT_DIR, destFile);
+    // 2. 复制 Agent 目录模板文件
+    logger.debug("复制 Agent 目录模板文件");
+    for (const { src: srcFile, dest: destFile } of AGENT_TEMPLATE_FILES) {
+      const src = join(TEMPLATES_DIR, srcFile);
+      const dest = join(AGENT_DIR, destFile);
 
-    if (options.dryRun) {
+      if (options.dryRun) {
+        const destExists = await Bun.file(dest).exists();
+        if (destExists && !options.force) {
+          result.skipped.push(destFile);
+        } else {
+          result.files.push(destFile);
+        }
+        continue;
+      }
+
       const destExists = await Bun.file(dest).exists();
+
       if (destExists && !options.force) {
         result.skipped.push(destFile);
-      } else {
-        result.files.push(destFile);
+        continue;
       }
-      continue;
+
+      const copied = await copyFile(src, dest);
+      if (copied) {
+        result.files.push(destFile);
+      } else {
+        result.skipped.push(destFile);
+      }
     }
 
-    const destExists = await Bun.file(dest).exists();
+    // 3. 复制根目录配置文件（settings.yaml）
+    logger.debug("复制根目录配置文件");
+    for (const { src: srcFile, dest: destFile } of ROOT_TEMPLATE_FILES) {
+      const src = join(TEMPLATES_DIR, srcFile);
+      const dest = join(MICRO_AGENT_DIR, destFile);
 
-    if (destExists && !options.force) {
-      result.skipped.push(destFile);
-      continue;
-    }
+      if (options.dryRun) {
+        const destExists = await Bun.file(dest).exists();
+        if (destExists && !options.force) {
+          result.skipped.push(destFile);
+        } else {
+          result.files.push(destFile);
+        }
+        continue;
+      }
 
-    const copied = await copyFile(src, dest);
-    if (copied) {
-      result.files.push(destFile);
-    } else {
-      result.skipped.push(destFile);
-    }
-  }
-
-  // 3. 复制根目录配置文件（settings.yaml）
-  for (const { src: srcFile, dest: destFile } of ROOT_TEMPLATE_FILES) {
-    const src = join(TEMPLATES_DIR, srcFile);
-    const dest = join(MICRO_AGENT_DIR, destFile);
-
-    if (options.dryRun) {
       const destExists = await Bun.file(dest).exists();
+
       if (destExists && !options.force) {
         result.skipped.push(destFile);
-      } else {
-        result.files.push(destFile);
+        continue;
       }
-      continue;
+
+      const copied = await copyFile(src, dest);
+      if (copied) {
+        result.files.push(destFile);
+      } else {
+        result.skipped.push(destFile);
+      }
     }
 
-    const destExists = await Bun.file(dest).exists();
-
-    if (destExists && !options.force) {
-      result.skipped.push(destFile);
-      continue;
-    }
-
-    const copied = await copyFile(src, dest);
-    if (copied) {
-      result.files.push(destFile);
-    } else {
-      result.skipped.push(destFile);
-    }
+    logger.info("配置命令执行完成", {
+      directoryCount: result.directories.length,
+      fileCount: result.files.length,
+      skippedCount: result.skipped.length,
+      errorCount: result.errors.length,
+      dryRun: options.dryRun,
+    });
+    logMethodReturn(logger, { method: "configCommand", module: "CLI", result: { directories: result.directories.length, files: result.files.length, skipped: result.skipped.length, errors: result.errors.length }, duration: timer() });
+    return result;
+  } catch (err) {
+    const error = err as Error;
+    logMethodError(logger, {
+      method: "configCommand",
+      module: "CLI",
+      error: { name: error.name, message: error.message, ...(error.stack ? { stack: error.stack } : {}) },
+      params: { force: options.force, dryRun: options.dryRun },
+      duration: timer(),
+    });
+    throw error;
   }
-
-  return result;
 }
 
 /**

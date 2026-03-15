@@ -11,6 +11,9 @@
 
 import { z } from "zod";
 
+const MODULE_NAME = "ConfigSchema";
+import { configLogger, createTimer, sanitize, logMethodCall, logMethodReturn, logMethodError } from "../shared/logger.js";
+
 // ============================================================================
 // Agent Config Schema
 // ============================================================================
@@ -369,7 +372,25 @@ export type Settings = z.infer<typeof SettingsSchema>;
  * @returns 验证结果
  */
 export function validateAgentsConfig(data: unknown): AgentsConfig {
-  return AgentsConfigSchema.parse(data);
+  const timer = createTimer();
+  const logger = configLogger();
+  
+  logMethodCall(logger, { method: "validateAgentsConfig", module: MODULE_NAME, params: {} });
+  
+  try {
+    const result = AgentsConfigSchema.parse(data);
+    logMethodReturn(logger, { method: "validateAgentsConfig", module: MODULE_NAME, result: sanitize(result), duration: timer() });
+    return result;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logMethodError(logger, { 
+      method: "validateAgentsConfig", 
+      module: MODULE_NAME, 
+      error: { name: err.name, message: err.message, ...(err.stack ? { stack: err.stack } : {}) },
+      duration: timer() 
+    });
+    throw error;
+  }
 }
 
 /**
@@ -379,7 +400,25 @@ export function validateAgentsConfig(data: unknown): AgentsConfig {
  * @returns 验证结果
  */
 export function validateProvidersConfig(data: unknown): ProvidersConfig {
-  return ProvidersConfigSchema.parse(data);
+  const timer = createTimer();
+  const logger = configLogger();
+  
+  logMethodCall(logger, { method: "validateProvidersConfig", module: MODULE_NAME, params: {} });
+  
+  try {
+    const result = ProvidersConfigSchema.parse(data);
+    logMethodReturn(logger, { method: "validateProvidersConfig", module: MODULE_NAME, result: sanitize(result), duration: timer() });
+    return result;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logMethodError(logger, { 
+      method: "validateProvidersConfig", 
+      module: MODULE_NAME, 
+      error: { name: err.name, message: err.message, ...(err.stack ? { stack: err.stack } : {}) },
+      duration: timer() 
+    });
+    throw error;
+  }
 }
 
 /**
@@ -389,7 +428,25 @@ export function validateProvidersConfig(data: unknown): ProvidersConfig {
  * @returns 验证结果
  */
 export function validateToolsConfig(data: unknown): ToolsConfig {
-  return ToolsConfigSchema.parse(data);
+  const timer = createTimer();
+  const logger = configLogger();
+  
+  logMethodCall(logger, { method: "validateToolsConfig", module: MODULE_NAME, params: {} });
+  
+  try {
+    const result = ToolsConfigSchema.parse(data);
+    logMethodReturn(logger, { method: "validateToolsConfig", module: MODULE_NAME, result: sanitize(result), duration: timer() });
+    return result;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logMethodError(logger, { 
+      method: "validateToolsConfig", 
+      module: MODULE_NAME, 
+      error: { name: err.name, message: err.message, ...(err.stack ? { stack: err.stack } : {}) },
+      duration: timer() 
+    });
+    throw error;
+  }
 }
 
 /**
@@ -399,7 +456,25 @@ export function validateToolsConfig(data: unknown): ToolsConfig {
  * @returns 验证结果
  */
 export function validateChannelsConfig(data: unknown): ChannelsConfig {
-  return ChannelsConfigSchema.parse(data);
+  const timer = createTimer();
+  const logger = configLogger();
+  
+  logMethodCall(logger, { method: "validateChannelsConfig", module: MODULE_NAME, params: {} });
+  
+  try {
+    const result = ChannelsConfigSchema.parse(data);
+    logMethodReturn(logger, { method: "validateChannelsConfig", module: MODULE_NAME, result: sanitize(result), duration: timer() });
+    return result;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logMethodError(logger, { 
+      method: "validateChannelsConfig", 
+      module: MODULE_NAME, 
+      error: { name: err.name, message: err.message, ...(err.stack ? { stack: err.stack } : {}) },
+      duration: timer() 
+    });
+    throw error;
+  }
 }
 
 /**
@@ -409,7 +484,25 @@ export function validateChannelsConfig(data: unknown): ChannelsConfig {
  * @returns 验证结果
  */
 export function validateSettings(data: unknown): Settings {
-  return SettingsSchema.parse(data);
+  const timer = createTimer();
+  const logger = configLogger();
+  
+  logMethodCall(logger, { method: "validateSettings", module: MODULE_NAME, params: {} });
+  
+  try {
+    const result = SettingsSchema.parse(data);
+    logMethodReturn(logger, { method: "validateSettings", module: MODULE_NAME, result: sanitize(result), duration: timer() });
+    return result;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logMethodError(logger, { 
+      method: "validateSettings", 
+      module: MODULE_NAME, 
+      error: { name: err.name, message: err.message, ...(err.stack ? { stack: err.stack } : {}) },
+      duration: timer() 
+    });
+    throw error;
+  }
 }
 
 /**
@@ -421,5 +514,21 @@ export function validateSettings(data: unknown): Settings {
 export function safeValidateSettings(
   data: unknown,
 ): z.SafeParseReturnType<unknown, Settings> {
-  return SettingsSchema.safeParse(data);
+  const timer = createTimer();
+  const logger = configLogger();
+  
+  logMethodCall(logger, { method: "safeValidateSettings", module: MODULE_NAME, params: {} });
+  
+  const result = SettingsSchema.safeParse(data);
+  
+  if (result.success) {
+    logger.debug("配置验证成功", { duration: timer() });
+    logMethodReturn(logger, { method: "safeValidateSettings", module: MODULE_NAME, result: sanitize(result.data), duration: timer() });
+  } else {
+    const issues = result.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ");
+    logger.warn("配置验证失败", { issues, duration: timer() });
+    logMethodReturn(logger, { method: "safeValidateSettings", module: MODULE_NAME, result: { success: false, issueCount: result.error.issues.length }, duration: timer() });
+  }
+  
+  return result;
 }

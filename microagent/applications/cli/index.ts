@@ -12,7 +12,20 @@
 
 // ============================================================================
 // 全局静默配置（禁用所有 console 输出，包括第三方 SDK）
+// 注意：保存原始 console 供日志系统使用
 // ============================================================================
+import { setOriginalConsole } from "../shared/logger.js";
+
+// 保存原始 console 方法
+setOriginalConsole({
+  log: console.log.bind(console),
+  info: console.info.bind(console),
+  debug: console.debug.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+});
+
+// 禁用全局 console（第三方 SDK 将无法输出）
 console.log = console.info = console.debug = console.warn = console.error = () => {};
 
 // ============================================================================
@@ -22,6 +35,17 @@ console.log = console.info = console.debug = console.warn = console.error = () =
 import { configCommand, showConfigHelp } from "./options/config.js";
 import { statusCommand, showStatusHelp } from "./options/status.js";
 import { startCommand, showStartHelp } from "./options/start.js";
+import {
+  cliLogger,
+  createTimer,
+  sanitize,
+  logMethodCall,
+  logMethodReturn,
+  logMethodError,
+  initLogger,
+} from "../shared/logger.js";
+
+const logger = cliLogger();
 
 // ============================================================================
 // 常量定义
@@ -68,6 +92,9 @@ function parseArgs(args: string[]): {
   options: Record<string, string | boolean>;
   positional: string[];
 } {
+  const timer = createTimer();
+  logMethodCall(logger, { method: "parseArgs", module: "CLI", params: { argCount: args.length } });
+
   const result = {
     command: null as string | null,
     options: {} as Record<string, string | boolean>,
@@ -161,6 +188,7 @@ function parseArgs(args: string[]): {
     i++;
   }
 
+  logMethodReturn(logger, { method: "parseArgs", module: "CLI", result: sanitize(result), duration: timer() });
   return result;
 }
 
@@ -178,62 +206,81 @@ async function executeCommand(
   command: string | null,
   options: Record<string, string | boolean>
 ): Promise<void> {
-  // 全局选项处理
-  if (options.help) {
-    if (command) {
-      showCommandHelp(command);
-    } else {
+  const timer = createTimer();
+  logMethodCall(logger, { method: "executeCommand", module: "CLI", params: { command, options } });
+
+  try {
+    // 全局选项处理
+    if (options.help) {
+      if (command) {
+        showCommandHelp(command);
+      } else {
+        showMainHelp();
+      }
+      process.exit(0);
+    }
+
+    if (options.version) {
+      showVersion();
+      process.exit(0);
+    }
+
+    // 无命令时显示帮助
+    if (!command) {
       showMainHelp();
-    }
-    process.exit(0);
-  }
-
-  if (options.version) {
-    showVersion();
-    process.exit(0);
-  }
-
-  // 无命令时显示帮助
-  if (!command) {
-    showMainHelp();
-    process.exit(0);
-  }
-
-  // 命令分发
-  switch (command) {
-    case "start": {
-      const startOpts: {
-        config?: string;
-        model?: string;
-        debug?: boolean;
-        logLevel?: "debug" | "info" | "warn" | "error";
-      } = {
-        debug: !!options.debug,
-      };
-      if (options.config) startOpts.config = options.config as string;
-      if (options.model) startOpts.model = options.model as string;
-      if (options["log-level"]) startOpts.logLevel = options["log-level"] as "debug" | "info" | "warn" | "error";
-
-      await startCommand(startOpts);
-      break;
+      process.exit(0);
     }
 
-    case "status":
-      await statusCommand({
-        verbose: !!options.verbose,
-        json: !!options.json,
-      });
-      break;
+    // 命令分发
+    logger.info("CLI命令执行", { command, options });
+    switch (command) {
+      case "start": {
+        const startOpts: {
+          config?: string;
+          model?: string;
+          debug?: boolean;
+          logLevel?: "debug" | "info" | "warn" | "error";
+        } = {
+          debug: !!options.debug,
+        };
+        if (options.config) startOpts.config = options.config as string;
+        if (options.model) startOpts.model = options.model as string;
+        if (options["log-level"]) startOpts.logLevel = options["log-level"] as "debug" | "info" | "warn" | "error";
 
-    case "config":
-      await configCommand({
-        force: !!options.force,
-        dryRun: !!options["dry-run"],
-      });
-      break;
+        await startCommand(startOpts);
+        break;
+      }
 
-    default:
-      process.exit(1);
+      case "status":
+        await statusCommand({
+          verbose: !!options.verbose,
+          json: !!options.json,
+        });
+        break;
+
+      case "config":
+        await configCommand({
+          force: !!options.force,
+          dryRun: !!options["dry-run"],
+        });
+        break;
+
+      default:
+        logger.warn("未知命令", { command });
+        process.exit(1);
+    }
+
+    logMethodReturn(logger, { method: "executeCommand", module: "CLI", result: { success: true }, duration: timer() });
+  } catch (err) {
+    const error = err as Error;
+    logMethodError(logger, {
+      method: "executeCommand",
+      module: "CLI",
+      error: { name: error.name, message: error.message, ...(error.stack ? { stack: error.stack } : {}) },
+      params: { command, options },
+      duration: timer(),
+    });
+    process.exit(1);
   }
 }
 
@@ -267,16 +314,21 @@ function showCommandHelp(command: string): void {
  * 防止 SDK 内部错误导致进程崩溃
  */
 function setupGlobalErrorHandlers(): void {
+  const timer = createTimer();
+  logMethodCall(logger, { method: "setupGlobalErrorHandlers", module: "CLI", params: {} });
+
   // 捕获未处理的 Promise rejection
   process.on("unhandledRejection", (reason, _promise) => {
     const message = reason instanceof Error ? reason.message : String(reason);
 
     // 网络错误（如 ECONNREFUSED）静默处理
     if (message.includes("ECONNREFUSED") || message.includes("ETIMEDOUT") || message.includes("ENOTFOUND")) {
+      logger.debug("网络错误已静默处理", { errorType: "unhandledRejection", message });
       return;
     }
 
-    // 其他严重错误静默处理
+    // 其他严重错误记录日志
+    logger.error("未处理的 Promise rejection", { message, reason: sanitize(reason) });
     process.exit(1);
   });
 
@@ -286,12 +338,16 @@ function setupGlobalErrorHandlers(): void {
 
     // 网络错误静默处理
     if (message.includes("ECONNREFUSED") || message.includes("ETIMEDOUT") || message.includes("ENOTFOUND")) {
+      logger.debug("网络错误已静默处理", { errorType: "uncaughtException", message });
       return;
     }
 
-    // 其他严重错误静默处理
+    // 其他严重错误记录日志
+    logger.error("未捕获的异常", { name: error.name, message: error.message, stack: error.stack });
     process.exit(1);
   });
+
+  logMethodReturn(logger, { method: "setupGlobalErrorHandlers", module: "CLI", result: { success: true }, duration: timer() });
 }
 
 // ============================================================================
@@ -302,18 +358,42 @@ function setupGlobalErrorHandlers(): void {
  * CLI 主入口
  */
 async function main(): Promise<void> {
-  // 设置全局错误处理器
-  setupGlobalErrorHandlers();
-  // 获取命令行参数（跳过 node/bun 和脚本路径）
+  const timer = createTimer();
+
+  // 先获取命令行参数（跳过 node/bun 和脚本路径）
   const args = process.argv.slice(2);
 
-  // 解析参数
+  // 解析参数（提前解析以确定日志级别）
   const { command, options } = parseArgs(args);
 
-  // 执行命令
+  // 根据参数确定日志级别
+  const logLevel: "debug" | "info" | "warning" | "error" = 
+    options.debug ? "debug" :
+    options["log-level"] === "warn" ? "warning" :
+    (options["log-level"] as "debug" | "info" | "warning" | "error") ?? "info";
+
+  // 初始化日志系统（启用控制台输出）
+  await initLogger({ console: true, level: logLevel });
+
+  logMethodCall(logger, { method: "main", module: "CLI", params: { argv: args } });
+
   try {
+    // 设置全局错误处理器
+    setupGlobalErrorHandlers();
+
+    // 执行命令
     await executeCommand(command, options);
-  } catch {
+
+    logMethodReturn(logger, { method: "main", module: "CLI", result: { success: true }, duration: timer() });
+  } catch (err) {
+    const error = err as Error;
+    logMethodError(logger, {
+      method: "main",
+      module: "CLI",
+      error: { name: error.name, message: error.message, ...(error.stack ? { stack: error.stack } : {}) },
+      params: {},
+      duration: timer(),
+    });
     process.exit(1);
   }
 }
