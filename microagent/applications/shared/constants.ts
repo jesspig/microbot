@@ -26,7 +26,7 @@ export const SESSIONS_DIR = join(MICRO_AGENT_DIR, "sessions");
 /** 日志目录 */
 export const LOGS_DIR = join(MICRO_AGENT_DIR, "logs");
 
-/** 历史日志目录 */
+/** 每日记录目录 */
 export const HISTORY_DIR = join(AGENT_DIR, "history");
 
 /** 技能目录 */

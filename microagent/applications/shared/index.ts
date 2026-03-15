@@ -5,6 +5,53 @@
  */
 
 // ============================================================================
+// 日志工具 (LogTape)
+// ============================================================================
+
+// 日志配置
+export {
+  initLogger,
+  getModuleLogger,
+  isLoggerInitialized,
+  getDefaultLevel,
+  kernelLogger,
+  providerLogger,
+  toolLogger,
+  sessionLogger,
+  busLogger,
+  channelLogger,
+  memoryLogger,
+  skillLogger,
+  builderLogger,
+  configLogger,
+  cliLogger,
+  providersLogger,
+  channelsLogger,
+  toolsLogger,
+  mcpLogger,
+  skillsLogger,
+  promptsLogger,
+  sharedLogger,
+} from "./logger";
+
+// 日志辅助函数
+export {
+  logMethodCall,
+  logMethodReturn,
+  logMethodError,
+  createTimer,
+  sanitize,
+} from "./logger";
+
+// 日志类型
+export type {
+  LoggerConfig,
+  MethodCallLogData,
+  MethodReturnLogData,
+  MethodErrorLogData,
+} from "./logger";
+
+// ============================================================================
 // 安全工具
 // ============================================================================
 
