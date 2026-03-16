@@ -17,3 +17,13 @@ export type { IMemoryExtended } from "./contract.js";
 // 类导出
 export { BaseMemory } from "./base.js";
 export { MemoryRegistry } from "./registry.js";
+
+// 历史记录整理器
+export {
+  HistoryConsolidator,
+  DEFAULT_CONSOLIDATOR_CONFIG,
+  type HistoryEntry,
+  type ConsolidationResult,
+  type ConsolidatorConfig,
+  type LLMCallFunction,
+} from "./consolidator.js";
