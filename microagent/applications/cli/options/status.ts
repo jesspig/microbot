@@ -11,7 +11,6 @@
 import {
   MICRO_AGENT_DIR,
   WORKSPACE_DIR,
-  AGENT_DIR,
   SESSIONS_DIR,
   LOGS_DIR,
   SETTINGS_FILE,
@@ -182,7 +181,6 @@ export async function statusCommand(
     const directories = [
       { name: "根目录", path: MICRO_AGENT_DIR },
       { name: "工作目录", path: WORKSPACE_DIR },
-      { name: "Agent 配置", path: AGENT_DIR },
       { name: "会话存储", path: SESSIONS_DIR },
       { name: "日志目录", path: LOGS_DIR },
     ];

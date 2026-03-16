@@ -96,7 +96,6 @@ export { sanitizeError } from "./security";
 export {
   MICRO_AGENT_DIR,
   WORKSPACE_DIR,
-  AGENT_DIR,
   SESSIONS_DIR,
   LOGS_DIR,
   HISTORY_DIR,

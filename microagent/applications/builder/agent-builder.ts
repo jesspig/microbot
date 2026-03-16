@@ -34,7 +34,6 @@ import { FilesystemSkillLoader } from "../skills/index.js";
 import {
   MICRO_AGENT_DIR,
   WORKSPACE_DIR,
-  AGENT_DIR,
   SESSIONS_DIR,
   LOGS_DIR,
   HISTORY_DIR,
@@ -64,8 +63,8 @@ const TEMPLATES_DIR = join(
   "templates"
 );
 
-/** Agent 目录模板文件列表 */
-const AGENT_TEMPLATE_FILES = [
+/** 模板文件列表（全部复制到根目录） */
+const TEMPLATE_FILES = [
   "AGENTS.md",
   "SOUL.md",
   "USER.md",
@@ -73,10 +72,6 @@ const AGENT_TEMPLATE_FILES = [
   "HEARTBEAT.md",
   "MEMORY.md",
   "mcp.json",
-];
-
-/** 根目录模板文件列表 */
-const ROOT_TEMPLATE_FILES = [
   { src: "settings.example.yaml", dest: "settings.yaml" },
 ];
 
@@ -102,7 +97,6 @@ export interface AgentBuildResult {
   paths: {
     root: string;
     workspace: string;
-    agent: string;
     sessions: string;
     logs: string;
     history: string;
@@ -269,7 +263,6 @@ export class AgentBuilder {
         paths: {
           root: MICRO_AGENT_DIR,
           workspace: WORKSPACE_DIR,
-          agent: AGENT_DIR,
           sessions: SESSIONS_DIR,
           logs: LOGS_DIR,
           history: HISTORY_DIR,
@@ -319,7 +312,6 @@ export class AgentBuilder {
       logger.debug("创建目录", { dir: MICRO_AGENT_DIR });
       await this.ensureDir(MICRO_AGENT_DIR);
       await this.ensureDir(WORKSPACE_DIR);
-      await this.ensureDir(AGENT_DIR);
       await this.ensureDir(SESSIONS_DIR);
       await this.ensureDir(LOGS_DIR);
       await this.ensureDir(HISTORY_DIR);
@@ -389,10 +381,14 @@ export class AgentBuilder {
     let copiedCount = 0;
     let skippedCount = 0;
 
-    // 复制 Agent 目录模板文件
-    for (const file of AGENT_TEMPLATE_FILES) {
-      const srcPath = join(TEMPLATES_DIR, file);
-      const destPath = join(AGENT_DIR, file);
+    // 复制模板文件到根目录
+    for (const item of TEMPLATE_FILES) {
+      // 处理两种格式：字符串或对象
+      const srcFile = typeof item === "string" ? item : item.src;
+      const destFile = typeof item === "string" ? item : item.dest;
+
+      const srcPath = join(TEMPLATES_DIR, srcFile);
+      const destPath = join(MICRO_AGENT_DIR, destFile);
 
       try {
         // 检查目标文件是否存在
@@ -411,36 +407,10 @@ export class AgentBuilder {
         // 复制文件
         await copyFile(srcPath, destPath);
         copiedCount++;
-        logger.debug("复制模板文件", { file, destPath });
+        logger.debug("复制模板文件", { file: srcFile, destPath });
       } catch (error) {
         // 复制失败不影响启动
-        logger.warn("模板复制失败", { file, error: String(error) });
-      }
-    }
-
-    // 复制根目录模板文件（settings.yaml）
-    for (const { src, dest } of ROOT_TEMPLATE_FILES) {
-      const srcPath = join(TEMPLATES_DIR, src);
-      const destPath = join(MICRO_AGENT_DIR, dest);
-
-      try {
-        const destExists = await this.pathExists(destPath);
-        if (destExists) {
-          skippedCount++;
-          continue;
-        }
-
-        const srcExists = await this.pathExists(srcPath);
-        if (!srcExists) {
-          continue;
-        }
-
-        await copyFile(srcPath, destPath);
-        copiedCount++;
-        logger.debug("复制模板文件", { file: src, destPath });
-      } catch (error) {
-        // 忽略错误
-        logger.warn("模板复制失败", { file: src, error: String(error) });
+        logger.warn("模板复制失败", { file: srcFile, error: String(error) });
       }
     }
 

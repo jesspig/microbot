@@ -43,6 +43,8 @@ export interface SystemPromptParams {
   userContent?: string;
   /** 工具使用指南内容（TOOLS.md） */
   toolsContent?: string;
+  /** 长期记忆内容（MEMORY.md） */
+  memoryContent?: string;
   /** 当前日期时间 */
   currentDate?: string;
   /** 渠道信息 */
@@ -63,6 +65,8 @@ export interface RuntimeContext {
   chatId?: string;
   /** 平台信息 */
   platform: string;
+  /** workspace 路径（可选） */
+  workspacePath?: string;
 }
 
 /**
@@ -210,17 +214,18 @@ function isEmptyTemplate(content: string): boolean {
 /**
  * 构建系统提示词
  *
- * 整合 AGENTS.md、SOUL.md、USER.md、TOOLS.md 等内容，
+ * 整合 AGENTS.md、SOUL.md、USER.md、MEMORY.md、TOOLS.md 等内容，
  * 生成完整的系统提示词。
  *
  * 构建顺序：
  * 1. Agent 角色定义（AGENTS.md）- 核心身份和行为准则
  * 2. 个性价值观（SOUL.md）- 沟通风格和行为边界
  * 3. 用户偏好（USER.md）- 个性化配置
- * 4. 核心工具摘要 - 预定义工具描述
- * 5. 工具使用指南（TOOLS.md）- 工具调用规范
- * 6. 安全准则 - 安全边界和禁止行为
- * 7. 平台策略 - 操作系统特定指导
+ * 4. 长期记忆（MEMORY.md）- 跨会话记忆信息
+ * 5. 核心工具摘要 - 预定义工具描述
+ * 6. 工具使用指南（TOOLS.md）- 工具调用规范
+ * 7. 安全准则 - 安全边界和禁止行为
+ * 8. 平台策略 - 操作系统特定指导
  *
  * @param params 系统提示词参数
  * @returns 构建后的系统提示词
@@ -235,6 +240,7 @@ export function buildSystemPrompt(params: SystemPromptParams): BuiltSystemPrompt
       hasSoulContent: !!params.soulContent,
       hasUserContent: !!params.userContent,
       hasToolsContent: !!params.toolsContent,
+      hasMemoryContent: !!params.memoryContent,
       hasCurrentDate: !!params.currentDate,
     },
   });
@@ -265,7 +271,15 @@ export function buildSystemPrompt(params: SystemPromptParams): BuiltSystemPrompt
       }
     }
 
-    // 4. 添加核心工具摘要
+    // 4. 添加长期记忆（可选，跳过空模板）
+    if (params.memoryContent?.trim() && !isEmptyTemplate(params.memoryContent)) {
+      const memoryContent = removeYamlFrontmatter(params.memoryContent);
+      if (memoryContent.trim()) {
+        sections.push(formatSection("长期记忆", memoryContent));
+      }
+    }
+
+    // 5. 添加核心工具摘要
     sections.push(getToolSummariesSection());
 
     // 5. 添加工具使用指南（可选）
@@ -274,10 +288,10 @@ export function buildSystemPrompt(params: SystemPromptParams): BuiltSystemPrompt
       sections.push(formatSection("工具使用指南", toolsContent));
     }
 
-    // 6. 添加安全准则
+    // 7. 添加安全准则
     sections.push(getSafetySection());
 
-    // 7. 添加平台策略
+    // 8. 添加平台策略
     sections.push(getPlatformPolicy());
 
     const prompt = sections.join("\n\n---\n\n");
@@ -342,6 +356,11 @@ export function buildRuntimeContext(ctx: Partial<RuntimeContext>): string {
 
   // 平台信息
   lines.push(`平台: ${ctx.platform ?? platform()}`);
+
+  // 工作目录
+  if (ctx.workspacePath) {
+    lines.push(`工作目录: ${ctx.workspacePath}`);
+  }
 
   return lines.join("\n");
 }

@@ -15,7 +15,6 @@ import { mkdirSync } from "node:fs";
 import {
   MICRO_AGENT_DIR,
   WORKSPACE_DIR,
-  AGENT_DIR,
   SESSIONS_DIR,
   LOGS_DIR,
   HISTORY_DIR,
@@ -59,6 +58,12 @@ import {
   logMethodReturn,
   logMethodError,
 } from "../../shared/logger.js";
+import {
+  buildSystemPrompt,
+  buildRuntimeContext,
+  getCurrentDateString,
+} from "../../prompts/index.js";
+import { readFile } from "node:fs/promises";
 
 const logger = cliLogger();
 
@@ -102,7 +107,6 @@ function initializeRuntimeDirectories(): void {
   const dirs = [
     MICRO_AGENT_DIR,
     WORKSPACE_DIR,
-    AGENT_DIR,
     SESSIONS_DIR,
     LOGS_DIR,
     HISTORY_DIR,
@@ -427,6 +431,17 @@ function createChannels(settings: Settings): IChannelExtended[] {
 // ============================================================================
 
 /**
+ * 读取文件内容（如果存在）
+ */
+async function readFileIfExists(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+/**
  * 创建消息处理器（将 Channel 消息转发给 AgentLoop）
  */
 async function createMessageHandler(
@@ -441,6 +456,26 @@ async function createMessageHandler(
 
   // 单用户模式：使用全局统一的 session key
   const GLOBAL_SESSION_KEY = "global";
+
+  // 构建系统提示词（只构建一次）
+  const [agentsContent, soulContent, userContent, toolsContent, memoryContent] = await Promise.all([
+    readFileIfExists(AGENTS_FILE),
+    readFileIfExists(SOUL_FILE),
+    readFileIfExists(USER_FILE),
+    readFileIfExists(TOOLS_FILE),
+    readFileIfExists(MEMORY_FILE),
+  ]);
+
+  const systemPromptResult = buildSystemPrompt({
+    agentsContent: agentsContent || "You are MicroAgent, a helpful AI assistant.",
+    soulContent,
+    userContent,
+    toolsContent,
+    memoryContent,
+    currentDate: getCurrentDateString(),
+  });
+
+  logger.info("系统提示词已构建", { length: systemPromptResult.length });
 
   // 获取上下文配置
   const contextWindowTokens = settings.sessions?.contextWindowTokens ?? 65535;
@@ -511,15 +546,47 @@ async function createMessageHandler(
       // 使用压缩器处理消息
       const compressionResult = await compressor.compress(allMessages);
 
+      // 构建运行时上下文（包含 workspace 路径）
+      const runtimeContext = buildRuntimeContext({
+        currentDate: getCurrentDateString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        platform: process.platform,
+        workspacePath: WORKSPACE_DIR,
+      });
+
+      // 构建最终消息列表：系统提示词 + 压缩后的消息
+      const finalMessages: Message[] = [
+        { role: "system", content: systemPromptResult.prompt },
+      ];
+
+      // 在压缩后的消息中注入运行时上下文
+      const compressedMsgs = compressionResult.messages;
+      for (let i = 0; i < compressedMsgs.length; i++) {
+        const msg = compressedMsgs[i];
+        if (!msg) continue;
+
+        if (msg.role === "user" && i === compressedMsgs.length - 1) {
+          // 最后一条用户消息前注入运行时上下文
+          finalMessages.push({
+            role: "user",
+            content: `${runtimeContext}\n\n${msg.content}`,
+          });
+        } else {
+          finalMessages.push(msg);
+        }
+      }
+
       logger.info("开始运行 Agent", { 
-        messageCount: allMessages.length, 
+        messageCount: finalMessages.length, 
         originalTokens: compressionResult.originalTokens,
         compressedTokens: compressionResult.compressedTokens,
         hasSummary: compressionResult.hasSummary,
-        strategy: compressionResult.strategy
+        strategy: compressionResult.strategy,
+        systemPromptLength: systemPromptResult.length,
+        hasWorkspacePath: true,
       });
 
-      const result = await agent.run(compressionResult.messages);
+      const result = await agent.run(finalMessages);
 
       // 记录 Agent 运行结果
       logger.info("Agent 运行完成", {

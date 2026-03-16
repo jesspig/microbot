@@ -5,13 +5,12 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { ITool } from "../../../runtime/contracts.js";
 import { connectMCPServer, type MCPConnectionResult } from "./client.js";
 import { MCPToolWrapper } from "./wrapper.js";
 import type { MCPConfig, MCPServerConfig, MCPServerInfo } from "./types.js";
 import { resolveEnvVars } from "../../config/env-resolver.js";
-import { AGENT_DIR } from "../../shared/constants.js";
+import { MCP_CONFIG_FILE } from "../../shared/constants.js";
 import {
   mcpLogger,
   createTimer,
@@ -50,7 +49,7 @@ export class MCPManager {
       params: { configPath },
     });
 
-    const path = configPath || join(AGENT_DIR, "mcp.json");
+    const path = configPath || MCP_CONFIG_FILE;
 
     try {
       const content = await readFile(path, "utf-8");

@@ -345,6 +345,25 @@ export const CompressionConfigSchema = z.strictObject({
 });
 
 /**
+ * 历史记录整理配置 Schema
+ *
+ * 定义对话历史记录的自动整理参数
+ */
+export const HistoryConfigSchema = z.strictObject({
+  /** 是否启用历史记录整理，默认 true */
+  enabled: z.boolean().default(true),
+
+  /** 触发整理的阈值（0-1，相对于 contextWindow），默认 0.7 */
+  threshold: z.number().min(0).max(1).default(0.7),
+
+  /** 整理时保留最近消息数，默认 10 */
+  keepRecentMessages: z.number().int().min(1).max(50).default(10),
+
+  /** 整理后上下文目标比例（0-1），默认 0.5 */
+  targetRatio: z.number().min(0.1).max(0.8).default(0.5),
+});
+
+/**
  * Sessions 配置 Schema
  *
  * 定义会话持久化和上下文管理参数
@@ -358,6 +377,9 @@ export const SessionsConfigSchema = z.strictObject({
 
   /** 压缩配置 */
   compression: CompressionConfigSchema.optional(),
+
+  /** 历史记录整理配置 */
+  history: HistoryConfigSchema.optional(),
 
   /** 是否启用持久化，默认 true */
   persist: z.boolean().default(true),
@@ -377,6 +399,11 @@ export type SummaryMaxTokens = z.infer<typeof SummaryMaxTokensSchema>;
  * 压缩配置类型
  */
 export type CompressionConfig = z.infer<typeof CompressionConfigSchema>;
+
+/**
+ * 历史记录整理配置类型
+ */
+export type HistoryConfig = z.infer<typeof HistoryConfigSchema>;
 
 /**
  * Sessions 配置类型
