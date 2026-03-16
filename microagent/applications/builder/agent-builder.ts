@@ -514,17 +514,42 @@ export class AgentBuilder {
         return this.customProvider;
       }
 
-      // 从配置中获取启用的 Provider
       const providers = settings.providers ?? {};
-      const enabledProvider = Object.entries(providers).find(
-        ([_, config]) => config?.enabled === true
-      );
+      const model = settings.agents?.defaults?.model ?? "";
 
-      if (!enabledProvider) {
-        throw new Error("未找到已启用的 Provider 配置");
+      // 解析模型名中的 provider 前缀
+      const slashIndex = model.indexOf("/");
+      let targetProviderName: string | null = null;
+
+      if (slashIndex >= 0) {
+        targetProviderName = model.substring(0, slashIndex);
       }
 
-      const [providerName, providerConfig] = enabledProvider;
+      // 根据 provider 前缀或默认选择 Provider
+      let selectedProvider: [string, typeof providers[string]] | null = null;
+
+      if (targetProviderName) {
+        // 模型名包含 provider 前缀，直接查找该 provider
+        const config = providers[targetProviderName];
+        if (!config) {
+          throw new Error(`模型 "${model}" 的 provider "${targetProviderName}" 不存在于 providers 配置中`);
+        }
+        if (!config.enabled) {
+          throw new Error(`模型 "${model}" 的 provider "${targetProviderName}" 未启用，请设置 providers.${targetProviderName}.enabled: true`);
+        }
+        selectedProvider = [targetProviderName, config];
+      } else {
+        // 模型名不含 provider 前缀，选择第一个启用的 provider
+        const enabledProvider = Object.entries(providers).find(
+          ([_, config]) => config?.enabled === true
+        );
+        if (!enabledProvider) {
+          throw new Error("未找到已启用的 Provider 配置");
+        }
+        selectedProvider = enabledProvider;
+      }
+
+      const [providerName, providerConfig] = selectedProvider;
 
       if (!providerConfig) {
         throw new Error(`Provider "${providerName}" 配置不存在`);
@@ -777,8 +802,16 @@ export class AgentBuilder {
 
     const agentDefaults = settings.agents.defaults;
 
+    // 处理模型名：剥离 provider 前缀
+    let model = this.agentConfig.model ?? agentDefaults.model ?? "default";
+    const slashIndex = model.indexOf("/");
+    if (slashIndex >= 0) {
+      model = model.substring(slashIndex + 1);
+      logger.debug("剥离模型 provider 前缀", { originalModel: this.agentConfig.model ?? agentDefaults.model, strippedModel: model });
+    }
+
     const config: AgentConfig = {
-      model: this.agentConfig.model ?? agentDefaults.model ?? "default",
+      model,
       maxIterations: this.agentConfig.maxIterations ?? agentDefaults.maxToolIterations ?? DEFAULT_MAX_ITERATIONS,
       defaultTimeout: this.agentConfig.defaultTimeout ?? DEFAULT_TIMEOUT_MS,
       enableLogging: this.agentConfig.enableLogging ?? false,
