@@ -7,25 +7,37 @@
  * - 文件日志：JSON Lines 格式（每行一个 JSON 对象），用于问题定位和调试
  * - 控制台日志：人类可读格式，支持颜色输出
  * - 日志文件存储在 ~/.micro-agent/logs/ 目录
- * - 按日期滚动，自动保留最近 7 天的日志
+ * - 按时间和大小滚动，自动保留最近 7 天的日志
+ * - 支持敏感信息脱敏
  */
 
 import { configure, getLogger, type Logger, type LogRecord, type Sink } from "@logtape/logtape";
-import { getFileSink } from "@logtape/file";
 import { join } from "node:path";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statSync, readdirSync, unlinkSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
 import { LOGS_DIR } from "./constants.js";
+import {
+  DEFAULT_LOG_LEVEL,
+  DEFAULT_LOG_MAX_FILE_SIZE_MB,
+  MIN_LOG_FILE_SIZE_MB,
+  MAX_LOG_FILE_SIZE_MB,
+  DEFAULT_LOG_GRANULARITY,
+  LOG_RETENTION_DAYS,
+  DEFAULT_LOG_SANITIZE,
+} from "./constants.js";
 
 // ============================================================================
 // 类型定义
 // ============================================================================
 
+/** 日志级别 */
+export type LogLevel = "debug" | "info" | "warning" | "error";
+
 /**
  * 日志配置选项
  */
 export interface LoggerConfig {
-  /** 日志级别 */
-  level?: "debug" | "info" | "warning" | "error";
+  /** 控制台日志级别 */
+  level?: LogLevel;
   /** 是否输出到控制台 */
   console?: boolean;
   /** 是否输出到文件 */
@@ -34,6 +46,24 @@ export interface LoggerConfig {
   logDir?: string;
   /** 是否启用颜色输出（仅控制台） */
   color?: boolean;
+  /** 是否开启敏感信息脱敏 */
+  sanitize?: boolean;
+  /** 单个日志文件最大大小（MB） */
+  maxFileSize?: number;
+  /** 日志颗粒度，格式如 1D/6H/30M */
+  granularity?: string;
+}
+
+/**
+ * 解析后的日志颗粒度
+ */
+interface ParsedGranularity {
+  /** 原始值 */
+  raw: string;
+  /** 时间间隔（分钟） */
+  minutes: number;
+  /** 单位：D=天, H=小时, M=分钟 */
+  unit: "D" | "H" | "M";
 }
 
 /**
@@ -91,11 +121,26 @@ export interface MethodErrorLogData {
 /** 是否已初始化 */
 let initialized = false;
 
-/** 默认日志级别 */
-let defaultLevel: "debug" | "info" | "warning" | "error" = "info";
+/** 当前控制台日志级别 */
+let consoleLevel: LogLevel = "info";
 
 /** 是否启用颜色 */
 let colorEnabled = true;
+
+/** 是否启用脱敏 */
+let sanitizeEnabled = true;
+
+/** 日志文件最大大小（字节） */
+let maxFileSizeBytes = DEFAULT_LOG_MAX_FILE_SIZE_MB * 1024 * 1024;
+
+/** 日志颗粒度 */
+let granularity: ParsedGranularity = { raw: DEFAULT_LOG_GRANULARITY, minutes: 60, unit: "H" };
+
+/** 当前日志文件路径 */
+let currentLogFile: string | null = null;
+
+/** 当前日志文件创建时间 */
+let currentLogFileCreatedAt: number = 0;
 
 /** 原始 console 方法（在 CLI 禁用全局 console 前保存） */
 let originalConsole: {
@@ -147,6 +192,314 @@ const LEVEL_BG_COLORS: Record<string, string> = {
 };
 
 // ============================================================================
+// 敏感信息脱敏
+// ============================================================================
+
+/** 敏感字段名称列表 */
+const SENSITIVE_FIELDS = [
+  "token",
+  "accessToken",
+  "access_token",
+  "secret",
+  "key",
+  "password",
+  "credential",
+  "authorization",
+  "clientSecret",
+  "client_secret",
+  "appSecret",
+  "app_secret",
+  "apiKey",
+  "api_key",
+  "corpId",
+  "corp_id",
+  "botId",
+  "bot_id",
+];
+
+/** Token 可见长度 */
+const TOKEN_VISIBLE_LENGTH = 8;
+
+/**
+ * 脱敏 token 显示
+ */
+function maskToken(token: string): string {
+  if (!token || token.length <= TOKEN_VISIBLE_LENGTH * 2) {
+    return "***";
+  }
+  const start = token.substring(0, TOKEN_VISIBLE_LENGTH);
+  const end = token.substring(token.length - TOKEN_VISIBLE_LENGTH);
+  return `${start}...${end}`;
+}
+
+/**
+ * 脱敏字符串中的敏感信息
+ */
+function sanitizeString(str: string): string {
+  let sanitized = str;
+
+  // 替换常见的 token 格式
+  sanitized = sanitized.replace(
+    /(Bearer\s+|QQBot\s+)([A-Za-z0-9_-]+)/gi,
+    (_, prefix) => `${prefix}***`
+  );
+
+  // 匹配 JSON 中的敏感字段
+  for (const field of SENSITIVE_FIELDS) {
+    const jsonPattern = new RegExp(`("${field}"\\s*:\\s*")([^"]+)(")`, "gi");
+    sanitized = sanitized.replace(jsonPattern, `$1***$3`);
+
+    const kvPattern = new RegExp(`(${field}=)([^&\\s]+)`, "gi");
+    sanitized = sanitized.replace(kvPattern, `$1***`);
+  }
+
+  return sanitized;
+}
+
+/**
+ * 脱敏对象中的敏感字段
+ */
+function sanitizeObject<T>(obj: T, depth: number = 0): T {
+  // 防止无限递归
+  if (depth > 10) {
+    return obj;
+  }
+
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+
+  if (typeof obj === "string") {
+    return sanitizeString(obj) as T;
+  }
+
+  if (typeof obj !== "object") {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeObject(item, depth + 1)) as T;
+  }
+
+  if (obj instanceof Date) {
+    return obj;
+  }
+
+  const result: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (SENSITIVE_FIELDS.some((field) => key.toLowerCase().includes(field.toLowerCase()))) {
+      if (typeof value === "string") {
+        result[key] = maskToken(value);
+      } else {
+        result[key] = "[REDACTED]";
+      }
+    } else if (typeof value === "object" && value !== null) {
+      result[key] = sanitizeObject(value, depth + 1);
+    } else if (typeof value === "string") {
+      result[key] = sanitizeString(value);
+    } else {
+      result[key] = value;
+    }
+  }
+
+  return result as T;
+}
+
+/**
+ * 脱敏日志记录属性
+ */
+function sanitizeProperties(props: Record<string, unknown>): Record<string, unknown> {
+  if (!sanitizeEnabled) {
+    return props;
+  }
+  return sanitizeObject(props);
+}
+
+// ============================================================================
+// 颗粒度解析
+// ============================================================================
+
+/**
+ * 解析颗粒度字符串
+ * 
+ * @param value - 颗粒度字符串，如 "1D", "6H", "30M"
+ * @returns 解析后的颗粒度信息
+ */
+function parseGranularity(value: string): ParsedGranularity {
+  const match = value.match(/^(\d+)([DHM])$/);
+  if (!match) {
+    return { raw: DEFAULT_LOG_GRANULARITY, minutes: 60, unit: "H" };
+  }
+
+  const num = parseInt(match[1]!, 10);
+  const unit = match[2] as "D" | "H" | "M";
+
+  let minutes: number;
+  switch (unit) {
+    case "D":
+      minutes = num * 24 * 60;
+      break;
+    case "H":
+      minutes = num * 60;
+      break;
+    case "M":
+      minutes = num;
+      break;
+    default:
+      minutes = 60;
+  }
+
+  return { raw: value, minutes, unit };
+}
+
+// ============================================================================
+// 日志文件名生成
+// ============================================================================
+
+/**
+ * 生成日志文件名
+ * 
+ * 文件名精度由单位决定：
+ * - D: YYYY-MM-DD.jsonl（精确到天）
+ * - H: YYYY-MM-DD-HH.jsonl（精确到小时）
+ * - M: YYYY-MM-DD-HH-MM.jsonl（精确到分钟）
+ * 
+ * @param date - 日期
+ * @param granularity - 颗粒度信息
+ * @param iterator - 迭代器（用于大小滚动）
+ */
+function generateLogFileName(date: Date, gran: ParsedGranularity, iterator?: number): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  
+  let baseName = `${year}-${month}-${day}`;
+
+  // 根据单位决定文件名精度
+  switch (gran.unit) {
+    case "D":
+      // 精确到天，不添加时间部分
+      break;
+    case "H":
+      // 精确到小时
+      const hour = String(date.getHours()).padStart(2, "0");
+      baseName += `-${hour}`;
+      break;
+    case "M":
+      // 精确到分钟
+      const hourM = String(date.getHours()).padStart(2, "0");
+      const minute = String(date.getMinutes()).padStart(2, "0");
+      baseName += `-${hourM}-${minute}`;
+      break;
+  }
+
+  // 添加迭代器（大小滚动时使用）
+  if (iterator !== undefined && iterator > 0) {
+    baseName += `-${iterator}`;
+  }
+
+  return `${baseName}.jsonl`;
+}
+
+/**
+ * 获取当前应该使用的日志文件路径
+ * 
+ * 检查是否需要滚动：
+ * 1. 时间滚动：当前时间超出颗粒度范围
+ * 2. 大小滚动：当前文件超出最大大小
+ */
+function getLogFilePath(logDir: string, gran: ParsedGranularity, maxSizeBytes: number): string {
+  const now = Date.now();
+  
+  // 检查是否需要新建文件
+  if (currentLogFile && currentLogFileCreatedAt > 0) {
+    const elapsedMinutes = (now - currentLogFileCreatedAt) / (1000 * 60);
+    
+    // 时间滚动
+    if (elapsedMinutes >= gran.minutes) {
+      currentLogFile = null;
+      currentLogFileCreatedAt = 0;
+    } else {
+      // 大小滚动
+      try {
+        const stats = statSync(currentLogFile);
+        if (stats.size >= maxSizeBytes) {
+          currentLogFile = null;
+          currentLogFileCreatedAt = 0;
+        }
+      } catch {
+        currentLogFile = null;
+        currentLogFileCreatedAt = 0;
+      }
+    }
+  }
+  
+  // 创建新文件
+  if (!currentLogFile) {
+    const nowDate = new Date(now);
+    let iterator = 0;
+    let filePath = join(logDir, generateLogFileName(nowDate, gran, iterator));
+    
+    // 查找可用的文件名（处理大小滚动）
+    while (existsSync(filePath)) {
+      try {
+        const stats = statSync(filePath);
+        if (stats.size < maxSizeBytes) {
+          // 文件存在且未满，使用它
+          break;
+        }
+      } catch {
+        break;
+      }
+      iterator++;
+      filePath = join(logDir, generateLogFileName(nowDate, gran, iterator));
+    }
+    
+    currentLogFile = filePath;
+    currentLogFileCreatedAt = now;
+    
+    // 确保文件存在
+    if (!existsSync(filePath)) {
+      writeFileSync(filePath, "");
+    }
+  }
+  
+  return currentLogFile;
+}
+
+// ============================================================================
+// 日志清理
+// ============================================================================
+
+/**
+ * 清理过期日志文件
+ */
+function cleanupOldLogs(logDir: string): void {
+  const cutoffTime = Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  
+  try {
+    const files = readdirSync(logDir);
+    
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+      
+      const filePath = join(logDir, file);
+      try {
+        const stats = statSync(filePath);
+        if (stats.mtime.getTime() < cutoffTime) {
+          unlinkSync(filePath);
+        }
+      } catch {
+        // 忽略错误
+      }
+    }
+  } catch {
+    // 忽略错误
+  }
+}
+
+// ============================================================================
 // 格式化器
 // ============================================================================
 
@@ -157,7 +510,7 @@ function jsonFormatter(record: LogRecord): string {
     level: record.level,
     category: record.category,
     message: record.message,
-    properties: record.properties,
+    properties: sanitizeProperties(record.properties),
   };
   return JSON.stringify(entry) + "\n";
 }
@@ -182,10 +535,11 @@ function humanReadableFormatter(record: LogRecord): string {
     ? record.message 
     : JSON.stringify(record.message);
   
-  // 格式化属性
+  // 格式化属性（脱敏）
   let propsStr = "";
   if (record.properties && Object.keys(record.properties).length > 0) {
-    propsStr = " | " + formatProperties(record.properties);
+    const sanitizedProps = sanitizeProperties(record.properties);
+    propsStr = " | " + formatProperties(sanitizedProps);
   }
   
   // 应用颜色
@@ -258,6 +612,36 @@ function formatValue(value: unknown, indent = 0): string {
 }
 
 // ============================================================================
+// 自定义文件 Sink（支持滚动）
+// ============================================================================
+
+/**
+ * 创建支持滚动的文件 Sink
+ */
+function createRollingFileSink(logDir: string, gran: ParsedGranularity, maxSizeBytes: number): Sink {
+  // 确保目录存在
+  try {
+    mkdirSync(logDir, { recursive: true });
+  } catch {
+    // 忽略
+  }
+  
+  // 清理旧日志
+  cleanupOldLogs(logDir);
+  
+  return (record: LogRecord) => {
+    const filePath = getLogFilePath(logDir, gran, maxSizeBytes);
+    const formatted = jsonFormatter(record);
+    
+    try {
+      appendFileSync(filePath, formatted, "utf-8");
+    } catch {
+      // 忽略写入错误
+    }
+  };
+}
+
+// ============================================================================
 // 日志配置函数
 // ============================================================================
 
@@ -271,34 +655,46 @@ export async function initLogger(config: LoggerConfig = {}): Promise<void> {
     return;
   }
 
-  const level = config.level ?? "info";
-  defaultLevel = level;
+  // 解析配置
+  consoleLevel = config.level ?? DEFAULT_LOG_LEVEL;
   colorEnabled = config.color !== false;
+  sanitizeEnabled = config.sanitize ?? DEFAULT_LOG_SANITIZE;
+  
+  // 解析文件大小（clamp 到有效范围）
+  const maxSizeMB = config.maxFileSize ?? DEFAULT_LOG_MAX_FILE_SIZE_MB;
+  maxFileSizeBytes = Math.max(MIN_LOG_FILE_SIZE_MB, Math.min(MAX_LOG_FILE_SIZE_MB, maxSizeMB)) * 1024 * 1024;
+  
+  // 解析颗粒度
+  granularity = parseGranularity(config.granularity ?? DEFAULT_LOG_GRANULARITY);
+  
   const logDir = config.logDir ?? LOGS_DIR;
 
   // 构建 sinks 配置
   const sinks: Record<string, Sink> = {};
 
-  // JSON 文件 sink（主 sink）
+  // JSON 文件 sink（主 sink）- 使用自定义滚动 sink
   if (config.file !== false) {
-    // 确保日志目录存在
-    try {
-      mkdirSync(logDir, { recursive: true });
-    } catch {
-      // 忽略目录已存在的错误
-    }
-    
-    const date = new Date().toISOString().split("T")[0];
-    const logFile = join(logDir, `${date}.jsonl`);
-    
-    sinks.jsonl = getFileSink(logFile, {
-      formatter: jsonFormatter,
-    });
+    sinks.jsonl = createRollingFileSink(logDir, granularity, maxFileSizeBytes);
   }
 
-  // 控制台 sink（可选）
+  // 控制台 sink（可选）- 使用配置的日志级别过滤
   if (config.console === true) {
     sinks.console = (record: LogRecord) => {
+      // 根据控制台日志级别过滤
+      const levelPriority: Record<string, number> = {
+        debug: 0,
+        info: 1,
+        warning: 2,
+        error: 3,
+      };
+      
+      const recordPriority = levelPriority[record.level] ?? 1;
+      const configPriority = levelPriority[consoleLevel] ?? 1;
+      
+      if (recordPriority < configPriority) {
+        return; // 低于配置级别的日志不输出到控制台
+      }
+      
       const output = humanReadableFormatter(record);
       const con = originalConsole ?? console;
       
@@ -313,13 +709,15 @@ export async function initLogger(config: LoggerConfig = {}): Promise<void> {
   }
 
   // 配置 logtape
+  // 注意：文件日志始终使用 debug 级别（记录所有日志）
+  // 控制台日志由 sink 内部根据 consoleLevel 过滤
   await configure({
     sinks,
     loggers: [
       {
         category: ["microagent"],
         sinks: config.console === true ? ["jsonl", "console"] : ["jsonl"],
-        lowestLevel: level,
+        lowestLevel: "debug", // 文件始终记录所有级别，控制台由 sink 过滤
       },
     ],
   });
@@ -448,14 +846,19 @@ export function createTimer(): () => number {
 
 /**
  * 脱敏对象（移除敏感信息）
+ * 
+ * @deprecated 使用配置 sanitize 选项代替
  */
 export function sanitize(obj: unknown, maxDepth = 3): unknown {
+  if (!sanitizeEnabled) {
+    return obj;
+  }
+  
   if (obj === null || obj === undefined) {
     return obj;
   }
 
   if (typeof obj !== "object") {
-    // 字符串截断
     if (typeof obj === "string" && obj.length > 500) {
       return obj.substring(0, 500) + "...[truncated]";
     }
@@ -466,7 +869,6 @@ export function sanitize(obj: unknown, maxDepth = 3): unknown {
     return "[max depth reached]";
   }
 
-  // 处理数组
   if (Array.isArray(obj)) {
     if (obj.length > 10) {
       return [...obj.slice(0, 10).map(v => sanitize(v, maxDepth - 1)), `...${obj.length - 10} more items`];
@@ -474,13 +876,10 @@ export function sanitize(obj: unknown, maxDepth = 3): unknown {
     return obj.map(v => sanitize(v, maxDepth - 1));
   }
 
-  // 处理对象
-  const sensitiveKeys = ["password", "token", "secret", "apiKey", "api_key", "credential", "authorization"];
   const result: Record<string, unknown> = {};
   
   for (const [key, value] of Object.entries(obj)) {
-    // 敏感字段脱敏
-    if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
+    if (SENSITIVE_FIELDS.some(sk => key.toLowerCase().includes(sk))) {
       result[key] = "[REDACTED]";
     } else {
       result[key] = sanitize(value, maxDepth - 1);
@@ -494,4 +893,12 @@ export function sanitize(obj: unknown, maxDepth = 3): unknown {
 export const isLoggerInitialized = () => initialized;
 
 // 导出获取默认日志级别
-export const getDefaultLevel = () => defaultLevel;
+export const getDefaultLevel = () => consoleLevel;
+
+// 导出获取当前配置
+export const getLoggerConfig = () => ({
+  level: consoleLevel,
+  sanitize: sanitizeEnabled,
+  maxFileSizeMB: maxFileSizeBytes / (1024 * 1024),
+  granularity: granularity.raw,
+});

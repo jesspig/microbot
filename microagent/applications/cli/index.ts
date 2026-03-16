@@ -366,14 +366,71 @@ async function main(): Promise<void> {
   // 解析参数（提前解析以确定日志级别）
   const { command, options } = parseArgs(args);
 
-  // 根据参数确定日志级别
-  const logLevel: "debug" | "info" | "warning" | "error" = 
-    options.debug ? "debug" :
-    options["log-level"] === "warn" ? "warning" :
-    (options["log-level"] as "debug" | "info" | "warning" | "error") ?? "info";
+  // 尝试加载配置以获取日志设置
+  let logConfig: {
+    level?: "debug" | "info" | "warning" | "error";
+    sanitize?: boolean;
+    maxFileSize?: number;
+    granularity?: string;
+  } = {};
 
-  // 初始化日志系统（启用控制台输出）
-  await initLogger({ console: true, level: logLevel });
+  // 尝试加载配置文件中的日志设置
+  if (command === "start" || command === "status") {
+    try {
+      const { loadSettings } = await import("../config/loader.js");
+      const settings = await loadSettings(options.config as string | undefined);
+      
+      if (settings.logs) {
+        logConfig = {
+          level: settings.logs.level as "debug" | "info" | "warning" | "error",
+          sanitize: settings.logs.sanitize,
+          maxFileSize: settings.logs.maxFileSize,
+          granularity: settings.logs.granularity,
+        };
+      }
+    } catch {
+      // 配置加载失败，使用默认配置
+    }
+  }
+
+  // CLI 参数覆盖配置文件
+  if (options.debug) {
+    logConfig.level = "debug";
+  } else if (options["log-level"]) {
+    const levelMap: Record<string, "debug" | "info" | "warning" | "error"> = {
+      debug: "debug",
+      info: "info",
+      warn: "warning",
+      warning: "warning",
+      error: "error",
+    };
+    logConfig.level = levelMap[options["log-level"] as string] ?? "info";
+  }
+
+  // 构建日志配置（只包含有值的属性）
+  const loggerConfig: {
+    console: boolean;
+    level: "debug" | "info" | "warning" | "error";
+    sanitize?: boolean;
+    maxFileSize?: number;
+    granularity?: string;
+  } = {
+    console: true,
+    level: logConfig.level ?? "info",
+  };
+  
+  if (logConfig.sanitize !== undefined) {
+    loggerConfig.sanitize = logConfig.sanitize;
+  }
+  if (logConfig.maxFileSize !== undefined) {
+    loggerConfig.maxFileSize = logConfig.maxFileSize;
+  }
+  if (logConfig.granularity !== undefined) {
+    loggerConfig.granularity = logConfig.granularity;
+  }
+
+  // 初始化日志系统
+  await initLogger(loggerConfig);
 
   logMethodCall(logger, { method: "main", module: "CLI", params: { argv: args } });
 
