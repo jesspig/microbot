@@ -170,3 +170,30 @@ export {
   ENV_VAR_PATTERN,
   DATE_PATTERN,
 } from "./constants";
+
+// ============================================================================
+// Token 估算
+// ============================================================================
+
+export {
+  estimateStringTokens,
+  estimateMessageTokens,
+  estimateMessagesTokens,
+  selectMessagesByTokens,
+  shouldCompressContext,
+  calculateTokensToRemove,
+} from "./token-estimator.js";
+
+// ============================================================================
+// 上下文压缩
+// ============================================================================
+
+export {
+  ContextCompressor,
+  createContextCompressor,
+  quickCompress,
+  type CompressionResult,
+  type LLMCallable,
+  type CompressorOptions,
+  type RunningSummary,
+} from "./context-compressor.js";

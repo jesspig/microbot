@@ -48,6 +48,7 @@ import {
 } from "../../channels/index.js";
 import type { IProviderExtended } from "../../../runtime/provider/contract.js";
 import type { AgentConfig } from "../../../runtime/kernel/types.js";
+import type { Message } from "../../../runtime/types.js";
 import type { SingleProviderConfig } from "../../config/schema.js";
 import type { IChannelExtended } from "../../../runtime/channel/contract.js";
 import type { InboundMessage } from "../../../runtime/channel/types.js";
@@ -399,12 +400,13 @@ function createChannels(settings: Settings): IChannelExtended[] {
 /**
  * 创建消息处理器（将 Channel 消息转发给 AgentLoop）
  */
-function createMessageHandler(
+async function createMessageHandler(
   agent: AgentLoop,
   sessionManager: SessionManager,
   channels: IChannelExtended[],
-  settings: Settings
-): (message: InboundMessage) => Promise<void> {
+  settings: Settings,
+  provider: IProviderExtended
+): Promise<(message: InboundMessage) => Promise<void>> {
   const handlerTimer = createTimer();
   logMethodCall(logger, { method: "createMessageHandler", module: "CLI", params: { channelCount: channels.length } });
 
@@ -414,8 +416,39 @@ function createMessageHandler(
   // 获取上下文配置
   const contextWindowTokens = settings.sessions?.contextWindowTokens ?? 65535;
   const compressionTokenThreshold = settings.sessions?.compressionTokenThreshold ?? 0.7;
+  const compressionConfig = settings.sessions?.compression;
 
-  logMethodReturn(logger, { method: "createMessageHandler", module: "CLI", result: { success: true }, duration: handlerTimer() });
+  // 创建 LLM 调用函数（用于摘要生成）
+  // 注意：如果 LLM 调用失败，会降级到滑动窗口策略
+  const llmCall = async (messages: Message[]): Promise<string> => {
+    try {
+      const model = settings.agents.defaults.model ?? "gpt-4o-mini";
+      const response = await provider.chat({
+        messages,
+        model,
+        maxTokens: 500,
+        temperature: 0.3,
+      });
+      return response.text ?? "";
+    } catch (error) {
+      logger.error("摘要生成 LLM 调用失败，将降级到滑动窗口策略", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error; // 重新抛出，让 compressor 处理降级
+    }
+  };
+
+  // 创建压缩器
+  const { ContextCompressor } = await import("../../shared/context-compressor.js");
+  const compressorOptions = {
+    contextWindowTokens,
+    compressionTokenThreshold,
+    llmCall,
+    ...(compressionConfig && { compression: compressionConfig }),
+  };
+  const compressor = new ContextCompressor(compressorOptions);
+
+  logMethodReturn(logger, { method: "createMessageHandler", module: "CLI", result: { success: true, compressionStrategy: compressionConfig?.strategy ?? "sliding-window" }, duration: handlerTimer() });
 
   return async (message: InboundMessage) => {
     const messageTimer = createTimer();
@@ -446,32 +479,18 @@ function createMessageHandler(
       // 获取所有消息
       const allMessages = session.getMessages();
 
-      // 根据 token 限制选择消息
-      const {
-        estimateMessagesTokens,
-        selectMessagesByTokens,
-      } = await import("../../shared/token-estimator.js");
-
-      const totalTokens = estimateMessagesTokens(allMessages);
-      const compressionThreshold = contextWindowTokens * compressionTokenThreshold;
-
-      let result: Awaited<ReturnType<typeof agent.run>>;
+      // 使用压缩器处理消息
+      const compressionResult = await compressor.compress(allMessages);
 
       logger.info("开始运行 Agent", { 
         messageCount: allMessages.length, 
-        totalTokens,
-        compressionThreshold 
+        originalTokens: compressionResult.originalTokens,
+        compressedTokens: compressionResult.compressedTokens,
+        hasSummary: compressionResult.hasSummary,
+        strategy: compressionResult.strategy
       });
 
-      if (totalTokens > compressionThreshold) {
-        // 超过压缩阈值，选择最近的消息
-        logger.info("Token 超过阈值，压缩消息", { totalTokens, threshold: compressionThreshold });
-        const selectedMessages = selectMessagesByTokens(allMessages, contextWindowTokens);
-        result = await agent.run(selectedMessages);
-      } else {
-        // 运行 Agent
-        result = await agent.run(allMessages);
-      }
+      const result = await agent.run(compressionResult.messages);
 
       // 记录 Agent 运行结果
       logger.info("Agent 运行完成", {
@@ -565,8 +584,8 @@ async function runAgentService(
   const agent = new AgentLoop(provider, toolRegistry, agentConfig);
   logger.info("AgentLoop 创建完成", { model: agentConfig.model, maxIterations: agentConfig.maxIterations });
 
-  // 创建消息处理器
-  const messageHandler = createMessageHandler(agent, sessionManager, channels, settings);
+  // 创建消息处理器（传入 provider 用于摘要生成）
+  const messageHandler = await createMessageHandler(agent, sessionManager, channels, settings, provider);
 
   // 注册消息处理器到所有 Channel
   for (const channel of channels) {
@@ -729,11 +748,12 @@ export async function startCommand(
 
     // 读取会话配置
     const persistEnabled = settings.sessions?.persist ?? true;
+    const contextWindowTokens = settings.sessions?.contextWindowTokens ?? 65535;
 
     // 仅在持久化启用时加载历史
     if (persistEnabled) {
       try {
-        await sessionManager.loadHistory(GLOBAL_SESSION_KEY);
+        await sessionManager.loadHistory(GLOBAL_SESSION_KEY, contextWindowTokens);
         logger.debug("历史会话加载成功");
       } catch (err) {
         const error = err as Error;

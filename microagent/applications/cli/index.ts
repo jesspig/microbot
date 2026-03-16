@@ -321,9 +321,15 @@ function setupGlobalErrorHandlers(): void {
   process.on("unhandledRejection", (reason, _promise) => {
     const message = reason instanceof Error ? reason.message : String(reason);
 
-    // 网络错误（如 ECONNREFUSED）静默处理
+    // 网络连接错误静默处理
     if (message.includes("ECONNREFUSED") || message.includes("ETIMEDOUT") || message.includes("ENOTFOUND")) {
       logger.debug("网络错误已静默处理", { errorType: "unhandledRejection", message });
+      return;
+    }
+
+    // HTTP 状态码错误（如 503、429）记录警告但不退出
+    if (message.includes("status code 5") || message.includes("status code 4")) {
+      logger.warn("HTTP 请求失败，服务可能暂时不可用", { message });
       return;
     }
 
