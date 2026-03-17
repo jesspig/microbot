@@ -15,6 +15,19 @@ const logger = toolsLogger();
 export { FilesystemTool } from "./filesystem.js";
 export { ShellTool } from "./shell.js";
 export { WebTool } from "./web.js";
+export { MemoryTool } from "./memory.js";
+export { HistoryTool } from "./history.js";
+export {
+  SkillTool,
+  SkillListTool,
+  SkillSearchTool,
+  SkillReadTool,
+  SkillExecuteTool,
+  SkillCreateTool,
+  SkillDeleteTool,
+  SkillAddTool,
+  skillTools,
+} from "./skill.js";
 
 // ============================================================================
 // MCP 工具模块
@@ -39,6 +52,9 @@ import type { ToolFactory } from "../../runtime/tool/contract.js";
 import { FilesystemTool } from "./filesystem.js";
 import { ShellTool } from "./shell.js";
 import { WebTool } from "./web.js";
+import { MemoryTool } from "./memory.js";
+import { HistoryTool } from "./history.js";
+import { skillTools } from "./skill.js";
 
 /**
  * 工具工厂映射
@@ -49,6 +65,16 @@ export const toolFactories: Record<string, ToolFactory> = {
   filesystem: () => new FilesystemTool(),
   shell: () => new ShellTool(),
   web: () => new WebTool(),
+  memory: () => new MemoryTool(),
+  history: () => new HistoryTool(),
+  // 技能工具（独立工具）
+  skill_list: () => skillTools.find(t => t.name === "skill_list")!,
+  skill_search: () => skillTools.find(t => t.name === "skill_search")!,
+  skill_read: () => skillTools.find(t => t.name === "skill_read")!,
+  skill_execute: () => skillTools.find(t => t.name === "skill_execute")!,
+  skill_create: () => skillTools.find(t => t.name === "skill_create")!,
+  skill_delete: () => skillTools.find(t => t.name === "skill_delete")!,
+  skill_add: () => skillTools.find(t => t.name === "skill_add")!,
 };
 
 /**

@@ -17,9 +17,6 @@ export const MICRO_AGENT_DIR = join(homedir(), ".micro-agent");
 /** 工作目录 */
 export const WORKSPACE_DIR = join(MICRO_AGENT_DIR, "workspace");
 
-/** Agent 配置目录 */
-export const AGENT_DIR = join(WORKSPACE_DIR, ".agent");
-
 /** 会话存储目录 */
 export const SESSIONS_DIR = join(MICRO_AGENT_DIR, "sessions");
 
@@ -27,38 +24,44 @@ export const SESSIONS_DIR = join(MICRO_AGENT_DIR, "sessions");
 export const LOGS_DIR = join(MICRO_AGENT_DIR, "logs");
 
 /** 每日记录目录 */
-export const HISTORY_DIR = join(AGENT_DIR, "history");
+export const HISTORY_DIR = join(MICRO_AGENT_DIR, "history");
 
-/** 技能目录 */
-export const SKILLS_DIR = join(AGENT_DIR, "skills");
+/** 技能目录（主目录） */
+export const SKILLS_DIR = join(MICRO_AGENT_DIR, "skills");
+
+/** 备用技能目录（~/.agents/skills/） */
+export const AGENTS_SKILLS_DIR = join(homedir(), ".agents", "skills");
+
+/** 所有技能目录列表（按优先级排序，主目录优先） */
+export const SKILLS_DIRS = [SKILLS_DIR, AGENTS_SKILLS_DIR];
 
 // ============================================================================
-// 配置文件路径
+// 配置文件路径（直接放在根目录）
 // ============================================================================
 
-/** 用户配置文件（放在根目录） */
+/** 用户配置文件 */
 export const SETTINGS_FILE = join(MICRO_AGENT_DIR, "settings.yaml");
 
 /** MCP 配置文件 */
-export const MCP_CONFIG_FILE = join(AGENT_DIR, "mcp.json");
+export const MCP_CONFIG_FILE = join(MICRO_AGENT_DIR, "mcp.json");
 
 /** Agent 角色定义文件 */
-export const AGENTS_FILE = join(AGENT_DIR, "AGENTS.md");
+export const AGENTS_FILE = join(MICRO_AGENT_DIR, "AGENTS.md");
 
 /** 个性/价值观文件 */
-export const SOUL_FILE = join(AGENT_DIR, "SOUL.md");
+export const SOUL_FILE = join(MICRO_AGENT_DIR, "SOUL.md");
 
 /** 用户偏好文件 */
-export const USER_FILE = join(AGENT_DIR, "USER.md");
+export const USER_FILE = join(MICRO_AGENT_DIR, "USER.md");
 
 /** 工具使用指南文件 */
-export const TOOLS_FILE = join(AGENT_DIR, "TOOLS.md");
+export const TOOLS_FILE = join(MICRO_AGENT_DIR, "TOOLS.md");
 
 /** 心跳任务文件 */
-export const HEARTBEAT_FILE = join(AGENT_DIR, "HEARTBEAT.md");
+export const HEARTBEAT_FILE = join(MICRO_AGENT_DIR, "HEARTBEAT.md");
 
 /** 长期记忆文件 */
-export const MEMORY_FILE = join(AGENT_DIR, "MEMORY.md");
+export const MEMORY_FILE = join(MICRO_AGENT_DIR, "MEMORY.md");
 
 // ============================================================================
 // 默认配置

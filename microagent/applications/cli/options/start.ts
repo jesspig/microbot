@@ -15,7 +15,6 @@ import { mkdirSync } from "node:fs";
 import {
   MICRO_AGENT_DIR,
   WORKSPACE_DIR,
-  AGENT_DIR,
   SESSIONS_DIR,
   LOGS_DIR,
   HISTORY_DIR,
@@ -48,6 +47,7 @@ import {
 } from "../../channels/index.js";
 import type { IProviderExtended } from "../../../runtime/provider/contract.js";
 import type { AgentConfig } from "../../../runtime/kernel/types.js";
+import type { Message } from "../../../runtime/types.js";
 import type { SingleProviderConfig } from "../../config/schema.js";
 import type { IChannelExtended } from "../../../runtime/channel/contract.js";
 import type { InboundMessage } from "../../../runtime/channel/types.js";
@@ -58,6 +58,12 @@ import {
   logMethodReturn,
   logMethodError,
 } from "../../shared/logger.js";
+import {
+  buildSystemPrompt,
+  buildRuntimeContext,
+  getCurrentDateString,
+} from "../../prompts/index.js";
+import { readFile } from "node:fs/promises";
 
 const logger = cliLogger();
 
@@ -101,7 +107,6 @@ function initializeRuntimeDirectories(): void {
   const dirs = [
     MICRO_AGENT_DIR,
     WORKSPACE_DIR,
-    AGENT_DIR,
     SESSIONS_DIR,
     LOGS_DIR,
     HISTORY_DIR,
@@ -177,17 +182,46 @@ function createProvider(settings: Settings): IProviderExtended | null {
   logMethodCall(logger, { method: "createProvider", module: "CLI", params: {} });
 
   const providers = settings.providers ?? {};
-  const enabledProvider = Object.entries(providers).find(
-    ([_, config]) => config?.enabled === true
-  );
+  const model = settings.agents?.defaults?.model ?? "";
 
-  if (!enabledProvider) {
-    logger.warn("未找到启用的 Provider");
-    logMethodReturn(logger, { method: "createProvider", module: "CLI", result: null, duration: timer() });
-    return null;
+  // 解析模型名中的 provider 前缀
+  const slashIndex = model.indexOf("/");
+  let targetProviderName: string | null = null;
+
+  if (slashIndex >= 0) {
+    targetProviderName = model.substring(0, slashIndex);
   }
 
-  const [providerName, providerConfig] = enabledProvider;
+  let selectedProvider: [string, SingleProviderConfig] | null = null;
+
+  if (targetProviderName) {
+    // 模型名包含 provider 前缀，直接查找该 provider
+    const config = providers[targetProviderName];
+    if (!config) {
+      logger.error("Provider 未找到", { targetProviderName, model });
+      logMethodReturn(logger, { method: "createProvider", module: "CLI", result: null, duration: timer() });
+      return null;
+    }
+    if (!config.enabled) {
+      logger.error("Provider 未启用", { targetProviderName, model });
+      logMethodReturn(logger, { method: "createProvider", module: "CLI", result: null, duration: timer() });
+      return null;
+    }
+    selectedProvider = [targetProviderName, config];
+  } else {
+    // 模型名不含 provider 前缀，选择第一个启用的 provider
+    const enabledProvider = Object.entries(providers).find(
+      ([_, config]) => config?.enabled === true
+    );
+    if (!enabledProvider) {
+      logger.warn("未找到启用的 Provider");
+      logMethodReturn(logger, { method: "createProvider", module: "CLI", result: null, duration: timer() });
+      return null;
+    }
+    selectedProvider = enabledProvider;
+  }
+
+  const [providerName, providerConfig] = selectedProvider;
 
   if (!providerConfig) {
     logger.warn("Provider 配置为空", { providerName });
@@ -302,12 +336,13 @@ function createChannels(settings: Settings): IChannelExtended[] {
           enabled: true,
           appId: qqConfig.appId,
           clientSecret: qqConfig.clientSecret,
+          sandbox: qqConfig.sandbox,
           allowFrom: qqConfig.allowFrom,
           allowChannels: qqConfig.allowChannels,
         };
         const channel = createQQChannel(config as Parameters<typeof createQQChannel>[0]);
         channels.push(channel);
-        logger.info("QQ Channel 创建成功");
+        logger.info("QQ Channel 创建成功", { sandbox: config.sandbox });
       } catch (err) {
         const error = err as Error;
         logger.error("QQ Channel 创建失败", { error: error.message });
@@ -397,25 +432,90 @@ function createChannels(settings: Settings): IChannelExtended[] {
 // ============================================================================
 
 /**
+ * 读取文件内容（如果存在）
+ */
+async function readFileIfExists(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+/**
  * 创建消息处理器（将 Channel 消息转发给 AgentLoop）
  */
-function createMessageHandler(
+async function createMessageHandler(
   agent: AgentLoop,
   sessionManager: SessionManager,
   channels: IChannelExtended[],
-  settings: Settings
-): (message: InboundMessage) => Promise<void> {
+  settings: Settings,
+  provider: IProviderExtended
+): Promise<(message: InboundMessage) => Promise<void>> {
   const handlerTimer = createTimer();
   logMethodCall(logger, { method: "createMessageHandler", module: "CLI", params: { channelCount: channels.length } });
 
   // 单用户模式：使用全局统一的 session key
   const GLOBAL_SESSION_KEY = "global";
 
+  // 构建系统提示词（只构建一次）
+  const [agentsContent, soulContent, userContent, toolsContent, memoryContent] = await Promise.all([
+    readFileIfExists(AGENTS_FILE),
+    readFileIfExists(SOUL_FILE),
+    readFileIfExists(USER_FILE),
+    readFileIfExists(TOOLS_FILE),
+    readFileIfExists(MEMORY_FILE),
+  ]);
+
+  // 构建系统提示词
+  const systemPromptResult = buildSystemPrompt({
+    agentsContent: agentsContent || "You are MicroAgent, a helpful AI assistant.",
+    soulContent,
+    userContent,
+    toolsContent,
+    memoryContent,
+    currentDate: getCurrentDateString(),
+  });
+  logger.info("使用标准系统提示词");
+
+  logger.info("系统提示词已构建", { length: systemPromptResult.length });
+
   // 获取上下文配置
   const contextWindowTokens = settings.sessions?.contextWindowTokens ?? 65535;
   const compressionTokenThreshold = settings.sessions?.compressionTokenThreshold ?? 0.7;
+  const compressionConfig = settings.sessions?.compression;
 
-  logMethodReturn(logger, { method: "createMessageHandler", module: "CLI", result: { success: true }, duration: handlerTimer() });
+  // 创建 LLM 调用函数（用于摘要生成）
+  // 注意：如果 LLM 调用失败，会降级到滑动窗口策略
+  const llmCall = async (messages: Message[]): Promise<string> => {
+    try {
+      const model = settings.agents.defaults.model ?? "gpt-4o-mini";
+      const response = await provider.chat({
+        messages,
+        model,
+        maxTokens: 500,
+        temperature: 0.3,
+      });
+      return response.text ?? "";
+    } catch (error) {
+      logger.error("摘要生成 LLM 调用失败，将降级到滑动窗口策略", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error; // 重新抛出，让 compressor 处理降级
+    }
+  };
+
+  // 创建压缩器
+  const { ContextCompressor } = await import("../../shared/context-compressor.js");
+  const compressorOptions = {
+    contextWindowTokens,
+    compressionTokenThreshold,
+    llmCall,
+    ...(compressionConfig && { compression: compressionConfig }),
+  };
+  const compressor = new ContextCompressor(compressorOptions);
+
+  logMethodReturn(logger, { method: "createMessageHandler", module: "CLI", result: { success: true, compressionStrategy: compressionConfig?.strategy ?? "sliding-window" }, duration: handlerTimer() });
 
   return async (message: InboundMessage) => {
     const messageTimer = createTimer();
@@ -446,32 +546,50 @@ function createMessageHandler(
       // 获取所有消息
       const allMessages = session.getMessages();
 
-      // 根据 token 限制选择消息
-      const {
-        estimateMessagesTokens,
-        selectMessagesByTokens,
-      } = await import("../../shared/token-estimator.js");
+      // 使用压缩器处理消息
+      const compressionResult = await compressor.compress(allMessages);
 
-      const totalTokens = estimateMessagesTokens(allMessages);
-      const compressionThreshold = contextWindowTokens * compressionTokenThreshold;
-
-      let result: Awaited<ReturnType<typeof agent.run>>;
-
-      logger.info("开始运行 Agent", { 
-        messageCount: allMessages.length, 
-        totalTokens,
-        compressionThreshold 
+      // 构建运行时上下文（包含 workspace 路径）
+      const runtimeContext = buildRuntimeContext({
+        currentDate: getCurrentDateString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        platform: process.platform,
+        workspacePath: WORKSPACE_DIR,
       });
 
-      if (totalTokens > compressionThreshold) {
-        // 超过压缩阈值，选择最近的消息
-        logger.info("Token 超过阈值，压缩消息", { totalTokens, threshold: compressionThreshold });
-        const selectedMessages = selectMessagesByTokens(allMessages, contextWindowTokens);
-        result = await agent.run(selectedMessages);
-      } else {
-        // 运行 Agent
-        result = await agent.run(allMessages);
+      // 构建最终消息列表：系统提示词 + 压缩后的消息
+      const finalMessages: Message[] = [
+        { role: "system", content: systemPromptResult.prompt },
+      ];
+
+      // 在压缩后的消息中注入运行时上下文
+      const compressedMsgs = compressionResult.messages;
+      for (let i = 0; i < compressedMsgs.length; i++) {
+        const msg = compressedMsgs[i];
+        if (!msg) continue;
+
+        if (msg.role === "user" && i === compressedMsgs.length - 1) {
+          // 最后一条用户消息前注入运行时上下文
+          finalMessages.push({
+            role: "user",
+            content: `${runtimeContext}\n\n${msg.content}`,
+          });
+        } else {
+          finalMessages.push(msg);
+        }
       }
+
+      logger.info("开始运行 Agent", { 
+        messageCount: finalMessages.length, 
+        originalTokens: compressionResult.originalTokens,
+        compressedTokens: compressionResult.compressedTokens,
+        hasSummary: compressionResult.hasSummary,
+        strategy: compressionResult.strategy,
+        systemPromptLength: systemPromptResult.length,
+        hasWorkspacePath: true,
+      });
+
+      const result = await agent.run(finalMessages);
 
       // 记录 Agent 运行结果
       logger.info("Agent 运行完成", {
@@ -556,8 +674,17 @@ async function runAgentService(
   logMethodCall(logger, { method: "runAgentService", module: "CLI", params: { channelCount: channels.length } });
 
   // 创建 AgentLoop
+  // 处理模型名：剥离 provider 前缀
+  let model = settings.agents.defaults.model ?? "default";
+  const slashIndex = model.indexOf("/");
+  if (slashIndex >= 0) {
+    const originalModel = model;
+    model = model.substring(slashIndex + 1);
+    logger.debug("剥离模型 provider 前缀", { originalModel, strippedModel: model });
+  }
+
   const agentConfig: AgentConfig = {
-    model: settings.agents.defaults.model ?? "default",
+    model,
     maxIterations: settings.agents.defaults.maxToolIterations ?? 50,
     defaultTimeout: 60000,
     enableLogging: false,
@@ -565,8 +692,8 @@ async function runAgentService(
   const agent = new AgentLoop(provider, toolRegistry, agentConfig);
   logger.info("AgentLoop 创建完成", { model: agentConfig.model, maxIterations: agentConfig.maxIterations });
 
-  // 创建消息处理器
-  const messageHandler = createMessageHandler(agent, sessionManager, channels, settings);
+  // 创建消息处理器（传入 provider 用于摘要生成）
+  const messageHandler = await createMessageHandler(agent, sessionManager, channels, settings, provider);
 
   // 注册消息处理器到所有 Channel
   for (const channel of channels) {
@@ -729,11 +856,12 @@ export async function startCommand(
 
     // 读取会话配置
     const persistEnabled = settings.sessions?.persist ?? true;
+    const contextWindowTokens = settings.sessions?.contextWindowTokens ?? 65535;
 
     // 仅在持久化启用时加载历史
     if (persistEnabled) {
       try {
-        await sessionManager.loadHistory(GLOBAL_SESSION_KEY);
+        await sessionManager.loadHistory(GLOBAL_SESSION_KEY, contextWindowTokens);
         logger.debug("历史会话加载成功");
       } catch (err) {
         const error = err as Error;

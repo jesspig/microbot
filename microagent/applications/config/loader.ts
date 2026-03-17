@@ -34,6 +34,109 @@ const DEFAULT_AGENT_CONFIG = {
 };
 
 // ============================================================================
+// 模型与 Provider 交叉验证
+// ============================================================================
+
+/**
+ * 验证模型配置与 Provider 配置的一致性
+ *
+ * 检查规则：
+ * 1. 如果模型格式为 `<provider>/<model>`：
+ *    - provider 必须存在于 providers 配置中
+ *    - provider 必须启用 (enabled: true)
+ *    - model 必须在该 provider 的 models 列表中
+ * 2. 如果模型格式为纯模型名（不带前缀）：
+ *    - 必须有且仅有一个启用的 provider
+ *    - model 必须在该 provider 的 models 列表中
+ *
+ * @param settings - 配置对象
+ * @param filePath - 配置文件路径（用于错误信息）
+ * @throws ConfigValidationError 如果验证失败
+ */
+function validateModelProvider(settings: Settings, filePath: string): void {
+  const logger = configLogger();
+  const model = settings.agents?.defaults?.model;
+
+  // 模型未配置，跳过验证
+  if (!model || model.trim() === "") {
+    logger.debug("模型未配置，跳过 Provider 交叉验证");
+    return;
+  }
+
+  const slashIndex = model.indexOf("/");
+  const providers = settings.providers ?? {};
+
+  // 获取所有启用的 providers
+  const enabledProviders = Object.entries(providers)
+    .filter(([, config]) => config.enabled)
+    .map(([name, config]) => ({ name, config }));
+
+  if (slashIndex >= 0) {
+    // 格式：<provider>/<model>
+    const providerName = model.substring(0, slashIndex);
+    const modelName = model.substring(slashIndex + 1);
+
+    // 检查 provider 是否存在
+    const provider = providers[providerName];
+    if (!provider) {
+      throw new ConfigValidationError(
+        `模型 "${model}" 的 provider "${providerName}" 不存在于 providers 配置中`,
+        filePath
+      );
+    }
+
+    // 检查 provider 是否启用
+    if (!provider.enabled) {
+      throw new ConfigValidationError(
+        `模型 "${model}" 的 provider "${providerName}" 未启用，请设置 providers.${providerName}.enabled: true`,
+        filePath
+      );
+    }
+
+    // 检查模型是否在 provider 的 models 列表中
+    if (provider.models && provider.models.length > 0) {
+      if (!provider.models.includes(modelName)) {
+        throw new ConfigValidationError(
+          `模型 "${modelName}" 不在 provider "${providerName}" 的 models 列表中。可用模型: ${provider.models.join(", ")}`,
+          filePath
+        );
+      }
+    }
+
+    logger.debug("模型与 Provider 验证通过", { model, provider: providerName });
+  } else {
+    // 格式：纯模型名（不带前缀）
+    if (enabledProviders.length === 0) {
+      throw new ConfigValidationError(
+        `模型 "${model}" 未指定 provider，但没有任何启用的 provider。请在 providers 中启用至少一个 provider，或使用完整格式 "<provider>/<model>"`,
+        filePath
+      );
+    }
+
+    if (enabledProviders.length > 1) {
+      const providerNames = enabledProviders.map((p) => p.name).join(", ");
+      throw new ConfigValidationError(
+        `模型 "${model}" 未指定 provider，但有多个启用的 provider (${providerNames})。请使用完整格式 "<provider>/<model>" 指定 provider`,
+        filePath
+      );
+    }
+
+    // 只有一个启用的 provider，检查模型是否在其 models 列表中
+    const { name: providerName, config: providerConfig } = enabledProviders[0]!;
+    if (providerConfig.models && providerConfig.models.length > 0) {
+      if (!providerConfig.models.includes(model)) {
+        throw new ConfigValidationError(
+          `模型 "${model}" 不在 provider "${providerName}" 的 models 列表中。可用模型: ${providerConfig.models.join(", ")}`,
+          filePath
+        );
+      }
+    }
+
+    logger.debug("模型与 Provider 验证通过", { model, provider: providerName });
+  }
+}
+
+// ============================================================================
 // 配置加载
 // ============================================================================
 
@@ -108,6 +211,10 @@ export async function loadSettings(configPath?: string): Promise<Settings> {
     }
 
     const data = validationResult.data;
+
+    // 交叉验证：agents.defaults.model 与 providers 配置
+    validateModelProvider(data, filePath);
+
     const providersCount = data.providers ? Object.keys(data.providers).length : 0;
     const hasChannels = data.channels ? Object.keys(data.channels).length > 0 : false;
     logger.info("配置加载成功", { configPath: filePath, providersCount, hasChannels });

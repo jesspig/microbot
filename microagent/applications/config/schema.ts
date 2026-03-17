@@ -233,11 +233,12 @@ export const QQChannelConfigSchema = z.strictObject({
   clientSecret: z.string().default(""),
   /** @deprecated 已弃用，请使用 clientSecret */
   token: z.string().optional(),
+  /** 是否使用沙箱环境（默认 true） */
+  sandbox: z.boolean().default(true),
   /** 允许发送消息的频道列表（["*"] 表示全部允许） */
   allowChannels: z.array(z.string()).optional(),
   /** 允许发送消息的用户列表（["*"] 表示全部允许） */
   allowFrom: z.array(z.string()).optional(),
-  // 注意：个人助理场景强制使用沙箱环境，不暴露在公共域
 });
 
 /**
@@ -310,6 +311,60 @@ export type WechatWorkChannelConfig = z.infer<
 // ============================================================================
 
 /**
+ * 压缩策略枚举
+ */
+export const CompressionStrategySchema = z.enum(["sliding-window", "summarization", "hybrid"]);
+
+/**
+ * 摘要 Token 数配置
+ * - 纯数字：表示绝对 token 数，如 1000
+ * - 数字+百分号：表示占 contextWindowTokens 的比例，如 "10%"
+ * - 不设置：默认 "5%"
+ */
+export const SummaryMaxTokensSchema = z.union([
+  z.number().int().positive(),
+  z.string().regex(/^\d+(\.\d+)?%$/, "百分比格式应为数字+%，如 10%"),
+]);
+
+/**
+ * 压缩配置 Schema
+ *
+ * 定义上下文压缩策略参数
+ */
+export const CompressionConfigSchema = z.strictObject({
+  /** 压缩策略：sliding-window（滑动窗口）| summarization（摘要）| hybrid（混合），默认 hybrid */
+  strategy: CompressionStrategySchema.default("hybrid"),
+
+  /** 保留最近消息数（hybrid/summarization 策略），默认 10 */
+  keepRecentMessages: z.number().int().min(1).max(50).default(10),
+
+  /** 摘要最大 token 数：纯数字（绝对值）或 "10%"（比例），默认 "5%" */
+  summaryMaxTokens: SummaryMaxTokensSchema.optional(),
+
+  /** 是否启用摘要压缩，默认 true */
+  enabled: z.boolean().default(true),
+});
+
+/**
+ * 历史记录整理配置 Schema
+ *
+ * 定义对话历史记录的自动整理参数
+ */
+export const HistoryConfigSchema = z.strictObject({
+  /** 是否启用历史记录整理，默认 true */
+  enabled: z.boolean().default(true),
+
+  /** 触发整理的阈值（0-1，相对于 contextWindow），默认 0.7 */
+  threshold: z.number().min(0).max(1).default(0.7),
+
+  /** 整理时保留最近消息数，默认 10 */
+  keepRecentMessages: z.number().int().min(1).max(50).default(10),
+
+  /** 整理后上下文目标比例（0-1），默认 0.5 */
+  targetRatio: z.number().min(0.1).max(0.8).default(0.5),
+});
+
+/**
  * Sessions 配置 Schema
  *
  * 定义会话持久化和上下文管理参数
@@ -321,9 +376,35 @@ export const SessionsConfigSchema = z.strictObject({
   /** 压缩阈值（0-1），当上下文达到窗口的此比例时触发压缩，默认 0.7 */
   compressionTokenThreshold: z.number().min(0).max(1).default(0.7),
 
+  /** 压缩配置 */
+  compression: CompressionConfigSchema.optional(),
+
+  /** 历史记录整理配置 */
+  history: HistoryConfigSchema.optional(),
+
   /** 是否启用持久化，默认 true */
   persist: z.boolean().default(true),
 });
+
+/**
+ * 压缩策略类型
+ */
+export type CompressionStrategy = z.infer<typeof CompressionStrategySchema>;
+
+/**
+ * 摘要 Token 数类型
+ */
+export type SummaryMaxTokens = z.infer<typeof SummaryMaxTokensSchema>;
+
+/**
+ * 压缩配置类型
+ */
+export type CompressionConfig = z.infer<typeof CompressionConfigSchema>;
+
+/**
+ * 历史记录整理配置类型
+ */
+export type HistoryConfig = z.infer<typeof HistoryConfigSchema>;
 
 /**
  * Sessions 配置类型

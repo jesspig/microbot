@@ -1,7 +1,7 @@
 /**
  * config 命令实现
  *
- * 生成默认配置文件到 workspace/.agent/
+ * 生成默认配置文件到 ~/.micro-agent/
  * 复制模板文件
  */
 
@@ -11,7 +11,6 @@ import { mkdirSync, existsSync } from "node:fs";
 import {
   MICRO_AGENT_DIR,
   WORKSPACE_DIR,
-  AGENT_DIR,
   SESSIONS_DIR,
   LOGS_DIR,
   HISTORY_DIR,
@@ -39,8 +38,8 @@ const TEMPLATES_DIR = join(
   "templates"
 );
 
-/** 需要复制到 Agent 目录的模板文件 */
-const AGENT_TEMPLATE_FILES: Array<{ src: string; dest: string }> = [
+/** 需要复制到根目录的模板文件 */
+const TEMPLATE_FILES: Array<{ src: string; dest: string }> = [
   { src: "AGENTS.md", dest: "AGENTS.md" },
   { src: "SOUL.md", dest: "SOUL.md" },
   { src: "USER.md", dest: "USER.md" },
@@ -48,10 +47,6 @@ const AGENT_TEMPLATE_FILES: Array<{ src: string; dest: string }> = [
   { src: "HEARTBEAT.md", dest: "HEARTBEAT.md" },
   { src: "MEMORY.md", dest: "MEMORY.md" },
   { src: "mcp.json", dest: "mcp.json" },
-];
-
-/** 需要复制到根目录的配置文件 */
-const ROOT_TEMPLATE_FILES: Array<{ src: string; dest: string }> = [
   { src: "settings.example.yaml", dest: "settings.yaml" },
 ];
 
@@ -161,7 +156,6 @@ export async function configCommand(
     const directories = [
       MICRO_AGENT_DIR,
       WORKSPACE_DIR,
-      AGENT_DIR,
       SESSIONS_DIR,
       LOGS_DIR,
       HISTORY_DIR,
@@ -191,40 +185,9 @@ export async function configCommand(
       }
     }
 
-    // 2. 复制 Agent 目录模板文件
-    logger.debug("复制 Agent 目录模板文件");
-    for (const { src: srcFile, dest: destFile } of AGENT_TEMPLATE_FILES) {
-      const src = join(TEMPLATES_DIR, srcFile);
-      const dest = join(AGENT_DIR, destFile);
-
-      if (options.dryRun) {
-        const destExists = await Bun.file(dest).exists();
-        if (destExists && !options.force) {
-          result.skipped.push(destFile);
-        } else {
-          result.files.push(destFile);
-        }
-        continue;
-      }
-
-      const destExists = await Bun.file(dest).exists();
-
-      if (destExists && !options.force) {
-        result.skipped.push(destFile);
-        continue;
-      }
-
-      const copied = await copyFile(src, dest);
-      if (copied) {
-        result.files.push(destFile);
-      } else {
-        result.skipped.push(destFile);
-      }
-    }
-
-    // 3. 复制根目录配置文件（settings.yaml）
-    logger.debug("复制根目录配置文件");
-    for (const { src: srcFile, dest: destFile } of ROOT_TEMPLATE_FILES) {
+    // 2. 复制模板文件到根目录
+    logger.debug("复制模板文件");
+    for (const { src: srcFile, dest: destFile } of TEMPLATE_FILES) {
       const src = join(TEMPLATES_DIR, srcFile);
       const dest = join(MICRO_AGENT_DIR, destFile);
 

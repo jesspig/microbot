@@ -240,6 +240,7 @@ channels:
     enabled: false
     appId: ""
     clientSecret: "" # 从 QQ 开放平台「开发设置」获取
+    sandbox: true
     allowChannels: [] # 允许的频道列表，["*"] 表示全部
     allowFrom: [] # 允许的用户列表，["*"] 表示全部
 
@@ -316,6 +317,31 @@ sessions:
   # 较小的值会更早触发压缩，保持更短的上下文
   # 较大的值会保留更多上下文，但可能增加 token 消耗
   compressionTokenThreshold: 0.7
+
+  # 压缩策略配置
+  # 当上下文超过阈值时，根据策略压缩对话历史
+  compression:
+    # 压缩策略：sliding-window（滑动窗口）| summarization（摘要）| hybrid（混合）
+    # - sliding-window: 丢弃旧消息，保留最近的消息
+    # - summarization: 使用 LLM 压缩所有历史为摘要
+    # - hybrid: 摘要旧消息 + 保留最近消息（推荐）
+    strategy: hybrid
+
+    # 保留最近消息数（hybrid 策略）
+    # 这些消息不会被压缩，保持完整上下文
+    # 默认 10，范围 1-50
+    keepRecentMessages: 10
+
+    # 摘要最大 token 数（hybrid/summarization 策略）
+    # 支持两种格式：
+    #   - 纯数字：绝对 token 数，如 1000
+    #   - 百分比：占 contextWindowTokens 的比例，如 "10%"
+    # 不设置默认 "5%"，建议范围 1% ~ 10%
+    # summaryMaxTokens: 1000      # 绝对值：1000 tokens
+    # summaryMaxTokens: "10%"     # 比例：contextWindowTokens 的 10%
+
+    # 是否启用压缩，默认 true
+    enabled: true
 
   # 是否启用会话持久化
   # 开启后重启可恢复上下文，关闭则每次启动都是新会话

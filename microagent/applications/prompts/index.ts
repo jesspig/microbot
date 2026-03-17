@@ -11,11 +11,13 @@
 export {
   buildSystemPrompt,
   buildSimpleSystemPrompt,
-  buildSystemPromptWithTools,
+  buildRuntimeContext,
+  removeYamlFrontmatter,
   getCurrentDateString,
   estimateTokenCount,
   type SystemPromptParams,
   type BuiltSystemPrompt,
+  type RuntimeContext,
 } from "./system-prompt.js";
 
 // ============================================================================
@@ -73,3 +75,5 @@ export {
   formatErrorMessage,
   createError,
 } from "./error-messages.js";
+
+

@@ -481,19 +481,35 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
 
   private convertMessages(messages: Message[]): unknown[] {
     return messages.map((msg) => {
-      const result: Record<string, unknown> = { role: msg.role, content: msg.content };
-      if (msg.role === "assistant" && msg.toolCalls) {
-        result.tool_calls = msg.toolCalls.map((tc) => ({
-          id: tc.id,
-          type: "function",
-          function: {
-            name: tc.name,
-            arguments: typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments),
-          },
-        }));
+      // assistant 消息有 tool_calls 时，content 应为 null（而非空字符串）
+      // 某些模型（如 Ollama/qwen）对空字符串和 null 有不同解析方式
+      if (msg.role === "assistant" && msg.toolCalls?.length) {
+        const result: Record<string, unknown> = {
+          role: msg.role,
+          content: msg.content || null, // 空字符串转为 null
+          tool_calls: msg.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: "function",
+            function: {
+              name: tc.name,
+              arguments: typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments),
+            },
+          })),
+        };
+        return result;
       }
-      if (msg.role === "tool") result.tool_call_id = msg.toolCallId;
-      return result;
+
+      // tool 消息：只包含 role、content、tool_call_id（不需要 name）
+      if (msg.role === "tool") {
+        return {
+          role: msg.role,
+          content: msg.content,
+          tool_call_id: msg.toolCallId,
+        };
+      }
+
+      // 其他消息类型
+      return { role: msg.role, content: msg.content };
     });
   }
 
