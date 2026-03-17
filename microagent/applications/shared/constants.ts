@@ -26,8 +26,14 @@ export const LOGS_DIR = join(MICRO_AGENT_DIR, "logs");
 /** 每日记录目录 */
 export const HISTORY_DIR = join(MICRO_AGENT_DIR, "history");
 
-/** 技能目录 */
+/** 技能目录（主目录） */
 export const SKILLS_DIR = join(MICRO_AGENT_DIR, "skills");
+
+/** 备用技能目录（~/.agents/skills/） */
+export const AGENTS_SKILLS_DIR = join(homedir(), ".agents", "skills");
+
+/** 所有技能目录列表（按优先级排序，主目录优先） */
+export const SKILLS_DIRS = [SKILLS_DIR, AGENTS_SKILLS_DIR];
 
 // ============================================================================
 // 配置文件路径（直接放在根目录）
