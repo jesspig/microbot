@@ -2,77 +2,31 @@
  * OpenAI Provider 实现
  *
  * 支持 OpenAI GPT API 格式
+ * 重构后使用专职组件处理不同职责
  */
 
 import { BaseProvider } from "../../runtime/provider/base.js";
 import { providersLogger, createTimer, sanitize, logMethodCall, logMethodReturn, logMethodError } from "../shared/logger.js";
 import type { IProviderExtended } from "../../runtime/provider/contract.js";
 import type { ProviderCapabilities, ProviderConfig, ProviderStatus } from "../../runtime/provider/types.js";
-import type { ChatRequest, ChatResponse, Message, StreamCallback, ToolCall } from "../../runtime/types.js";
+import type { ChatRequest, ChatResponse, Message, StreamCallback } from "../../runtime/types.js";
+import { truncateTextForLog } from "./openai-utils.js";
+import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_MAX_CONTEXT_TOKENS,
+  DEFAULT_TEMPERATURE,
+} from "./openai-constants.js";
+import { OpenAIRequestHandler, type RequestConfig } from "./openai-request-handler.js";
+import { OpenAIResponseParser, type OpenAIResponse } from "./openai-response-parser.js";
+import { OpenAIStreamProcessor } from "./openai-stream-processor.js";
+import { OpenAIRetryStrategy } from "./openai-retry-strategy.js";
 
 const logger = providersLogger();
 
 // ============================================================================
-// 辅助函数
-// ============================================================================
-
-/**
- * 截断文本用于日志
- * 避免日志过长影响可读性
- */
-function truncateTextForLog(text: string, maxLen = 1000): string {
-  if (!text) return "";
-  return text.length > maxLen ? text.substring(0, maxLen) + "...(truncated)" : text;
-}
-
-// ============================================================================
 // 类型定义
 // ============================================================================
-
-/** 流式工具调用（带原始参数字符串） */
-interface StreamingToolCall {
-  id: string;
-  name: string;
-  arguments: Record<string, unknown>;
-  /** 原始参数字符串（流式累加） */
-  _rawArgs?: string;
-}
-
-interface OpenAIResponse {
-  id: string;
-  object: string;
-  created: number;
-  model: string;
-  choices: Array<{
-    index: number;
-    message: {
-      role: string;
-      content: string | null;
-      /** 思考内容（OpenAI o1 等推理模型） */
-      reasoning_content?: string;
-      tool_calls?: Array<{
-        id: string;
-        type: "function";
-        function: {
-          name: string;
-          arguments: string;
-        };
-      }>;
-    };
-    finish_reason: string;
-  }>;
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-}
-
-/** 非标准错误响应格式（如部分国内平台） */
-interface OpenAINonStandardError {
-  status?: string | number;
-  msg?: string;
-}
 
 export interface OpenAIProviderOptions {
   name: string;
@@ -96,11 +50,21 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
 
   private readonly defaultModel: string;
   private readonly timeout: number;
-  private readonly maxRetries: number;
-  private readonly retryBaseDelay = 1000;
 
   /** 缓存的请求头（避免每次请求重新创建对象） */
   private readonly cachedHeaders: Record<string, string>;
+
+  /** 请求处理器 */
+  private readonly requestHandler: OpenAIRequestHandler;
+
+  /** 响应解析器 */
+  private readonly responseParser: OpenAIResponseParser;
+
+  /** 流式处理器 */
+  private readonly streamProcessor: OpenAIStreamProcessor;
+
+  /** 重试策略 */
+  private readonly retryStrategy: OpenAIRetryStrategy;
 
   constructor(options: OpenAIProviderOptions) {
     super();
@@ -124,20 +88,27 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
       supportsStreaming: true,
       supportsVision: true,
       supportsPromptCaching: false,
-      maxContextTokens: 128000,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
       toolSchemaMode: "native",
       ...options.capabilities,
     };
 
     this.defaultModel = options.models[0]!;
-    this.timeout = options.timeout ?? 60000;
-    this.maxRetries = options.maxRetries ?? 3;
+    this.timeout = options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
     // 初始化缓存请求头
     this.cachedHeaders = { "Content-Type": "application/json" };
     if (this.config.apiKey) {
       this.cachedHeaders.Authorization = `Bearer ${this.config.apiKey}`;
     }
+
+    // 初始化专职组件
+    this.requestHandler = new OpenAIRequestHandler();
+    this.responseParser = new OpenAIResponseParser(this.config.name);
+    this.streamProcessor = new OpenAIStreamProcessor();
+    this.retryStrategy = new OpenAIRetryStrategy({
+      maxRetries: options.maxRetries ?? DEFAULT_MAX_RETRIES,
+    });
   }
 
   getSupportedModels(): string[] {
@@ -148,35 +119,50 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
     const timer = createTimer();
     const { model, messages, tools, temperature, maxTokens } = request;
 
-    logMethodCall(logger, { method: "chat", module: "OpenAIProvider", params: { model, messageCount: messages.length, hasTools: !!tools?.length } });
+    logMethodCall(logger, {
+      method: "chat",
+      module: "OpenAIProvider",
+      params: { model, messageCount: messages.length, hasTools: !!tools?.length },
+    });
 
     try {
-      // 解析模型名称：支持 "provider/model" 格式，提取 model 部分
       const actualModel = this.parseModelName(model || this.defaultModel);
+      const body = this.buildRequestBody(actualModel, messages, tools, temperature, maxTokens);
 
-      const body: Record<string, unknown> = {
+      logger.info("LLM调用", {
+        provider: this.name,
         model: actualModel,
-        messages: this.convertMessages(messages),
-        temperature: temperature ?? 0.7,
-      };
+        endpoint: "chat/completions",
+        stream: false,
+      });
 
-      if (maxTokens !== undefined) body.max_tokens = maxTokens;
-      if (tools?.length) {
-        body.tools = tools.map((tool) => ({
-          type: "function",
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.parameters,
-          },
-        }));
+      // 使用重试策略执行请求
+      const retryResult = await this.retryStrategy.execute(async () => {
+        const response = await this.requestHandler.sendRequest({
+          url: `${this.config.baseUrl}/chat/completions`,
+          body,
+          headers: this.cachedHeaders,
+          timeout: this.timeout,
+        });
+
+        if (this.requestHandler.isError(response)) {
+          throw new Error(
+            `${this.config.name} API 错误: ${this.requestHandler.extractErrorMessage(response)}`
+          );
+        }
+
+        return response.json;
+      });
+
+      if (!retryResult.success || !retryResult.result) {
+        throw retryResult.error ?? new Error("请求失败");
       }
 
-      logger.info("LLM调用", { provider: this.name, model: actualModel, endpoint: "chat/completions", stream: false });
-
-      const response = await this.requestWithRetry(`${this.config.baseUrl}/chat/completions`, body);
       this.recordUsage();
-      const result = this.parseResponse(response);
+
+      // 解析响应
+      const openAIResponse = this.responseParser.validateOpenAIResponse(retryResult.result);
+      const result = this.responseParser.parseResponse(openAIResponse);
 
       // 记录 LLM 完整响应详情
       const llmResponseLog: Record<string, unknown> = {
@@ -198,7 +184,13 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
       }
       logger.info("LLM响应", llmResponseLog);
 
-      logMethodReturn(logger, { method: "chat", module: "OpenAIProvider", result: sanitize(result), duration: timer() });
+      logMethodReturn(logger, {
+        method: "chat",
+        module: "OpenAIProvider",
+        result: sanitize(result),
+        duration: timer(),
+      });
+
       return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -217,41 +209,29 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
     const timer = createTimer();
     const { model, messages, tools, temperature, maxTokens } = request;
 
-    logMethodCall(logger, { method: "streamChat", module: "OpenAIProvider", params: { model, messageCount: messages.length, hasTools: !!tools?.length } });
+    logMethodCall(logger, {
+      method: "streamChat",
+      module: "OpenAIProvider",
+      params: { model, messageCount: messages.length, hasTools: !!tools?.length },
+    });
 
     const actualModel = this.parseModelName(model || this.defaultModel);
+    const body = this.buildRequestBody(actualModel, messages, tools, temperature, maxTokens, true);
 
-    const body: Record<string, unknown> = {
-        model: actualModel,
-        messages: this.convertMessages(messages),
-        temperature: temperature ?? 0.7,
-        stream: true,
-      };
+    logger.info("LLM调用", {
+      provider: this.name,
+      model: actualModel,
+      endpoint: "chat/completions",
+      stream: true,
+    });
 
-      if (maxTokens !== undefined) body.max_tokens = maxTokens;
-      if (tools?.length) {
-        body.tools = tools.map((tool) => ({
-          type: "function",
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.parameters,
-          },
-        }));
-      }
-
-      logger.info("LLM调用", { provider: this.name, model: actualModel, endpoint: "chat/completions", stream: true });
-
-      const controller = new AbortController();
+    const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (this.config.apiKey) headers.Authorization = `Bearer ${this.config.apiKey}`;
-
       const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
         method: "POST",
-        headers,
+        headers: this.cachedHeaders,
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -261,135 +241,9 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
         throw new Error(`${this.config.name} API 错误: ${response.statusText} - ${errorText}`);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("无法获取响应流");
-
-      const decoder = new TextDecoder();
-      let fullText = "";
-      let fullReasoning = "";
-      const toolCalls: StreamingToolCall[] = [];
-      let usage: { inputTokens: number; outputTokens: number } | undefined;
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n").filter((line) => line.startsWith("data: "));
-
-          for (const line of lines) {
-            const data = line.slice(6);
-            if (data === "[DONE]") continue;
-
-            try {
-              const json = JSON.parse(data) as {
-                choices?: Array<{
-                  delta?: {
-                    content?: string;
-                    reasoning_content?: string;
-                    tool_calls?: Array<{
-                      id?: string;
-                      function?: { name?: string; arguments?: string };
-                    }>;
-                  };
-                }>;
-                usage?: { prompt_tokens: number; completion_tokens: number };
-              };
-              const delta = json.choices?.[0]?.delta;
-
-              if (delta?.content) {
-                fullText += delta.content;
-              }
-              if (delta?.reasoning_content) {
-                fullReasoning += delta.reasoning_content;
-              }
-              if (delta?.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                  this.mergeToolCall(toolCalls, tc);
-                }
-              }
-              if (json.usage) {
-                usage = {
-                  inputTokens: json.usage.prompt_tokens,
-                  outputTokens: json.usage.completion_tokens,
-                };
-              }
-
-              // 构建回调参数（处理 exactOptionalPropertyTypes）
-              const callbackChunk: {
-                delta: string;
-                text: string;
-                done: boolean;
-                reasoningDelta?: string;
-                reasoning?: string;
-              } = {
-                delta: delta?.content || "",
-                text: fullText,
-                done: false,
-              };
-              if (delta?.reasoning_content !== undefined) {
-                callbackChunk.reasoningDelta = delta.reasoning_content;
-              }
-              if (fullReasoning) {
-                callbackChunk.reasoning = fullReasoning;
-              }
-              await callback(callbackChunk);
-            } catch {
-              // 忽略 JSON 解析错误（可能是不完整的 chunk）
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-      }
-
-      // 最终回调
-      const finalChunk: {
-        delta: string;
-        text: string;
-        done: boolean;
-        reasoning?: string;
-        toolCalls?: ToolCall[];
-        usage?: { inputTokens: number; outputTokens: number };
-      } = {
-        delta: "",
-        text: fullText,
-        done: true,
-      };
-      if (fullReasoning) {
-        finalChunk.reasoning = fullReasoning;
-      }
-      if (toolCalls.length > 0) {
-        finalChunk.toolCalls = toolCalls.map((tc) => ({
-          id: tc.id,
-          name: tc.name,
-          arguments: tc._rawArgs ? this.parseToolArguments(tc._rawArgs) : tc.arguments,
-        }));
-      }
-      if (usage) {
-        finalChunk.usage = usage;
-      }
-      await callback(finalChunk);
-
-      // 构建返回值
-      const result: ChatResponse = {
-        text: fullText,
-        hasToolCall: toolCalls.length > 0,
-      };
-      if (fullReasoning) {
-        result.reasoning = fullReasoning;
-      }
-      if (toolCalls.length > 0) {
-        result.toolCalls = toolCalls.map((tc) => ({
-          id: tc.id,
-          name: tc.name,
-          arguments: tc._rawArgs ? this.parseToolArguments(tc._rawArgs) : tc.arguments,
-        }));
-      }
-      if (usage) {
-        result.usage = usage;
-      }
+      // 使用流式处理器处理响应
+      const streamResult = await this.streamProcessor.processStream(response, callback);
+      const result = await this.streamProcessor.buildFinalResponse(streamResult, callback);
 
       this.recordUsage();
 
@@ -397,10 +251,10 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
       const llmResponseLog: Record<string, unknown> = {
         provider: this.name,
         model: actualModel,
-        fullText: truncateTextForLog(fullText),
+        fullText: truncateTextForLog(result.text),
       };
-      if (fullReasoning) {
-        llmResponseLog.fullReasoning = truncateTextForLog(fullReasoning);
+      if (result.reasoning) {
+        llmResponseLog.fullReasoning = truncateTextForLog(result.reasoning);
       }
       if (result.toolCalls?.length) {
         llmResponseLog.toolCalls = result.toolCalls.map((tc) => ({
@@ -408,12 +262,18 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
           arguments: tc.arguments,
         }));
       }
-      if (usage) {
-        llmResponseLog.usage = usage;
+      if (result.usage) {
+        llmResponseLog.usage = result.usage;
       }
       logger.info("LLM响应", llmResponseLog);
 
-      logMethodReturn(logger, { method: "streamChat", module: "OpenAIProvider", result: sanitize(result), duration: timer() });
+      logMethodReturn(logger, {
+        method: "streamChat",
+        module: "OpenAIProvider",
+        result: sanitize(result),
+        duration: timer(),
+      });
+
       return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -430,27 +290,41 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
     }
   }
 
+  // ============================================================================
+  // 私有方法
+  // ============================================================================
+
   /**
-   * 合并流式工具调用
-   * OpenAI 流式返回工具调用时，id 和 arguments 可能分多次返回
+   * 构建请求体
    */
-  private mergeToolCall(
-    toolCalls: StreamingToolCall[],
-    tc: { id?: string; function?: { name?: string; arguments?: string } }
-  ): void {
-    if (tc.id) {
-      // 新的工具调用开始
-      toolCalls.push({
-        id: tc.id,
-        name: tc.function?.name || "",
-        arguments: {},
-        _rawArgs: "",
-      });
-    } else if (toolCalls.length > 0 && tc.function?.arguments) {
-      // 追加参数到最后一个工具调用
-      const last = toolCalls[toolCalls.length - 1]!;
-      last._rawArgs = (last._rawArgs || "") + tc.function.arguments;
+  private buildRequestBody(
+    model: string,
+    messages: Message[],
+    tools: ChatRequest["tools"],
+    temperature: number | undefined,
+    maxTokens: number | undefined,
+    stream = false
+  ): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      model,
+      messages: this.convertMessages(messages),
+      temperature: temperature ?? DEFAULT_TEMPERATURE,
+      stream,
+    };
+
+    if (maxTokens !== undefined) body.max_tokens = maxTokens;
+    if (tools?.length) {
+      body.tools = tools.map((tool) => ({
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }));
     }
+
+    return body;
   }
 
   /**
@@ -479,14 +353,16 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
     return model;
   }
 
+  /**
+   * 转换消息格式
+   */
   private convertMessages(messages: Message[]): unknown[] {
     return messages.map((msg) => {
       // assistant 消息有 tool_calls 时，content 应为 null（而非空字符串）
-      // 某些模型（如 Ollama/qwen）对空字符串和 null 有不同解析方式
       if (msg.role === "assistant" && msg.toolCalls?.length) {
         const result: Record<string, unknown> = {
           role: msg.role,
-          content: msg.content || null, // 空字符串转为 null
+          content: msg.content || null,
           tool_calls: msg.toolCalls.map((tc) => ({
             id: tc.id,
             type: "function",
@@ -499,7 +375,7 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
         return result;
       }
 
-      // tool 消息：只包含 role、content、tool_call_id（不需要 name）
+      // tool 消息：只包含 role、content、tool_call_id
       if (msg.role === "tool") {
         return {
           role: msg.role,
@@ -511,170 +387,6 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
       // 其他消息类型
       return { role: msg.role, content: msg.content };
     });
-  }
-
-  private async requestWithRetry(url: string, body: unknown): Promise<OpenAIResponse> {
-    let lastError: Error | null = null;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      try {
-        return await this.sendRequest(url, body);
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        if (!this.isRetryableError(error)) throw error;
-        if (attempt < this.maxRetries) {
-          await this.sleep(this.retryBaseDelay * Math.pow(2, attempt));
-        }
-      }
-    }
-    this.recordError();
-    throw lastError ?? new Error("请求失败");
-  }
-
-  private async sendRequest(url: string, body: unknown): Promise<OpenAIResponse> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (this.config.apiKey) headers.Authorization = `Bearer ${this.config.apiKey}`;
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      const json: unknown = await response.json();
-
-      // 处理 HTTP 错误
-      if (!response.ok) {
-        const errorMessage = this.extractErrorMessage(json);
-        throw new Error(`${this.config.name} API 错误: ${errorMessage}`);
-      }
-
-      // 处理非标准错误格式（如 {"status":"435","msg":"Model not support"}）
-      if (this.isNonStandardError(json)) {
-        throw new Error(`${this.config.name} API 错误: ${json.msg} (status: ${json.status})`);
-      }
-
-      return this.validateOpenAIResponse(json);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  /**
-   * 从响应中提取错误消息
-   */
-  private extractErrorMessage(json: unknown): string {
-    if (typeof json === "object" && json !== null) {
-      const obj = json as Record<string, unknown>;
-      if (obj.error && typeof obj.error === "object") {
-        const error = obj.error as Record<string, unknown>;
-        if (typeof error.message === "string") return error.message;
-      }
-      if (typeof obj.message === "string") return obj.message;
-    }
-    return "未知错误";
-  }
-
-  /**
-   * 检查是否为非标准错误响应
-   */
-  private isNonStandardError(json: unknown): json is OpenAINonStandardError {
-    return (
-      typeof json === "object" &&
-      json !== null &&
-      "status" in json &&
-      "msg" in json &&
-      !("choices" in json)
-    );
-  }
-
-  /**
-   * 验证并转换 OpenAI 响应
-   * 使用类型守卫确保运行时类型安全
-   */
-  private validateOpenAIResponse(json: unknown): OpenAIResponse {
-    if (typeof json !== "object" || json === null) {
-      throw new Error(`${this.config.name} API 返回无效响应格式`);
-    }
-
-    const obj = json as Record<string, unknown>;
-    if (!Array.isArray(obj.choices)) {
-      throw new Error(`${this.config.name} API 返回非标准格式响应，请检查 baseUrl 是否正确`);
-    }
-
-    return json as OpenAIResponse;
-  }
-
-  private isRetryableError(error: unknown): boolean {
-    if (error instanceof Error) {
-      const message = error.message.toLowerCase();
-      return (
-        message.includes("rate limit") ||
-        message.includes("overloaded") ||
-        message.includes("timeout") ||
-        message.includes("network") ||
-        message.includes("aborted") ||
-        message.includes("429") ||
-        message.includes("500") ||
-        message.includes("502") ||
-        message.includes("503") ||
-        message.includes("504")
-      );
-    }
-    return false;
-  }
-
-  private parseResponse(response: OpenAIResponse): ChatResponse {
-    // 检查响应格式
-    if (!response.choices || !Array.isArray(response.choices)) {
-      throw new Error(`${this.config.name} API 返回非标准格式响应，请检查 baseUrl 是否正确`);
-    }
-
-    const choice = response.choices[0];
-    if (!choice) throw new Error(`${this.config.name} API 返回空响应`);
-
-    const message = choice.message;
-    const toolCalls: ToolCall[] | undefined = message.tool_calls?.map((tc) => ({
-      id: tc.id,
-      name: tc.function.name,
-      arguments: this.parseToolArguments(tc.function.arguments),
-    }));
-
-    const result: ChatResponse = {
-      text: message.content ?? "",
-      hasToolCall: !!toolCalls?.length,
-    };
-
-    // 提取思考内容（OpenAI o1、DeepSeek 等推理模型）
-    if (message.reasoning_content) {
-      result.reasoning = message.reasoning_content;
-    }
-
-    if (toolCalls?.length) result.toolCalls = toolCalls;
-    if (response.usage) {
-      result.usage = {
-        inputTokens: response.usage.prompt_tokens,
-        outputTokens: response.usage.completion_tokens,
-      };
-    }
-
-    result.raw = response;
-    return result;
-  }
-
-  private parseToolArguments(args: string): Record<string, unknown> {
-    try {
-      return JSON.parse(args);
-    } catch {
-      return { raw: args };
-    }
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   override getStatus(): ProviderStatus {
