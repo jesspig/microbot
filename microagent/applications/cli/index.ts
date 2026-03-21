@@ -58,24 +58,6 @@ const VERSION = "0.1.0";
 const COMMAND_NAME = "micro-agent";
 
 // ============================================================================
-// 帮助信息
-// ============================================================================
-
-/**
- * 显示主帮助信息（保留接口，但不做任何输出）
- */
-function showMainHelp(): void {
-  // 已移除所有 console.log 调用
-}
-
-/**
- * 显示版本号（保留接口，但不做任何输出）
- */
-function showVersion(): void {
-  // 已移除所有 console.log 调用
-}
-
-// ============================================================================
 // 参数解析
 // ============================================================================
 
@@ -214,20 +196,16 @@ async function executeCommand(
     if (options.help) {
       if (command) {
         showCommandHelp(command);
-      } else {
-        showMainHelp();
       }
       process.exit(0);
     }
 
     if (options.version) {
-      showVersion();
       process.exit(0);
     }
 
-    // 无命令时显示帮助
+    // 无命令时直接退出
     if (!command) {
-      showMainHelp();
       process.exit(0);
     }
 
@@ -471,8 +449,6 @@ main();
 export {
   parseArgs,
   executeCommand,
-  showMainHelp,
-  showVersion,
   VERSION,
   COMMAND_NAME,
 };
