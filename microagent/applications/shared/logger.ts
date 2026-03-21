@@ -13,7 +13,8 @@
 
 import { configure, getLogger, type Logger, type LogRecord, type Sink } from "@logtape/logtape";
 import { join } from "node:path";
-import { mkdirSync, statSync, readdirSync, unlinkSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdirSync, statSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
+import { promises } from "node:fs";
 import { LOGS_DIR } from "./constants.js";
 import {
   DEFAULT_LOG_LEVEL,
@@ -473,30 +474,36 @@ function getLogFilePath(logDir: string, gran: ParsedGranularity, maxSizeBytes: n
 // ============================================================================
 
 /**
- * 清理过期日志文件
+ * 清理过期日志文件（异步执行，不阻塞初始化）
  */
 function cleanupOldLogs(logDir: string): void {
   const cutoffTime = Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  
-  try {
-    const files = readdirSync(logDir);
-    
-    for (const file of files) {
-      if (!file.endsWith(".jsonl")) continue;
-      
-      const filePath = join(logDir, file);
-      try {
-        const stats = statSync(filePath);
-        if (stats.mtime.getTime() < cutoffTime) {
-          unlinkSync(filePath);
+
+  // 异步执行清理，不阻塞主流程
+  (async () => {
+    try {
+      const files = await promises.readdir(logDir);
+
+      const deletePromises = [];
+      for (const file of files) {
+        if (!file.endsWith(".jsonl")) continue;
+
+        const filePath = join(logDir, file);
+        try {
+          const stats = await promises.stat(filePath);
+          if (stats.mtime.getTime() < cutoffTime) {
+            deletePromises.push(promises.unlink(filePath));
+          }
+        } catch {
+          // 忽略单个文件错误
         }
-      } catch {
-        // 忽略错误
       }
+
+      await Promise.allSettled(deletePromises);
+    } catch {
+      // 忽略清理错误
     }
-  } catch {
-    // 忽略错误
-  }
+  })();
 }
 
 // ============================================================================
@@ -647,7 +654,7 @@ function createRollingFileSink(logDir: string, gran: ParsedGranularity, maxSizeB
 
 /**
  * 初始化日志系统
- * 
+ *
  * @param config - 日志配置
  */
 export async function initLogger(config: LoggerConfig = {}): Promise<void> {
@@ -656,20 +663,35 @@ export async function initLogger(config: LoggerConfig = {}): Promise<void> {
   }
 
   // 解析配置
+  parseLoggerConfig(config);
+
+  const logDir = config.logDir ?? LOGS_DIR;
+  const sinks = createLoggerSinks(config, logDir);
+  await applyLogtapeConfig(sinks, config.console === true);
+
+  initialized = true;
+}
+
+/**
+ * 解析日志配置
+ */
+function parseLoggerConfig(config: LoggerConfig): void {
   consoleLevel = config.level ?? DEFAULT_LOG_LEVEL;
   colorEnabled = config.color !== false;
   sanitizeEnabled = config.sanitize ?? DEFAULT_LOG_SANITIZE;
-  
+
   // 解析文件大小（clamp 到有效范围）
   const maxSizeMB = config.maxFileSize ?? DEFAULT_LOG_MAX_FILE_SIZE_MB;
   maxFileSizeBytes = Math.max(MIN_LOG_FILE_SIZE_MB, Math.min(MAX_LOG_FILE_SIZE_MB, maxSizeMB)) * 1024 * 1024;
-  
+
   // 解析颗粒度
   granularity = parseGranularity(config.granularity ?? DEFAULT_LOG_GRANULARITY);
-  
-  const logDir = config.logDir ?? LOGS_DIR;
+}
 
-  // 构建 sinks 配置
+/**
+ * 创建日志 sinks
+ */
+function createLoggerSinks(config: LoggerConfig, logDir: string): Record<string, Sink> {
   const sinks: Record<string, Sink> = {};
 
   // JSON 文件 sink（主 sink）- 使用自定义滚动 sink
@@ -679,35 +701,49 @@ export async function initLogger(config: LoggerConfig = {}): Promise<void> {
 
   // 控制台 sink（可选）- 使用配置的日志级别过滤
   if (config.console === true) {
-    sinks.console = (record: LogRecord) => {
-      // 根据控制台日志级别过滤
-      const levelPriority: Record<string, number> = {
-        debug: 0,
-        info: 1,
-        warning: 2,
-        error: 3,
-      };
-      
-      const recordPriority = levelPriority[record.level] ?? 1;
-      const configPriority = levelPriority[consoleLevel] ?? 1;
-      
-      if (recordPriority < configPriority) {
-        return; // 低于配置级别的日志不输出到控制台
-      }
-      
-      const output = humanReadableFormatter(record);
-      const con = originalConsole ?? console;
-      
-      if (record.level === "error") {
-        con.error(output);
-      } else if (record.level === "warning") {
-        con.warn(output);
-      } else {
-        con.log(output);
-      }
-    };
+    sinks.console = createConsoleSink();
   }
 
+  return sinks;
+}
+
+/**
+ * 创建控制台 sink（带日志级别过滤）
+ */
+function createConsoleSink(): Sink {
+  return (record: LogRecord) => {
+    // 根据控制台日志级别过滤
+    const levelPriority: Record<string, number> = {
+      debug: 0,
+      info: 1,
+      warning: 2,
+      error: 3,
+    };
+
+    const recordPriority = levelPriority[record.level] ?? 1;
+    const configPriority = levelPriority[consoleLevel] ?? 1;
+
+    if (recordPriority < configPriority) {
+      return; // 低于配置级别的日志不输出到控制台
+    }
+
+    const output = humanReadableFormatter(record);
+    const con = originalConsole ?? console;
+
+    if (record.level === "error") {
+      con.error(output);
+    } else if (record.level === "warning") {
+      con.warn(output);
+    } else {
+      con.log(output);
+    }
+  };
+}
+
+/**
+ * 应用 logtape 配置
+ */
+async function applyLogtapeConfig(sinks: Record<string, Sink>, consoleEnabled: boolean): Promise<void> {
   // 配置 logtape
   // 注意：文件日志始终使用 debug 级别（记录所有日志）
   // 控制台日志由 sink 内部根据 consoleLevel 过滤
@@ -716,13 +752,11 @@ export async function initLogger(config: LoggerConfig = {}): Promise<void> {
     loggers: [
       {
         category: ["microagent"],
-        sinks: config.console === true ? ["jsonl", "console"] : ["jsonl"],
+        sinks: consoleEnabled ? ["jsonl", "console"] : ["jsonl"],
         lowestLevel: "debug", // 文件始终记录所有级别，控制台由 sink 过滤
       },
     ],
   });
-
-  initialized = true;
 }
 
 /**
@@ -889,6 +923,17 @@ export function sanitize(obj: unknown, maxDepth = 3): unknown {
   return result;
 }
 
+/**
+ * 截断文本到指定长度
+ * @param text - 原始文本
+ * @param maxLength - 最大长度
+ * @returns 截断后的文本
+ */
+export function truncateText(text: string, maxLength: number = 2000): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength) + `... (已截断，总长度：${text.length})`;
+}
+
 // 导出初始化状态检查
 export const isLoggerInitialized = () => initialized;
 
@@ -907,4 +952,5 @@ export const getLoggerConfig = () => ({
 // 导出日志装饰器和工具函数（用于简化方法日志记录）
 // ============================================================================
 
-export * from "./log-decorator.js";
+export type { LogDecoratorOptions } from "./log-decorator.js";
+export { logMethod, logClass, withLog, withLogSync } from "./log-decorator.js";

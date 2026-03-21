@@ -5,7 +5,7 @@
  */
 
 import type { Logger } from "@logtape/logtape";
-import { createTimer, type LogMethodOptions } from "./logger.js";
+import { createTimer } from "./logger.js";
 
 // ============================================================================
 // 类型定义
