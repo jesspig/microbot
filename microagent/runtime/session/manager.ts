@@ -42,6 +42,19 @@ export class Session implements ISession {
     logger.info("消息已添加", { sessionKey: this.key, messageCount: this.state.messageCount, role: message.role });
   }
 
+  /**
+   * 批量添加消息（用于初始化历史会话）
+   * @param messages - 消息列表
+   */
+  addMessages(messages: Message[]): void {
+    for (const message of messages) {
+      this.messages.push({ ...message, timestamp: message.timestamp ?? Date.now() });
+    }
+    this.state.messageCount = messages.length;
+    this.state.lastActivity = Date.now();
+    logger.info("批量添加消息", { sessionKey: this.key, messageCount: messages.length });
+  }
+
   async addMessageAndPersist(message: Message): Promise<void> {
     const timer = createTimer();
     const timestamp = message.timestamp ?? Date.now();
@@ -169,14 +182,9 @@ export class SessionManager {
     const session = this.getOrCreate(sessionKey);
     const entries = await loadRecentSessions(contextWindowTokens);
 
-    for (const entry of entries) {
-      session.addMessage(entryToMessage(entry));
-    }
-
-    const state = session.getState();
-    if (state.messageCount === 0) {
-      const sessionInternal = session as unknown as { state: SessionState };
-      sessionInternal.state.messageCount = entries.length;
+    if (entries.length > 0) {
+      const messages = entries.map(entryToMessage);
+      session.addMessages(messages);
     }
 
     logger.info("历史会话已加载", { sessionKey, loadedEntries: entries.length, contextWindowTokens });

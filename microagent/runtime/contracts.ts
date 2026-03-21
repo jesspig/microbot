@@ -84,18 +84,25 @@ export interface IMonitorableProvider {
 }
 
 /**
+ * IProvider 类型别名
+ *
+ * @deprecated 建议使用 IChatProvider 代替
+ */
+export type IProvider = IChatProvider;
+
+/**
  * Provider 扩展接口
  *
  * 组合多个小接口，形成完整的 Provider 契约
- * 兼容旧代码，保持向后兼容
+ * 注意：避免直接继承，通过交叉类型避免循环依赖
  */
-export interface IProviderExtended extends IStreamProvider, IMonitorableProvider {
+export type IProviderExtended = IStreamProvider & IMonitorableProvider & {
   /** Provider 配置信息 */
   readonly config: ProviderConfig;
 
   /** Provider 能力描述 */
   readonly capabilities: ProviderCapabilities;
-}
+};
 
 // 导入类型定义
 import type { ProviderConfig, ProviderStatus, ProviderCapabilities } from "./provider/types.js";
@@ -361,5 +368,5 @@ export interface IEventEmitter<EventMap extends Record<string, unknown>> {
 // 错误类型导出
 // ============================================================================
 
-// 导出统一的错误类型系统（从 errors.ts）
-export * from "./errors.js";
+// 注意：错误类型需要独立导出，避免循环依赖
+// 使用者应从 "./errors.js" 导入错误类型

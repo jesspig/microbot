@@ -4,11 +4,12 @@
  * 实现 Agent 的 ReAct（推理 - 行动）循环，负责协调 LLM 调用和工具执行
  */
 
-import type { Message, ChatRequest, ToolCall, StreamChunk } from "../types.js";
+import type { Message, ChatRequest, ToolCall, StreamChunk, ChatResponse } from "../types.js";
 import type { IProviderExtended } from "../provider/contract.js";
 import type { ToolRegistry } from "../tool/registry.js";
 import type { AgentConfig, AgentState, AgentEvent, AgentResult, ToolCallRecord } from "./types.js";
-import { kernelLogger, createTimer, sanitize, logMethodCall, logMethodReturn, logMethodError } from "../../applications/shared/logger.js";
+import { kernelLogger, createTimer, sanitize, logMethodCall, logMethodReturn, logMethodError, truncateText } from "../../applications/shared/logger.js";
+import { ToolExecutionError } from "../errors.js";
 
 // ============================================================================
 // 常量定义
@@ -16,9 +17,6 @@ import { kernelLogger, createTimer, sanitize, logMethodCall, logMethodReturn, lo
 
 /** 模块名称 */
 const MODULE_NAME = "AgentLoop";
-
-/** 日志文本截断长度 */
-const LOG_TRUNCATE_LENGTH = 2000;
 
 /** 默认兜底回复内容 */
 const DEFAULT_FALLBACK_RESPONSE = "我已完成处理，但没有生成回复内容。";
@@ -51,14 +49,6 @@ interface LLMResponse {
 // ============================================================================
 
 /**
- * 截断文本到指定长度
- */
-function truncateText(text: string, maxLength: number = LOG_TRUNCATE_LENGTH): string {
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength) + `... (已截断，总长度：${text.length})`;
-}
-
-/**
  * 构建最终回复内容
  */
 function buildFinalContent(text: string | undefined): string {
@@ -82,7 +72,7 @@ export class AgentLoop {
   constructor(
     private provider: IProviderExtended,
     private tools: ToolRegistry,
-    private config: AgentConfig = { model: "default", maxIterations: 40, defaultTimeout: 30000, enableLogging: false }
+    private config: AgentConfig = { model: "default", maxIterations: 40, defaultTimeout: 30000 }
   ) {
     const timer = createTimer();
     logMethodCall(this.logger, { method: "constructor", module: MODULE_NAME, params: sanitize({ config: this.config }) as Record<string, unknown> });
@@ -208,12 +198,7 @@ export class AgentLoop {
       ? await this.callLLMStreaming(request)
       : await this.callLLMStandard(request);
 
-    return {
-      hasToolCall: response.hasToolCall,
-      toolCalls: response.toolCalls,
-      text: response.text,
-      reasoning: response.reasoning,
-    };
+    return response as LLMResponse;
   }
 
   /**
@@ -264,7 +249,7 @@ export class AgentLoop {
   /**
    * 记录 LLM 响应日志
    */
-  private logLLMResponse(response: any, duration: number, streaming: boolean): void {
+  private logLLMResponse(response: ChatResponse, duration: number, streaming: boolean): void {
     this.logger.debug(`LLM ${streaming ? "流式" : ""}调用完成`, {
       hasToolCall: response.hasToolCall,
       toolCallCount: response.toolCalls?.length ?? 0,
@@ -304,6 +289,7 @@ export class AgentLoop {
 
   /**
    * 执行单个工具调用
+   * @throws ToolExecutionError 当工具执行失败时
    */
   private async executeSingleToolCall(call: ToolCall): Promise<ToolCallRecord> {
     const startTime = Date.now();
@@ -311,9 +297,8 @@ export class AgentLoop {
 
     this.logger.info("开始执行工具", { toolName: call.name, toolCallId: call.id, arguments: call.arguments });
 
-    let result: string;
     try {
-      result = await this.tools.execute(call.name, call.arguments);
+      const result = await this.tools.execute(call.name, call.arguments);
       this.emit({ type: "tool_end", toolName: call.name, message: result, timestamp: Date.now() });
 
       this.logger.info("工具执行完成", {
@@ -321,31 +306,22 @@ export class AgentLoop {
         resultLength: result.length,
         result: truncateText(result),
       });
+
+      return { id: call.id, name: call.name, arguments: call.arguments, result, duration: Date.now() - startTime };
     } catch (error) {
-      result = this.handleToolError(error, call);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const err = error instanceof Error ? error : new Error(String(error));
+
+      logMethodError(this.logger, {
+        method: "executeSingleToolCall",
+        module: MODULE_NAME,
+        error: { name: err.name, message: err.message, ...(err.stack ? { stack: err.stack } : {}) },
+        params: sanitize({ toolName: call.name, toolCallId: call.id }) as Record<string, unknown>,
+      });
+
+      // 抛出 ToolExecutionError，让调用方决定如何处理
+      throw new ToolExecutionError(call.name, errorMsg, err);
     }
-
-    return { id: call.id, name: call.name, arguments: call.arguments, result, duration: Date.now() - startTime };
-  }
-
-  /**
-   * 处理工具执行错误
-   */
-  private handleToolError(error: unknown, call: ToolCall): string {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    const result = `工具执行错误：${errorMsg}`;
-
-    this.emit({ type: "error", toolName: call.name, error: new Error(errorMsg), timestamp: Date.now() });
-
-    const err = error instanceof Error ? error : new Error(String(error));
-    logMethodError(this.logger, {
-      method: "executeSingleToolCall",
-      module: MODULE_NAME,
-      error: { name: err.name, message: err.message, ...(err.stack ? { stack: err.stack } : {}) },
-      params: sanitize({ toolName: call.name, toolCallId: call.id }) as Record<string, unknown>,
-    });
-
-    return result;
   }
 
   // ============================================================================
@@ -375,26 +351,16 @@ export class AgentLoop {
   // ============================================================================
 
   on(handler: AgentEventHandler): void {
-    const timer = createTimer();
-    logMethodCall(this.logger, { method: "on", module: MODULE_NAME, params: {} });
     this.handlers.add(handler);
     this.logger.debug("添加事件处理器", { handlerCount: this.handlers.size });
-    logMethodReturn(this.logger, { method: "on", module: MODULE_NAME, result: { handlerCount: this.handlers.size }, duration: timer() });
   }
 
   off(handler: AgentEventHandler): void {
-    const timer = createTimer();
-    logMethodCall(this.logger, { method: "off", module: MODULE_NAME, params: {} });
     this.handlers.delete(handler);
     this.logger.debug("移除事件处理器", { handlerCount: this.handlers.size });
-    logMethodReturn(this.logger, { method: "off", module: MODULE_NAME, result: { handlerCount: this.handlers.size }, duration: timer() });
   }
 
   getState(): AgentState {
-    const timer = createTimer();
-    logMethodCall(this.logger, { method: "getState", module: MODULE_NAME, params: {} });
-    const state = this.state;
-    logMethodReturn(this.logger, { method: "getState", module: MODULE_NAME, result: { state }, duration: timer() });
-    return state;
+    return this.state;
   }
 }

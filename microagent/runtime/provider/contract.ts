@@ -4,7 +4,7 @@
  * 定义 LLM 提供者的接口，遵循接口隔离原则
  */
 
-import type { IChatProvider, IStreamProvider, IMonitorableProvider, IProviderExtended } from "../contracts.js";
+import type { IChatProvider, IStreamProvider, IMonitorableProvider } from "../contracts.js";
 import type { ProviderCapabilities, ProviderConfig, ProviderStatus } from "./types.js";
 import type { ChatRequest, ChatResponse, StreamCallback } from "../types.js";
 

@@ -116,53 +116,56 @@ class EventBus<T extends Record<string, unknown>> implements IEventEmitter<T> {
   }
 
   /**
-   * 触发事件
+   * 触发事件（异步执行处理器）
    * @param event - 事件名
    * @param payload - 事件载荷
    */
   emit<K extends keyof T>(event: K, payload: T[K]): void {
     const timer = createTimer();
-    logMethodCall(logger, { 
-      method: "emit", 
+    logMethodCall(logger, {
+      method: "emit",
       module: "EventBus",
       params: { event: String(event) }
     });
-    
+
     const handlers = this.handlers.get(event);
     if (!handlers) {
       logger.debug("事件无处理器", { event: String(event) });
       return;
     }
-    
-    logger.info("事件触发", { 
+
+    logger.info("事件触发", {
       event: String(event),
       handlerCount: handlers.size,
       payload: sanitize(payload)
     });
-    
+
+    // 异步执行所有处理器，避免阻塞
     let successCount = 0;
     let errorCount = 0;
-    
+
     for (const handler of handlers) {
-      try {
-        handler(payload);
-        successCount++;
-      } catch (error) {
-        errorCount++;
-        const err = error instanceof Error ? error : new Error(String(error));
-        logMethodError(logger, { 
-          method: "emit", 
-          module: "EventBus",
-          error: { name: err.name, message: err.message, stack: err.stack },
-          params: { event: String(event) }
-        });
-      }
+      // 使用 Promise 包装同步/异步处理器
+      Promise.resolve().then(async () => {
+        try {
+          await handler(payload);
+          successCount++;
+        } catch (error) {
+          errorCount++;
+          const err = error instanceof Error ? error : new Error(String(error));
+          logMethodError(logger, {
+            method: "emit",
+            module: "EventBus",
+            error: { name: err.name, message: err.message, stack: err.stack },
+            params: { event: String(event) }
+          });
+        }
+      });
     }
-    
-    logger.debug("事件处理完成", { 
+
+    logger.debug("事件处理已调度", {
       event: String(event),
-      successCount,
-      errorCount,
+      handlerCount: handlers.size,
       duration: timer()
     });
   }
