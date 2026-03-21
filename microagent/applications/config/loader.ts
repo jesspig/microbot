@@ -1,6 +1,6 @@
 /**
  * 配置加载器
- * 
+ *
  * 加载、解析和验证用户配置文件
  */
 
@@ -9,11 +9,13 @@ import { parse } from "yaml";
 const MODULE_NAME = "ConfigLoader";
 import {
   type Settings,
+  type SingleProviderConfig,
   safeValidateSettings,
 } from "./schema.js";
 import { resolveEnvVarsDeep } from "./env-resolver.js";
 import { SETTINGS_FILE } from "../shared/constants.js";
 import { configLogger, createTimer, sanitize, logMethodCall, logMethodReturn, logMethodError } from "../shared/logger.js";
+import { ConfigError } from "../../runtime/errors.js";
 
 // ============================================================================
 // 默认配置
@@ -63,77 +65,99 @@ function validateModelProvider(settings: Settings, filePath: string): void {
     return;
   }
 
-  const slashIndex = model.indexOf("/");
   const providers = settings.providers ?? {};
-
-  // 获取所有启用的 providers
-  const enabledProviders = Object.entries(providers)
-    .filter(([, config]) => config.enabled)
-    .map(([name, config]) => ({ name, config }));
+  const enabledProviders = getEnabledProviders(providers);
+  const slashIndex = model.indexOf("/");
 
   if (slashIndex >= 0) {
     // 格式：<provider>/<model>
-    const providerName = model.substring(0, slashIndex);
-    const modelName = model.substring(slashIndex + 1);
-
-    // 检查 provider 是否存在
-    const provider = providers[providerName];
-    if (!provider) {
-      throw new ConfigValidationError(
-        `模型 "${model}" 的 provider "${providerName}" 不存在于 providers 配置中`,
-        filePath
-      );
-    }
-
-    // 检查 provider 是否启用
-    if (!provider.enabled) {
-      throw new ConfigValidationError(
-        `模型 "${model}" 的 provider "${providerName}" 未启用，请设置 providers.${providerName}.enabled: true`,
-        filePath
-      );
-    }
-
-    // 检查模型是否在 provider 的 models 列表中
-    if (provider.models && provider.models.length > 0) {
-      if (!provider.models.includes(modelName)) {
-        throw new ConfigValidationError(
-          `模型 "${modelName}" 不在 provider "${providerName}" 的 models 列表中。可用模型: ${provider.models.join(", ")}`,
-          filePath
-        );
-      }
-    }
-
-    logger.debug("模型与 Provider 验证通过", { model, provider: providerName });
+    validateFullModelFormat(model, slashIndex, providers, filePath);
   } else {
     // 格式：纯模型名（不带前缀）
-    if (enabledProviders.length === 0) {
-      throw new ConfigValidationError(
-        `模型 "${model}" 未指定 provider，但没有任何启用的 provider。请在 providers 中启用至少一个 provider，或使用完整格式 "<provider>/<model>"`,
-        filePath
-      );
-    }
-
-    if (enabledProviders.length > 1) {
-      const providerNames = enabledProviders.map((p) => p.name).join(", ");
-      throw new ConfigValidationError(
-        `模型 "${model}" 未指定 provider，但有多个启用的 provider (${providerNames})。请使用完整格式 "<provider>/<model>" 指定 provider`,
-        filePath
-      );
-    }
-
-    // 只有一个启用的 provider，检查模型是否在其 models 列表中
-    const { name: providerName, config: providerConfig } = enabledProviders[0]!;
-    if (providerConfig.models && providerConfig.models.length > 0) {
-      if (!providerConfig.models.includes(model)) {
-        throw new ConfigValidationError(
-          `模型 "${model}" 不在 provider "${providerName}" 的 models 列表中。可用模型: ${providerConfig.models.join(", ")}`,
-          filePath
-        );
-      }
-    }
-
-    logger.debug("模型与 Provider 验证通过", { model, provider: providerName });
+    validateSimpleModelFormat(model, enabledProviders, filePath);
   }
+}
+
+/**
+ * 获取所有启用的 providers
+ */
+function getEnabledProviders(providers: Record<string, SingleProviderConfig>): Array<{ name: string; config: SingleProviderConfig }> {
+  return Object.entries(providers)
+    .filter(([, config]) => config.enabled)
+    .map(([name, config]) => ({ name, config }));
+}
+
+/**
+ * 验证完整格式模型（<provider>/<model>）
+ */
+function validateFullModelFormat(model: string, slashIndex: number, providers: Record<string, SingleProviderConfig>, filePath: string): void {
+  const logger = configLogger();
+  const providerName = model.substring(0, slashIndex);
+  const modelName = model.substring(slashIndex + 1);
+
+  // 检查 provider 是否存在
+  const provider = providers[providerName];
+  if (!provider) {
+    throw new ConfigValidationError(
+      `模型 "${model}" 的 provider "${providerName}" 不存在于 providers 配置中`,
+      filePath
+    );
+  }
+
+  // 检查 provider 是否启用
+  if (!provider.enabled) {
+    throw new ConfigValidationError(
+      `模型 "${model}" 的 provider "${providerName}" 未启用，请设置 providers.${providerName}.enabled: true`,
+      filePath
+    );
+  }
+
+  // 检查模型是否在 provider 的 models 列表中
+  if (provider.models && provider.models.length > 0 && !provider.models.includes(modelName)) {
+    throw new ConfigValidationError(
+      `模型 "${modelName}" 不在 provider "${providerName}" 的 models 列表中。可用模型: ${provider.models.join(", ")}`,
+      filePath
+    );
+  }
+
+  logger.debug("模型与 Provider 验证通过", { model, provider: providerName });
+}
+
+/**
+ * 验证简短格式模型（仅模型名）
+ */
+function validateSimpleModelFormat(
+  model: string,
+  enabledProviders: Array<{ name: string; config: SingleProviderConfig }>,
+  filePath: string
+): void {
+  const logger = configLogger();
+
+  if (enabledProviders.length === 0) {
+    throw new ConfigValidationError(
+      `模型 "${model}" 未指定 provider，但没有任何启用的 provider。请在 providers 中启用至少一个 provider，或使用完整格式 "<provider>/<model>"`,
+      filePath
+    );
+  }
+
+  if (enabledProviders.length > 1) {
+    const providerNames = enabledProviders.map((p) => p.name).join(", ");
+    throw new ConfigValidationError(
+      `模型 "${model}" 未指定 provider，但有多个启用的 provider (${providerNames})。请使用完整格式 "<provider>/<model>" 指定 provider`,
+      filePath
+    );
+  }
+
+  // 只有一个启用的 provider，检查模型是否在其 models 列表中
+  const { name: providerName, config: providerConfig } = enabledProviders[0]!;
+  if (providerConfig.models && providerConfig.models.length > 0 && !providerConfig.models.includes(model)) {
+    throw new ConfigValidationError(
+      `模型 "${model}" 不在 provider "${providerName}" 的 models 列表中。可用模型: ${providerConfig.models.join(", ")}`,
+      filePath
+    );
+  }
+
+  logger.debug("模型与 Provider 验证通过", { model, provider: providerName });
 }
 
 // ============================================================================
@@ -351,48 +375,26 @@ export function mergeSettings(
 /**
  * 配置加载错误
  */
-export class ConfigLoadError extends Error {
+export class ConfigLoadError extends ConfigError {
   constructor(
     message: string,
-    public readonly filePath: string
+    filePath: string
   ) {
-    super(message);
+    super(message, "CONFIG_LOAD_ERROR", filePath);
     this.name = "ConfigLoadError";
-  }
-
-  /**
-   * 自定义 JSON 序列化，确保 message 被包含
-   */
-  toJSON() {
-    return {
-      message: this.message,
-      filePath: this.filePath,
-      name: this.name,
-    };
   }
 }
 
 /**
  * 配置验证错误
  */
-export class ConfigValidationError extends Error {
+export class ConfigValidationError extends ConfigError {
   constructor(
     message: string,
     public readonly filePath: string
   ) {
-    super(message);
+    super(message, "CONFIG_VALIDATION_ERROR", filePath);
     this.name = "ConfigValidationError";
-  }
-
-  /**
-   * 自定义 JSON 序列化，确保 message 被包含
-   */
-  toJSON() {
-    return {
-      message: this.message,
-      filePath: this.filePath,
-      name: this.name,
-    };
   }
 }
 

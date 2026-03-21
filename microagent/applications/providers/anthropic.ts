@@ -92,6 +92,10 @@ export class AnthropicProvider extends BaseProvider implements IProviderExtended
     this.name = options.name;
     const apiKey = options.apiKey ?? process.env[`${options.name.toUpperCase()}_API_KEY`] ?? "";
 
+    if (!apiKey) {
+      throw new Error(`${options.name} API Key 未配置，请设置环境变量 ${options.name.toUpperCase()}_API_KEY 或在配置中提供 apiKey`);
+    }
+
     this.config = {
       id: options.name,
       name: options.displayName ?? options.name,
@@ -276,8 +280,12 @@ export class AnthropicProvider extends BaseProvider implements IProviderExtended
                 outputTokens: 0,
               };
             }
-          } catch {
-            // 忽略解析错误
+          } catch (parseError) {
+            // JSON 解析失败，跳过该事件
+            logger.debug("流式事件解析失败", {
+              eventType: (event as unknown as Record<string, unknown>).type,
+              error: parseError instanceof Error ? parseError.message : String(parseError)
+            });
           }
         }
       }

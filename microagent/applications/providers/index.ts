@@ -10,6 +10,12 @@ export { OpenAIResponseProvider, createOpenAIResponseProvider, type OpenAIRespon
 export { AnthropicProvider, createAnthropicProvider, type AnthropicProviderOptions } from "./anthropic.js";
 export { OllamaProvider, createOllamaProvider, type OllamaProviderOptions } from "./ollama.js";
 
+// 导出 OpenAI Provider 专职组件
+export { OpenAIRequestHandler } from "./openai-request-handler.js";
+export { OpenAIResponseParser } from "./openai-response-parser.js";
+export { OpenAIStreamProcessor } from "./openai-stream-processor.js";
+export { OpenAIRetryStrategy } from "./openai-retry-strategy.js";
+
 // 导出 runtime 层接口和基类（便于外部使用）
 export { BaseProvider } from "../../runtime/provider/base.js";
 export type { IProviderExtended } from "../../runtime/provider/contract.js";

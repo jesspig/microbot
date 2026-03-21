@@ -3,6 +3,8 @@
  *
  * 定义 MicroAgent 运行时的核心接口，遵循依赖倒置原则。
  * 所有接口均为纯抽象，不包含实现细节。
+ *
+ * 根据**接口隔离原则**，将大接口拆分为多个小接口。
  */
 
 import type {
@@ -17,18 +19,19 @@ import type {
   OutboundMessage,
   SendResult,
   MessageHandler,
+  StreamCallback,
 } from "./types.js";
 
 // ============================================================================
-// Provider 接口
+// Provider 接口（拆分为多个小接口）
 // ============================================================================
 
 /**
- * Provider 接口
+ * 基础聊天 Provider 接口
  *
- * 定义 LLM 提供者的基础契约，负责与 AI 模型通信。
+ * 定义与 AI 模型通信的基础契约
  */
-export interface IProvider {
+export interface IChatProvider {
   /** 提供者名称 */
   readonly name: string;
 
@@ -45,6 +48,64 @@ export interface IProvider {
    */
   getSupportedModels(): string[];
 }
+
+/**
+ * 流式聊天 Provider 接口
+ *
+ * 定义流式通信的契约
+ */
+export interface IStreamProvider extends IChatProvider {
+  /**
+   * 执行流式聊天请求
+   * @param request - 聊天请求
+   * @param callback - 流式回调函数
+   * @returns 最终聊天响应
+   */
+  streamChat(request: ChatRequest, callback: StreamCallback): Promise<ChatResponse>;
+}
+
+/**
+ * 可监控的 Provider 接口
+ *
+ * 定义 Provider 状态监控和健康检查的契约
+ */
+export interface IMonitorableProvider {
+  /**
+   * 获取 Provider 当前状态
+   * @returns Provider 状态信息
+   */
+  getStatus(): ProviderStatus;
+
+  /**
+   * 测试连接是否正常
+   * @returns 连接是否成功
+   */
+  testConnection(): Promise<boolean>;
+}
+
+/**
+ * IProvider 类型别名
+ *
+ * @deprecated 建议使用 IChatProvider 代替
+ */
+export type IProvider = IChatProvider;
+
+/**
+ * Provider 扩展接口
+ *
+ * 组合多个小接口，形成完整的 Provider 契约
+ * 注意：避免直接继承，通过交叉类型避免循环依赖
+ */
+export type IProviderExtended = IStreamProvider & IMonitorableProvider & {
+  /** Provider 配置信息 */
+  readonly config: ProviderConfig;
+
+  /** Provider 能力描述 */
+  readonly capabilities: ProviderCapabilities;
+};
+
+// 导入类型定义
+import type { ProviderConfig, ProviderStatus, ProviderCapabilities } from "./provider/types.js";
 
 // ============================================================================
 // Tool 接口
@@ -302,3 +363,10 @@ export interface IEventEmitter<EventMap extends Record<string, unknown>> {
    */
   emit<K extends keyof EventMap>(event: K, payload: EventMap[K]): void;
 }
+
+// ============================================================================
+// 错误类型导出
+// ============================================================================
+
+// 注意：错误类型需要独立导出，避免循环依赖
+// 使用者应从 "./errors.js" 导入错误类型

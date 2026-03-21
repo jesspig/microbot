@@ -6,15 +6,18 @@
 
 import type { IChannelExtended, MessageHandler } from "./contract.js";
 import { RegistryError } from "../errors.js";
-import { 
-  channelLogger, 
-  createTimer, 
-  logMethodCall, 
-  logMethodReturn, 
-  logMethodError 
-} from "../../applications/shared/logger.js";
+import {
+  createTimer,
+  logMethodCall,
+  logMethodReturn,
+  logMethodError,
+  createDefaultLogger
+} from "../logger/index.js";
 
-const logger = channelLogger();
+/** 停止操作的默认超时时间（毫秒） */
+const DEFAULT_STOP_TIMEOUT = 5000;
+
+const logger = createDefaultLogger("debug", ["runtime", "channel", "manager"]);
 
 // ============================================================================
 // Channel 管理器
@@ -230,33 +233,39 @@ export class ChannelManager {
   }
 
   /**
-   * 停止所有 Channel
+   * 停止所有 Channel（带超时保护）
    */
   async stopAll(): Promise<void> {
     const timer = createTimer();
-    logMethodCall(logger, { 
-      method: "stopAll", 
+    logMethodCall(logger, {
+      method: "stopAll",
       module: "ChannelManager",
       params: { channelCount: this.channels.size }
     });
-    
-    logger.info("开始停止所有 Channel", { 
-      totalChannels: this.channels.size 
+
+    logger.info("开始停止所有 Channel", {
+      totalChannels: this.channels.size
     });
-    
-    await Promise.all(
-      Array.from(this.channels.values()).map((ch) => ch.stop())
+
+    // 为每个 channel 创建带超时的 Promise
+    const stopPromises = Array.from(this.channels.values()).map((ch) =>
+      Promise.race([
+        ch.stop(),
+        new Promise<void>((resolve) => setTimeout(() => resolve(), DEFAULT_STOP_TIMEOUT))
+      ])
     );
-    
-    logger.info("所有 Channel 已停止", { 
+
+    await Promise.all(stopPromises);
+
+    logger.info("所有 Channel 停止完成", {
       totalChannels: this.channels.size,
       duration: timer()
     });
-    
-    logMethodReturn(logger, { 
-      method: "stopAll", 
+
+    logMethodReturn(logger, {
+      method: "stopAll",
       module: "ChannelManager",
-      duration: timer() 
+      duration: timer()
     });
   }
 

@@ -8,8 +8,8 @@ import type { ToolDefinition } from "../types.js";
 import type { ITool } from "../contracts.js";
 import type { ToolPolicy } from "./types.js";
 import type { ToolFactory } from "./contract.js";
-import { RegistryError, ToolInputError } from "../errors.js";
-import { toolLogger, createTimer, sanitize, logMethodCall, logMethodReturn, logMethodError } from "../../applications/shared/logger.js";
+import { RegistryError, ToolExecutionError } from "../errors.js";
+import { createTimer, sanitize, logMethodCall, logMethodReturn, logMethodError, createDefaultLogger } from "../logger/index.js";
 
 // ============================================================================
 // 辅助函数
@@ -52,7 +52,7 @@ export const TOOL_GROUPS: Record<string, string[]> = {
 export class ToolRegistry {
   private tools = new Map<string, ITool>();
   private factories = new Map<string, ToolFactory>();
-  private logger = toolLogger();
+  private logger = createDefaultLogger("debug", ["runtime", "tool", "registry"]);
 
   /**
    * 注册工具
@@ -272,7 +272,7 @@ export class ToolRegistry {
    * @param params - 工具参数
    * @returns 执行结果
    * @throws RegistryError - 工具不存在时抛出
-   * @throws ToolInputError - 执行失败时抛出
+   * @throws ToolExecutionError - 工具执行失败时抛出
    */
   async execute(
     name: string,
@@ -322,6 +322,12 @@ export class ToolRegistry {
       return output;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
+
+      // 如果是 RegistryError 或 ToolExecutionError，直接重新抛出
+      if (err instanceof RegistryError || err instanceof ToolExecutionError) {
+        throw error;
+      }
+
       this.logger.error("工具执行失败", {
         toolName: name,
         error: { name: err.name, message: err.message },
@@ -337,10 +343,8 @@ export class ToolRegistry {
         duration: timer(),
       });
 
-      throw new ToolInputError(
-        error instanceof Error ? error.message : String(error),
-        name
-      );
+      // 抛出 ToolExecutionError 而非 ToolInputError
+      throw new ToolExecutionError(name, err.message, err);
     }
   }
 

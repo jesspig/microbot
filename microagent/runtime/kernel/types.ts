@@ -58,8 +58,8 @@ export interface AgentConfig {
   maxIterations: number;
   /** 默认超时时间（毫秒） */
   defaultTimeout: number;
-  /** 是否启用日志 */
-  enableLogging: boolean;
+  /** 是否启用日志（默认 true）*/
+  enableLogging?: boolean;
   /** 是否启用流式输出 */
   enableStreaming?: boolean;
   /** 流式输出回调（用于 Channel 消息更新） */
