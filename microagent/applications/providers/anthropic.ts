@@ -1,121 +1,96 @@
 /**
  * Anthropic Provider 实现
  *
- * 支持 Anthropic Claude API 格式
+ * 支持 Anthropic Claude 原生 Messages API
+ * 文档：https://docs.anthropic.com/
  */
 
 import { BaseProvider } from "../../runtime/provider/base.js";
 import { providersLogger, createTimer, sanitize, logMethodCall, logMethodReturn, logMethodError } from "../shared/logger.js";
-
-const logger = providersLogger();
 import type { IProviderExtended } from "../../runtime/provider/contract.js";
 import type { ProviderCapabilities, ProviderConfig, ProviderStatus } from "../../runtime/provider/types.js";
 import type { ChatRequest, ChatResponse, Message, StreamCallback, StreamChunk, ToolCall } from "../../runtime/types.js";
 
-// ============================================================================
-// 类型定义
-// ============================================================================
+const logger = providersLogger();
+
+export interface ThinkingConfig {
+  type: "enabled";
+  budget_tokens: number;
+}
+
+export interface ToolChoiceConfig {
+  type: "tool";
+  name: string;
+}
+
+export interface AnthropicProviderOptions {
+  name?: string;
+  displayName?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  models?: string[];
+  timeout?: number;
+  maxRetries?: number;
+  thinking?: ThinkingConfig;
+  stopSequences?: string[];
+  forceTool?: string;
+  capabilities?: Partial<ProviderCapabilities>;
+}
 
 type AnthropicContentBlock =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; tool_use_id: string; content: string };
+  | { type: "tool_result"; tool_use_id: string; content: string | unknown };
 
 interface AnthropicMessage {
   role: "user" | "assistant";
   content: AnthropicContentBlock[];
 }
 
-interface AnthropicRequest {
-  model: string;
-  messages: AnthropicMessage[];
-  system?: string;
-  max_tokens: number;
-  temperature?: number;
-  tools?: Array<{
-    name: string;
-    description: string;
-    input_schema: unknown;
-  }>;
-}
-
-interface AnthropicResponse {
-  id: string;
-  type: "message";
-  role: "assistant";
-  content: Array<{
-    type: "text" | "tool_use";
-    text?: string;
-    id?: string;
-    name?: string;
-    input?: unknown;
-  }>;
-  stop_reason: string;
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-  };
-}
-
-export interface AnthropicProviderOptions {
-  name: string;
-  displayName?: string;
-  baseUrl: string;
-  apiKey?: string;
-  models: string[];
-  timeout?: number;
-  maxRetries?: number;
-  capabilities?: Partial<ProviderCapabilities>;
-}
-
-// ============================================================================
-// Provider 实现
-// ============================================================================
-
 export class AnthropicProvider extends BaseProvider implements IProviderExtended {
   readonly name: string;
   readonly config: ProviderConfig;
   readonly capabilities: ProviderCapabilities;
 
-  private readonly defaultModel: string;
   private readonly timeout: number;
   private readonly maxRetries: number;
+  private readonly baseUrl: string;
+  private readonly apiKey: string;
+  private readonly thinking: ThinkingConfig | undefined;
+  private readonly stopSequences: string[] | undefined;
+  private readonly forceTool: string | undefined;
   private readonly retryBaseDelay = 1000;
 
-  constructor(options: AnthropicProviderOptions) {
+  constructor(options: AnthropicProviderOptions = {}) {
     super();
 
-    if (!options.name) throw new Error("Provider name 未配置");
-    if (!options.baseUrl) throw new Error(`${options.name} baseUrl 未配置`);
-    if (!options.models?.length) throw new Error(`${options.name} models 未配置`);
-
-    this.name = options.name;
-    const apiKey = options.apiKey ?? process.env[`${options.name.toUpperCase()}_API_KEY`] ?? "";
-
-    if (!apiKey) {
-      throw new Error(`${options.name} API Key 未配置，请设置环境变量 ${options.name.toUpperCase()}_API_KEY 或在配置中提供 apiKey`);
-    }
+    this.name = options.name ?? "anthropic";
+    this.baseUrl = options.baseUrl ?? "https://api.anthropic.com/v1";
+    this.apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY ?? "";
+    const models = options.models ?? [];
 
     this.config = {
-      id: options.name,
-      name: options.displayName ?? options.name,
-      baseUrl: options.baseUrl,
-      apiKey,
-      models: options.models,
+      id: this.name,
+      name: options.displayName ?? "Anthropic Claude",
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+      models,
     };
 
     this.capabilities = {
       supportsStreaming: true,
-      supportsVision: false,
+      supportsVision: true,
       supportsPromptCaching: true,
       maxContextTokens: 200000,
       toolSchemaMode: "anthropic",
       ...options.capabilities,
     };
 
-    this.defaultModel = options.models[0]!;
-    this.timeout = options.timeout ?? 60000;
+    this.timeout = options.timeout ?? 120000;
     this.maxRetries = options.maxRetries ?? 3;
+    this.thinking = options.thinking;
+    this.stopSequences = options.stopSequences;
+    this.forceTool = options.forceTool;
   }
 
   getSupportedModels(): string[] {
@@ -126,32 +101,35 @@ export class AnthropicProvider extends BaseProvider implements IProviderExtended
     const timer = createTimer();
     const { model, messages, tools, temperature, maxTokens } = request;
 
-    logMethodCall(logger, { method: "chat", module: "AnthropicProvider", params: { model, messageCount: messages.length, hasTools: !!tools?.length } });
+    logMethodCall(logger, {
+      method: "chat",
+      module: "AnthropicProvider",
+      params: { model, messageCount: messages.length, hasTools: !!tools?.length },
+    });
+
+    if (!model && this.config.models.length === 0) {
+      throw new Error(`Provider "${this.name}" 未配置模型，且请求中未指定模型`);
+    }
 
     try {
-      // 解析模型名称：支持 "provider/model" 格式，提取 model 部分
-      const actualModel = this.parseModelName(model || this.defaultModel);
+      const actualModel = model || this.config.models[0]!;
+      const body = this.buildRequestBody(actualModel, messages, tools, temperature, maxTokens);
 
-      const body: AnthropicRequest = {
+      logger.info("LLM调用", {
+        provider: this.name,
         model: actualModel,
-        messages: this.convertMessages(messages),
-        max_tokens: maxTokens ?? 4096,
-      };
+        endpoint: "messages",
+        stream: false,
+      });
 
-      if (temperature !== undefined) body.temperature = temperature;
-      if (tools?.length) {
-        body.tools = tools.map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          input_schema: tool.parameters,
-        }));
-      }
-
-      logger.info("LLM调用", { provider: this.name, model: actualModel, endpoint: "messages", stream: false });
-
-      const response = await this.requestWithRetry(`${this.config.baseUrl}/messages`, body);
+      const response = await this.requestWithRetry(`${this.baseUrl}/messages`, body);
       this.recordUsage();
       const result = this.parseResponse(response);
+
+      logger.info("LLM响应", {
+        provider: this.name,
+        text: result.text.substring(0, 200),
+      });
 
       logMethodReturn(logger, { method: "chat", module: "AnthropicProvider", result: sanitize(result), duration: timer() });
       return result;
@@ -160,8 +138,8 @@ export class AnthropicProvider extends BaseProvider implements IProviderExtended
       logMethodError(logger, {
         method: "chat",
         module: "AnthropicProvider",
-        error: { name: error.name, message: error.message, ...(error.stack ? { stack: error.stack } : {}) },
-        params: { model, messageCount: messages.length },
+        error: { name: error.name, message: error.message },
+        params: { model },
         duration: timer(),
       });
       throw error;
@@ -172,54 +150,58 @@ export class AnthropicProvider extends BaseProvider implements IProviderExtended
     const timer = createTimer();
     const { model, messages, tools, temperature, maxTokens } = request;
 
-    logMethodCall(logger, { method: "streamChat", module: "AnthropicProvider", params: { model, messageCount: messages.length, hasTools: !!tools?.length } });
-
-    try {
-      const actualModel = this.parseModelName(model || this.defaultModel);
-
-      const body: Record<string, unknown> = {
-        model: actualModel,
-        messages: this.convertMessages(messages),
-        max_tokens: maxTokens ?? 4096,
-        stream: true,
-      };
-
-      if (temperature !== undefined) body.temperature = temperature;
-      if (tools?.length) {
-        body.tools = tools.map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          input_schema: tool.parameters,
-        }));
-      }
-
-      logger.info("LLM调用", { provider: this.name, model: actualModel, endpoint: "messages", stream: true });
-
-      const httpResponse = await fetch(`${this.config.baseUrl}/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.config.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify(body),
+    logMethodCall(logger, {
+      method: "streamChat",
+      module: "AnthropicProvider",
+      params: { model, messageCount: messages.length, hasTools: !!tools?.length },
     });
 
-    if (!httpResponse.ok) {
-      const errorData = await httpResponse.json().catch(() => ({})) as { error?: { message?: string } };
-      throw new Error(`${this.config.name} API 错误: ${errorData.error?.message ?? httpResponse.statusText}`);
+    if (!model && this.config.models.length === 0) {
+      throw new Error(`Provider "${this.name}" 未配置模型，且请求中未指定模型`);
     }
 
-    const reader = httpResponse.body?.getReader();
-    if (!reader) throw new Error("无法获取响应流");
+    const actualModel = model || this.config.models[0]!;
+    const body = this.buildRequestBody(actualModel, messages, tools, temperature, maxTokens, true);
 
-    const decoder = new TextDecoder();
-    let fullText = "";
-    const toolCalls: ToolCall[] = [];
-    let usage: { inputTokens: number; outputTokens: number } | undefined;
-    let currentToolCall: { id: string; name: string; input: string } | null = null;
+    logger.info("LLM调用", {
+      provider: this.name,
+      model: actualModel,
+      endpoint: "messages",
+      stream: true,
+    });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
+      const response = await fetch(`${this.baseUrl}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => null) as AnthropicErrorResponse | null;
+        throw new Error(`Anthropic API 错误: ${errBody?.error?.message || response.statusText}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("无法获取响应流");
+
+      const decoder = new TextDecoder();
+      let fullText = "";
+      let fullThinking = "";
+      let usageReported = false;
+      const toolCalls: ToolCall[] = [];
+      let currentToolCall: { id: string; name: string; input: string } | null = null;
+      let inputTokens = 0;
+      let outputTokens = 0;
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -229,134 +211,169 @@ export class AnthropicProvider extends BaseProvider implements IProviderExtended
 
         for (const line of lines) {
           const data = line.slice(6);
+          if (data === "[DONE]") continue;
 
           try {
-            const event = JSON.parse(data);
+            const event = JSON.parse(data) as AnthropicStreamEvent;
+
+            if (event.type === "message_start" && event.message?.usage) {
+              inputTokens = event.message.usage.input_tokens ?? 0;
+            }
 
             if (event.type === "content_block_delta") {
               const delta = event.delta;
-              if (delta?.type === "text_delta" && delta.text) {
+              if (!delta) continue;
+
+              if (delta.type === "text_delta" && delta.text) {
                 fullText += delta.text;
                 await callback({
                   delta: delta.text,
                   text: fullText,
                   done: false,
                 });
-              } else if (delta?.type === "input_json_delta" && currentToolCall) {
+              } else if (delta.type === "thinking_delta" && delta.thinking) {
+                fullThinking += delta.thinking;
+              } else if (delta.type === "input_json_delta" && currentToolCall) {
                 currentToolCall.input += delta.partial_json ?? "";
               }
             } else if (event.type === "content_block_start") {
               const block = event.content_block;
-              if (block?.type === "tool_use") {
+              if (!block) continue;
+
+              if (block.type === "thinking") {
+                // 开始思考块
+              } else if (block.type === "tool_use" && block.id && block.name) {
                 currentToolCall = {
                   id: block.id,
                   name: block.name,
                   input: "",
                 };
+              } else if (block.type === "text") {
+                // 开始文本块
               }
-            } else if (event.type === "content_block_stop" && currentToolCall) {
-              try {
-                toolCalls.push({
-                  id: currentToolCall.id,
-                  name: currentToolCall.name,
-                  arguments: JSON.parse(currentToolCall.input),
-                });
-              } catch {
-                toolCalls.push({
-                  id: currentToolCall.id,
-                  name: currentToolCall.name,
-                  arguments: { raw: currentToolCall.input },
-                });
+            } else if (event.type === "content_block_stop") {
+              if (currentToolCall) {
+                try {
+                  toolCalls.push({
+                    id: currentToolCall.id,
+                    name: currentToolCall.name,
+                    arguments: JSON.parse(currentToolCall.input),
+                  });
+                } catch {
+                  toolCalls.push({
+                    id: currentToolCall.id,
+                    name: currentToolCall.name,
+                    arguments: { raw: currentToolCall.input },
+                  });
+                }
+                currentToolCall = null;
               }
-              currentToolCall = null;
             } else if (event.type === "message_delta" && event.usage) {
-              usage = {
-                inputTokens: usage?.inputTokens ?? 0,
-                outputTokens: event.usage.output_tokens ?? 0,
-              };
-            } else if (event.type === "message_start" && event.message?.usage) {
-              usage = {
-                inputTokens: event.message.usage.input_tokens,
-                outputTokens: 0,
-              };
+              outputTokens = event.usage.output_tokens ?? 0;
+              if (event.usage) {
+                usageReported = true;
+                this.recordUsage();
+              }
             }
-          } catch (parseError) {
-            // JSON 解析失败，跳过该事件
-            logger.debug("流式事件解析失败", {
-              eventType: (event as unknown as Record<string, unknown>).type,
-              error: parseError instanceof Error ? parseError.message : String(parseError)
-            });
+          } catch {
+            // 忽略解析错误
           }
         }
       }
-    } finally {
-      reader.releaseLock();
-    }
 
-    // 最终回调
-    const finalChunk: StreamChunk = {
-      delta: "",
-      text: fullText,
-      done: true,
-    };
-    if (toolCalls.length > 0) finalChunk.toolCalls = toolCalls;
-    if (usage) finalChunk.usage = usage;
-    await callback(finalChunk);
+      if (!usageReported) {
+        this.recordUsage();
+      }
 
-    this.recordUsage();
-    const chatResponse: ChatResponse = {
-      text: fullText,
-      hasToolCall: toolCalls.length > 0,
-    };
-    if (toolCalls.length > 0) chatResponse.toolCalls = toolCalls;
-    if (usage) chatResponse.usage = usage;
+      const result: ChatResponse = {
+        text: fullText,
+        hasToolCall: toolCalls.length > 0,
+        usage: {
+          inputTokens,
+          outputTokens,
+        },
+      };
 
-    logMethodReturn(logger, { method: "streamChat", module: "AnthropicProvider", result: sanitize(chatResponse), duration: timer() });
-    return chatResponse;
+      if (toolCalls.length > 0) result.toolCalls = toolCalls;
+      if (fullThinking) result.reasoning = fullThinking;
+
+      const finalChunk: StreamChunk = {
+        delta: "",
+        text: fullText,
+        done: true,
+      };
+      if (toolCalls.length > 0) finalChunk.toolCalls = toolCalls;
+      if (fullThinking) finalChunk.reasoning = fullThinking;
+      if (result.usage) finalChunk.usage = result.usage;
+      await callback(finalChunk);
+
+      logger.info("LLM响应", {
+        provider: this.name,
+        text: fullText.substring(0, 200),
+        thinking: fullThinking ? "(有思考过程)" : undefined,
+      });
+
+      logMethodReturn(logger, { method: "streamChat", module: "AnthropicProvider", result: sanitize(result), duration: timer() });
+      return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       logMethodError(logger, {
         method: "streamChat",
         module: "AnthropicProvider",
-        error: { name: error.name, message: error.message, ...(error.stack ? { stack: error.stack } : {}) },
-        params: { model, messageCount: messages.length },
+        error: { name: error.name, message: error.message },
         duration: timer(),
       });
       throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
-  /**
-   * 解析并验证模型名称
-   * 支持格式：
-   * - "model-name" -> 直接使用
-   * - "provider/model-name" -> 验证 provider 匹配后提取 model
-   *
-   * @throws 如果 provider 不匹配当前 Provider 实例
-   */
-  private parseModelName(model: string): string {
-    const slashIndex = model.indexOf("/");
-    if (slashIndex >= 0) {
-      const providerName = model.substring(0, slashIndex);
-      const modelName = model.substring(slashIndex + 1);
+  private buildRequestBody(
+    model: string,
+    messages: Message[],
+    tools: ChatRequest["tools"],
+    temperature: number | undefined,
+    maxTokens: number | undefined,
+    stream = false
+  ): AnthropicRequest {
+    const body: AnthropicRequest = {
+      model,
+      messages: this.convertMessages(messages),
+      max_tokens: maxTokens ?? 4096,
+      stream,
+    };
 
-      // 验证 provider 是否匹配当前实例
-      if (providerName !== this.name) {
-        throw new Error(
-          `模型 "${model}" 的 provider "${providerName}" 与当前 Provider "${this.name}" 不匹配`
-        );
+    if (temperature !== undefined) body.temperature = temperature;
+    if (this.thinking) body.thinking = this.thinking;
+    if (this.stopSequences?.length) body.stop_sequences = this.stopSequences;
+
+    if (tools?.length) {
+      body.tools = tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.parameters,
+      }));
+
+      if (this.forceTool) {
+        body.tool_choice = { type: "tool", name: this.forceTool };
+      } else {
+        body.tool_choice = { type: "auto" };
       }
-
-      return modelName;
     }
-    return model;
+
+    return body;
   }
 
   private convertMessages(messages: Message[]): AnthropicMessage[] {
     const result: AnthropicMessage[] = [];
+    let systemPrompt = "";
 
     for (const msg of messages) {
-      if (msg.role === "system") continue; // Anthropic 使用 system 参数
+      if (msg.role === "system") {
+        systemPrompt += (systemPrompt ? "\n" : "") + msg.content;
+        continue;
+      }
 
       if (msg.role === "user") {
         result.push({
@@ -383,16 +400,19 @@ export class AnthropicProvider extends BaseProvider implements IProviderExtended
 
         result.push({ role: "assistant", content });
       } else if (msg.role === "tool") {
-        // 找到对应的 tool_use 消息
         const lastAssistant = result[result.length - 1];
         if (lastAssistant && lastAssistant.role === "assistant") {
           lastAssistant.content.push({
             type: "tool_result",
             tool_use_id: msg.toolCallId!,
             content: msg.content,
-          } as AnthropicContentBlock);
+          });
         }
       }
+    }
+
+    if (systemPrompt) {
+      return [{ role: "user" as const, content: [{ type: "text", text: systemPrompt }] }, ...result];
     }
 
     return result;
@@ -400,111 +420,62 @@ export class AnthropicProvider extends BaseProvider implements IProviderExtended
 
   private async requestWithRetry(url: string, body: AnthropicRequest): Promise<AnthropicResponse> {
     let lastError: Error | null = null;
+
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
-        return await this.sendRequest(url, body);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": this.apiKey,
+              "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+
+          if (!response.ok) {
+            const errBody = await response.json().catch(() => null) as AnthropicErrorResponse | null;
+            throw new Error(`Anthropic API 错误: ${errBody?.error?.message || response.statusText}`);
+          }
+
+          return await response.json() as AnthropicResponse;
+        } finally {
+          clearTimeout(timeoutId);
+        }
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        if (!this.isRetryableError(error)) throw error;
-        if (attempt < this.maxRetries) {
-          await this.sleep(this.retryBaseDelay * Math.pow(2, attempt));
-        }
+        if (!this.isRetryableError(error) || attempt >= this.maxRetries) throw error;
+        await this.sleep(this.retryBaseDelay * Math.pow(2, attempt));
       }
     }
-    this.recordError();
+
     throw lastError ?? new Error("请求失败");
-  }
-
-  private async sendRequest(url: string, body: AnthropicRequest): Promise<AnthropicResponse> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-    try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "x-api-key": this.config.apiKey,
-        "anthropic-version": "2023-06-01",
-      };
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      const json: unknown = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        const errorMessage = this.extractErrorMessage(json);
-        throw new Error(`${this.config.name} API 错误: ${errorMessage}`);
-      }
-
-      return this.validateResponse(json);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  /**
-   * 从响应中提取错误消息
-   */
-  private extractErrorMessage(json: unknown): string {
-    if (typeof json === "object" && json !== null) {
-      const obj = json as Record<string, unknown>;
-      if (obj.error && typeof obj.error === "object") {
-        const error = obj.error as Record<string, unknown>;
-        if (typeof error.message === "string") return error.message;
-      }
-    }
-    return "未知错误";
-  }
-
-  /**
-   * 验证并转换 Anthropic 响应
-   */
-  private validateResponse(json: unknown): AnthropicResponse {
-    if (typeof json !== "object" || json === null) {
-      throw new Error(`${this.config.name} API 返回无效响应格式`);
-    }
-
-    const obj = json as Record<string, unknown>;
-    if (!Array.isArray(obj.content)) {
-      throw new Error(`${this.config.name} API 返回非标准格式响应`);
-    }
-
-    return json as AnthropicResponse;
   }
 
   private isRetryableError(error: unknown): boolean {
     if (error instanceof Error) {
-      const message = error.message.toLowerCase();
-      return (
-        message.includes("rate limit") ||
-        message.includes("overloaded") ||
-        message.includes("timeout") ||
-        message.includes("network") ||
-        message.includes("aborted") ||
-        message.includes("429") ||
-        message.includes("500") ||
-        message.includes("502") ||
-        message.includes("503") ||
-        message.includes("504")
-      );
+      const msg = error.message.toLowerCase();
+      return msg.includes("rate limit") || msg.includes("overloaded") || msg.includes("timeout") || msg.includes("429") || msg.includes("500");
     }
     return false;
   }
 
   private parseResponse(response: AnthropicResponse): ChatResponse {
-    const toolCalls: ToolCall[] | undefined = [];
+    const toolCalls: ToolCall[] = [];
     let text = "";
 
     for (const block of response.content) {
       if (block.type === "text") {
         text += block.text ?? "";
-      } else if (block.type === "tool_use") {
+      } else if (block.type === "tool_use" && block.id && block.name) {
         toolCalls.push({
-          id: block.id!,
-          name: block.name!,
+          id: block.id,
+          name: block.name,
           arguments: block.input as Record<string, unknown>,
         });
       }
@@ -515,11 +486,13 @@ export class AnthropicProvider extends BaseProvider implements IProviderExtended
       hasToolCall: toolCalls.length > 0,
     };
 
-    if (toolCalls.length) result.toolCalls = toolCalls;
-    result.usage = {
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-    };
+    if (toolCalls.length > 0) result.toolCalls = toolCalls;
+    if (response.usage) {
+      result.usage = {
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+      };
+    }
 
     result.raw = response;
     return result;
@@ -541,6 +514,82 @@ export class AnthropicProvider extends BaseProvider implements IProviderExtended
   }
 }
 
-export function createAnthropicProvider(options: AnthropicProviderOptions): AnthropicProvider {
+interface AnthropicRequest {
+  model: string;
+  messages: AnthropicMessage[];
+  system?: string;
+  max_tokens: number;
+  temperature?: number;
+  top_p?: number;
+  tools?: Array<{
+    name: string;
+    description: string;
+    input_schema: unknown;
+  }>;
+  tool_choice?: { type: "auto" } | { type: "any" } | { type: "tool"; name: string };
+  stop_sequences?: string[];
+  thinking?: ThinkingConfig;
+  stream: boolean;
+}
+
+interface AnthropicResponse {
+  id: string;
+  type: string;
+  role: string;
+  model: string;
+  content: Array<{
+    type: "text" | "tool_use";
+    text?: string;
+    id?: string;
+    name?: string;
+    input?: unknown;
+  }>;
+  stop_reason: string;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+}
+
+interface AnthropicStreamEvent {
+  type: string;
+  index?: number;
+  content_block?: {
+    type: string;
+    id?: string;
+    name?: string;
+  };
+  delta?: {
+    type: string;
+    text?: string;
+    thinking?: string;
+    partial_json?: string;
+  };
+  message?: {
+    id?: string;
+    role?: string;
+    content?: unknown[];
+    usage?: {
+      input_tokens: number;
+      output_tokens: number;
+    };
+  };
+  usage?: {
+    output_tokens: number;
+    stop_sequence?: string;
+  };
+}
+
+interface AnthropicErrorResponse {
+  type: string;
+  error: {
+    type: string;
+    message: string;
+  };
+}
+
+export function createAnthropicProvider(options: AnthropicProviderOptions = {}): AnthropicProvider {
   return new AnthropicProvider(options);
 }

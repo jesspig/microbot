@@ -94,6 +94,8 @@ export interface UsageStats {
   inputTokens: number;
   /** 输出 token 数 */
   outputTokens: number;
+  /** 思考/推理 token 数（用于 thinking 模型如 DeepSeek-R1、Qwen3） */
+  reasoningTokens?: number;
 }
 
 /**

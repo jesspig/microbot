@@ -2,107 +2,68 @@
  * Ollama Provider 实现
  *
  * 支持本地运行的开源大语言模型
- * 使用 Ollama 原生 API 格式（支持 thinking 模型）
+ * 提供两种 API 模式：
+ * 1. 原生 API (/api/chat) - 支持 think、format、options 等扩展参数
+ * 2. OpenAI 兼容 API (/v1/chat/completions) - 与 OpenAI SDK 兼容
+ * 文档：https://github.com/ollama/ollama/blob/main/docs/api.md
  */
 
 import { BaseProvider } from "../../runtime/provider/base.js";
 import { providersLogger, createTimer, sanitize, logMethodCall, logMethodReturn, logMethodError } from "../shared/logger.js";
 import type { IProviderExtended } from "../../runtime/provider/contract.js";
 import type { ProviderCapabilities, ProviderConfig, ProviderStatus } from "../../runtime/provider/types.js";
-import type { ChatRequest, ChatResponse, Message, StreamCallback, StreamChunk, ToolCall } from "../../runtime/types.js";
+import type { ChatRequest, ChatResponse, Message, StreamCallback, StreamChunk, ToolCall, UsageStats } from "../../runtime/types.js";
 
 const logger = providersLogger();
 
-// ============================================================================
-// 类型定义
-// ============================================================================
-
-/**
- * Ollama 模型信息
- */
-interface OllamaModel {
-  name: string;
-  modified_at: string;
-  size: number;
-}
-
-/**
- * Ollama 模型列表响应
- */
-interface OllamaModelsResponse {
-  models: OllamaModel[];
-}
-
-/**
- * Ollama 原生 API 响应格式
- */
-interface OllamaNativeResponse {
-  model: string;
-  created_at: string;
-  message: {
-    role: string;
-    content: string;
-    /** 思考内容（thinking 模型） */
-    thinking?: string;
-    tool_calls?: Array<{
-      id?: string;
-      type?: "function";
-      function: {
-        name: string;
-        arguments: string;
-      };
-    }>;
-  };
-  done_reason?: string;
-  done: boolean;
-  total_duration?: number;
-  load_duration?: number;
-  prompt_eval_count?: number;
-  prompt_eval_duration?: number;
-  eval_count?: number;
-  eval_duration?: number;
-}
-
-/**
- * Ollama API 错误响应
- */
-interface OllamaError {
-  error: string;
-}
-
-/**
- * Ollama Provider 配置选项
- */
 export interface OllamaProviderOptions {
-  /** Provider 名称 */
   name?: string;
-  /** 基础 URL */
+  displayName?: string;
   baseUrl?: string;
-  /** 支持的模型列表 */
+  apiKey?: string;
   models?: string[];
-  /** 默认模型 */
-  defaultModel?: string;
-  /** 请求超时（毫秒） */
   timeout?: number;
-  /** 最大重试次数 */
   maxRetries?: number;
-  /** 是否启用 thinking 模式 */
-  think?: boolean;
+  useNativeApi?: boolean;
+  think?: boolean | string;
+  format?: string | Record<string, unknown>;
+  options?: OllamaModelOptions;
+  keepAlive?: string | number;
+  reasoningEffort?: "high" | "medium" | "low" | "none";
+  capabilities?: Partial<ProviderCapabilities>;
 }
 
-// ============================================================================
-// Provider 实现
-// ============================================================================
+export interface OllamaModelOptions {
+  temperature?: number;
+  topK?: number;
+  topP?: number;
+  minP?: number;
+  repeatPenalty?: number;
+  presencePenalty?: number;
+  frequencyPenalty?: number;
+  numCtx?: number;
+  numPredict?: number;
+  numGpu?: number;
+  mainGpu?: number;
+  numThread?: number;
+  seed?: number;
+}
 
 export class OllamaProvider extends BaseProvider implements IProviderExtended {
   readonly name: string;
   readonly config: ProviderConfig;
   readonly capabilities: ProviderCapabilities;
+  readonly apiKey: string;
 
-  private readonly defaultModel: string;
   private readonly timeout: number;
   private readonly maxRetries: number;
-  private readonly think: boolean;
+  private readonly baseUrl: string;
+  private readonly useNativeApi: boolean;
+  private readonly think: boolean | string;
+  private readonly format: string | Record<string, unknown> | undefined;
+  private readonly options: OllamaModelOptions;
+  private readonly keepAlive: string | number;
+  private readonly reasoningEffort: "high" | "medium" | "low" | "none" | undefined;
   private readonly retryBaseDelay = 1000;
   private cachedModels: string[] | null = null;
 
@@ -110,33 +71,39 @@ export class OllamaProvider extends BaseProvider implements IProviderExtended {
     super();
 
     this.name = options.name ?? "ollama";
-    const baseUrl = options.baseUrl ?? "http://localhost:11434";
-    const models = options.models?.length ? options.models : [];
+    this.baseUrl = options.baseUrl ?? "http://localhost:11434";
+    this.apiKey = options.apiKey ?? "";
+    const models = options.models ?? [];
 
     this.config = {
       id: this.name,
-      name: "Ollama",
-      baseUrl,
-      apiKey: "",
+      name: options.displayName ?? "Ollama",
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
       models,
     };
+
+    this.capabilities = {
+      supportsStreaming: true,
+      supportsVision: true,
+      supportsPromptCaching: false,
+      maxContextTokens: 128000,
+      toolSchemaMode: "native",
+      ...options.capabilities,
+    };
+
+    this.timeout = options.timeout ?? 120000;
+    this.maxRetries = options.maxRetries ?? 2;
+    this.useNativeApi = options.useNativeApi ?? true;
+    this.think = options.think ?? false;
+    this.format = options.format;
+    this.options = options.options ?? {};
+    this.keepAlive = options.keepAlive ?? "5m";
+    this.reasoningEffort = options.reasoningEffort;
 
     if (models.length > 0) {
       this.cachedModels = [...models];
     }
-
-    this.defaultModel = options.defaultModel ?? "llama3.2";
-    this.timeout = options.timeout ?? 120000;
-    this.maxRetries = options.maxRetries ?? 2;
-    this.think = options.think ?? true;
-
-    this.capabilities = {
-      supportsStreaming: true,
-      supportsVision: false,
-      supportsPromptCaching: false,
-      maxContextTokens: 128000,
-      toolSchemaMode: "native",
-    };
   }
 
   getSupportedModels(): string[] {
@@ -146,12 +113,12 @@ export class OllamaProvider extends BaseProvider implements IProviderExtended {
     if (this.cachedModels) {
       return [...this.cachedModels];
     }
-    return [this.defaultModel];
+    return [];
   }
 
   async refreshModels(): Promise<string[]> {
     const timer = createTimer();
-    logMethodCall(logger, { method: "refreshModels", module: "OllamaProvider", params: {} });
+    logMethodCall(logger, { method: "refreshModels", module: "OllamaProvider" });
 
     try {
       const controller = new AbortController();
@@ -181,10 +148,10 @@ export class OllamaProvider extends BaseProvider implements IProviderExtended {
       logMethodError(logger, {
         method: "refreshModels",
         module: "OllamaProvider",
-        error: { name: error.name, message: error.message, ...(error.stack ? { stack: error.stack } : {}) },
+        error: { name: error.name, message: error.message },
         duration: timer(),
       });
-      return [this.defaultModel];
+      return [];
     }
   }
 
@@ -192,110 +159,198 @@ export class OllamaProvider extends BaseProvider implements IProviderExtended {
     const timer = createTimer();
     const { model, messages, tools, temperature, maxTokens } = request;
 
-    logMethodCall(logger, { method: "chat", module: "OllamaProvider", params: { model, messageCount: messages.length, hasTools: !!tools?.length } });
+    logMethodCall(logger, {
+      method: "chat",
+      module: "OllamaProvider",
+      params: { model, messageCount: messages.length, hasTools: !!tools?.length },
+    });
+
+    const actualModel = model || this.config.models[0];
+    if (!actualModel) {
+      throw new Error(`Provider "${this.name}" 未配置模型，且请求中未指定模型`);
+    }
 
     try {
-      if (!this.cachedModels) {
-        await this.refreshModels();
+      if (this.useNativeApi) {
+        return await this.nativeChat(actualModel, messages, tools, temperature, maxTokens, timer);
       }
-
-      // 解析模型名称：支持 "provider/model" 格式，提取 model 部分
-      const actualModel = this.parseModelName(model || this.defaultModel);
-
-      // 构建原生 Ollama API 请求体
-      const body: Record<string, unknown> = {
-        model: actualModel,
-        messages: this.convertMessages(messages),
-        stream: false,
-        think: this.think,
-      };
-
-      if (temperature !== undefined) {
-        body.options = { temperature };
-      }
-
-      if (maxTokens !== undefined) {
-        body.options = { ...(body.options as Record<string, unknown>), num_predict: maxTokens };
-      }
-
-      if (tools?.length) {
-        body.tools = tools.map((tool) => ({
-          type: "function",
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.parameters,
-          },
-        }));
-      }
-
-      logger.info("LLM调用", { provider: this.name, model: actualModel, endpoint: "api/chat", stream: false });
-
-      const response = await this.requestWithRetry(`${this.config.baseUrl}/api/chat`, body);
-      this.recordUsage();
-      const result = this.parseResponse(response);
-
-      logMethodReturn(logger, { method: "chat", module: "OllamaProvider", result: sanitize(result), duration: timer() });
-      return result;
+      return await this.openAICompatibleChat(actualModel, messages, tools, temperature, maxTokens, timer);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       logMethodError(logger, {
         method: "chat",
         module: "OllamaProvider",
-        error: { name: error.name, message: error.message, ...(error.stack ? { stack: error.stack } : {}) },
-        params: { model, messageCount: messages.length },
+        error: { name: error.name, message: error.message },
         duration: timer(),
       });
       throw error;
     }
   }
 
+  private async nativeChat(
+    model: string,
+    messages: Message[],
+    tools: ChatRequest["tools"],
+    temperature: number | undefined,
+    maxTokens: number | undefined,
+    timer: () => number
+  ): Promise<ChatResponse> {
+    const body: Record<string, unknown> = {
+      model,
+      messages: this.convertNativeMessages(messages),
+      stream: false,
+    };
+
+    if (this.think) body.think = this.think;
+    if (this.format) body.format = this.format;
+    if (this.keepAlive !== undefined) body.keep_alive = this.keepAlive;
+
+    const options: Record<string, unknown> = { ...this.options };
+    if (temperature !== undefined) options.temperature = temperature;
+    if (maxTokens !== undefined) options.num_predict = maxTokens;
+    if (Object.keys(options).length > 0) body.options = options;
+
+    if (tools?.length) {
+      body.tools = tools.map((tool) => ({
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }));
+    }
+
+    logger.info("LLM调用", { provider: this.name, model, endpoint: "api/chat", stream: false });
+
+    const response = await this.nativeRequest(`${this.baseUrl}/api/chat`, body);
+    this.recordUsage();
+    const result = this.parseNativeResponse(response);
+
+    logger.info("LLM响应", {
+      provider: this.name,
+      text: result.text.substring(0, 100),
+      reasoning: result.reasoning?.substring(0, 100),
+    });
+    logMethodReturn(logger, { method: "chat", module: "OllamaProvider", result: sanitize(result), duration: timer() });
+    return result;
+  }
+
+  private async openAICompatibleChat(
+    model: string,
+    messages: Message[],
+    tools: ChatRequest["tools"],
+    temperature: number | undefined,
+    maxTokens: number | undefined,
+    timer: () => number
+  ): Promise<ChatResponse> {
+    const body: Record<string, unknown> = {
+      model,
+      messages: this.convertOpenAIMessages(messages),
+      stream: false,
+    };
+
+    if (temperature !== undefined) body.temperature = temperature;
+    if (maxTokens !== undefined) body.max_tokens = maxTokens;
+    if (this.reasoningEffort) body.reasoning_effort = this.reasoningEffort;
+    body.stream_options = { include_usage: true };
+
+    if (tools?.length) {
+      body.tools = tools.map((tool) => ({
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }));
+      body.tool_choice = "auto";
+    }
+
+    logger.info("LLM调用", { provider: this.name, model, endpoint: "v1/chat/completions", stream: false });
+
+    const response = await this.openAIRequest(`${this.baseUrl}/v1/chat/completions`, body);
+    this.recordUsage();
+    const result = this.parseOpenAIResponse(response);
+
+    logMethodReturn(logger, { method: "chat", module: "OllamaProvider", result: sanitize(result), duration: timer() });
+    return result;
+  }
+
   async streamChat(request: ChatRequest, callback: StreamCallback): Promise<ChatResponse> {
     const timer = createTimer();
     const { model, messages, tools, temperature, maxTokens } = request;
 
-    logMethodCall(logger, { method: "streamChat", module: "OllamaProvider", params: { model, messageCount: messages.length, hasTools: !!tools?.length } });
+    logMethodCall(logger, {
+      method: "streamChat",
+      module: "OllamaProvider",
+      params: { model, messageCount: messages.length },
+    });
 
-    if (!this.cachedModels) {
-      await this.refreshModels();
+    const actualModel = model || this.config.models[0];
+    if (!actualModel) {
+      throw new Error(`Provider "${this.name}" 未配置模型，且请求中未指定模型`);
     }
 
-    const actualModel = this.parseModelName(model || this.defaultModel);
+    try {
+      if (this.useNativeApi) {
+        return await this.nativeStreamChat(actualModel, messages, tools, temperature, maxTokens, callback, timer);
+      }
+      return await this.openAICompatibleStreamChat(actualModel, messages, tools, temperature, maxTokens, callback, timer);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      logMethodError(logger, {
+        method: "streamChat",
+        module: "OllamaProvider",
+        error: { name: error.name, message: error.message },
+        duration: timer(),
+      });
+      throw error;
+    }
+  }
 
-    // 构建流式请求体
+  private async nativeStreamChat(
+    model: string,
+    messages: Message[],
+    tools: ChatRequest["tools"],
+    temperature: number | undefined,
+    maxTokens: number | undefined,
+    callback: StreamCallback,
+    timer: () => number
+  ): Promise<ChatResponse> {
     const body: Record<string, unknown> = {
-        model: actualModel,
-        messages: this.convertMessages(messages),
-        stream: true,
-        think: this.think,
-      };
+      model,
+      messages: this.convertNativeMessages(messages),
+      stream: true,
+    };
 
-      if (temperature !== undefined) {
-        body.options = { temperature };
-      }
+    if (this.think) body.think = this.think;
+    if (this.format) body.format = this.format;
+    if (this.keepAlive !== undefined) body.keep_alive = this.keepAlive;
 
-      if (maxTokens !== undefined) {
-        body.options = { ...(body.options as Record<string, unknown>), num_predict: maxTokens };
-      }
+    const options: Record<string, unknown> = { ...this.options };
+    if (temperature !== undefined) options.temperature = temperature;
+    if (maxTokens !== undefined) options.num_predict = maxTokens;
+    if (Object.keys(options).length > 0) body.options = options;
 
-      if (tools?.length) {
-        body.tools = tools.map((tool) => ({
-          type: "function",
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.parameters,
-          },
-        }));
-      }
+    if (tools?.length) {
+      body.tools = tools.map((tool) => ({
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }));
+    }
 
-      logger.info("LLM调用", { provider: this.name, model: actualModel, endpoint: "api/chat", stream: true });
+    logger.info("LLM调用", { provider: this.name, model, endpoint: "api/chat", stream: true });
 
-      const controller = new AbortController();
+    const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(`${this.config.baseUrl}/api/chat`, {
+      const response = await fetch(`${this.baseUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -303,8 +358,8 @@ export class OllamaProvider extends BaseProvider implements IProviderExtended {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json()) as OllamaError;
-        throw new Error(`Ollama API 错误: ${errorData.error ?? response.statusText}`);
+        const errBody = await response.json().catch(() => ({ error: response.statusText })) as OllamaError;
+        throw new Error(`Ollama API 错误: ${errBody.error || response.statusText}`);
       }
 
       const reader = response.body?.getReader();
@@ -316,153 +371,185 @@ export class OllamaProvider extends BaseProvider implements IProviderExtended {
       const toolCalls: ToolCall[] = [];
       let usage: { inputTokens: number; outputTokens: number } | undefined;
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          // Ollama 每行一个 JSON 对象
-          const lines = chunk.split("\n").filter((line) => line.trim());
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n").filter((line) => line.trim());
 
-          for (const line of lines) {
-            try {
-              const json = JSON.parse(line) as OllamaNativeResponse;
+        for (const line of lines) {
+          try {
+            const json = JSON.parse(line) as OllamaStreamChunk;
 
-              // 累积内容
-              if (json.message?.content) {
-                fullText += json.message.content;
-              }
-              if (json.message?.thinking) {
-                fullReasoning += json.message.thinking;
-              }
-
-              // 处理工具调用
-              if (json.message?.tool_calls) {
-                for (const tc of json.message.tool_calls) {
-                  toolCalls.push({
-                    id: tc.id ?? `tc_${Date.now()}_${toolCalls.length}`,
-                    name: tc.function.name,
-                    arguments: this.parseToolArguments(tc.function.arguments),
-                  });
-                }
-              }
-
-              // 触发回调
-              const streamChunk: StreamChunk = {
-                delta: json.message?.content ?? "",
-                text: fullText,
-                done: false,
-              };
-              if (fullReasoning) {
-                const thinkingContent = json.message?.thinking;
-                if (thinkingContent !== undefined) {
-                  streamChunk.reasoningDelta = thinkingContent;
-                }
-                streamChunk.reasoning = fullReasoning;
-              }
-              await callback(streamChunk);
-
-              // Ollama 在最后发送 done: true
-              if (json.done) {
-                usage = {
-                  inputTokens: json.prompt_eval_count ?? 0,
-                  outputTokens: json.eval_count ?? 0,
-                };
-              }
-            } catch {
-              // 忽略解析错误
+            if (json.message?.content) {
+              fullText += json.message.content;
+              await callback({ delta: json.message.content, text: fullText, done: false });
             }
+            if (json.message?.thinking) {
+              fullReasoning += json.message.thinking;
+            }
+
+            if (json.message?.tool_calls) {
+              for (const tc of json.message.tool_calls) {
+                toolCalls.push({
+                  id: tc.id ?? `tc_${Date.now()}_${toolCalls.length}`,
+                  name: tc.function.name,
+                  arguments: this.parseToolArguments(tc.function.arguments),
+                });
+              }
+            }
+
+            if (json.done) {
+              usage = {
+                inputTokens: json.prompt_eval_count ?? 0,
+                outputTokens: json.eval_count ?? 0,
+              };
+            }
+          } catch {
+            // 忽略解析错误
           }
         }
-      } finally {
-        reader.releaseLock();
       }
 
-      // 最终回调
-      const finalChunk: StreamChunk = {
+      this.recordUsage();
+
+      const finalChunk: { delta: string; text: string; done: true; usage?: UsageStats } = {
         delta: "",
         text: fullText,
         done: true,
       };
-      if (usage !== undefined) {
-        finalChunk.usage = usage;
-      }
-      if (toolCalls.length > 0) {
-        finalChunk.toolCalls = toolCalls;
-      }
-      if (fullReasoning) {
-        finalChunk.reasoning = fullReasoning;
-      }
-      await callback(finalChunk);
+      if (usage) finalChunk.usage = usage;
+      await callback(finalChunk as StreamChunk);
 
-      this.recordUsage();
-
-      const chatResponse: ChatResponse = {
+      const result: ChatResponse = {
         text: fullText,
         hasToolCall: toolCalls.length > 0,
       };
-      if (fullReasoning) {
-        chatResponse.reasoning = fullReasoning;
-      }
-      if (toolCalls.length > 0) {
-        chatResponse.toolCalls = toolCalls;
-      }
-      if (usage !== undefined) {
-        chatResponse.usage = usage;
-      }
+      if (fullReasoning) result.reasoning = fullReasoning;
+      if (toolCalls.length > 0) result.toolCalls = toolCalls;
+      if (usage) result.usage = usage;
 
-      logMethodReturn(logger, { method: "streamChat", module: "OllamaProvider", result: sanitize(chatResponse), duration: timer() });
-      return chatResponse;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      logMethodError(logger, {
-        method: "streamChat",
-        module: "OllamaProvider",
-        error: { name: error.name, message: error.message, ...(error.stack ? { stack: error.stack } : {}) },
-        params: { model, messageCount: messages.length },
-        duration: timer(),
-      });
-      throw error;
+      logMethodReturn(logger, { method: "streamChat", module: "OllamaProvider", result: sanitize(result), duration: timer() });
+      return result;
     } finally {
       clearTimeout(timeoutId);
     }
   }
 
-  /**
-   * 解析并验证模型名称
-   * 支持格式：
-   * - "model-name" -> 直接使用
-   * - "provider/model-name" -> 验证 provider 匹配后提取 model
-   *
-   * @throws 如果 provider 不匹配当前 Provider 实例
-   */
-  private parseModelName(model: string): string {
-    const slashIndex = model.indexOf("/");
-    if (slashIndex >= 0) {
-      const providerName = model.substring(0, slashIndex);
-      const modelName = model.substring(slashIndex + 1);
+  private async openAICompatibleStreamChat(
+    model: string,
+    messages: Message[],
+    tools: ChatRequest["tools"],
+    temperature: number | undefined,
+    maxTokens: number | undefined,
+    callback: StreamCallback,
+    timer: () => number
+  ): Promise<ChatResponse> {
+    const body: Record<string, unknown> = {
+      model,
+      messages: this.convertOpenAIMessages(messages),
+      stream: true,
+    };
 
-      // 验证 provider 是否匹配当前实例
-      if (providerName !== this.name) {
-        throw new Error(
-          `模型 "${model}" 的 provider "${providerName}" 与当前 Provider "${this.name}" 不匹配`
-        );
+    if (temperature !== undefined) body.temperature = temperature;
+    if (maxTokens !== undefined) body.max_tokens = maxTokens;
+    if (this.reasoningEffort) body.reasoning_effort = this.reasoningEffort;
+    body.stream_options = { include_usage: true };
+
+    if (tools?.length) {
+      body.tools = tools.map((tool) => ({
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }));
+      body.tool_choice = "auto";
+    }
+
+    logger.info("LLM调用", { provider: this.name, model, endpoint: "v1/chat/completions", stream: true });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({ error: { message: response.statusText } })) as { error?: { message?: string } };
+        throw new Error(`Ollama API 错误: ${errBody?.error?.message || response.statusText}`);
       }
 
-      return modelName;
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("无法获取响应流");
+
+      const decoder = new TextDecoder();
+      let fullText = "";
+      let fullReasoning = "";
+      let usageReported = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n").filter((line) => line.startsWith("data: "));
+
+        for (const line of lines) {
+          const data = line.slice(6);
+          if (data === "[DONE]") continue;
+
+          try {
+            const event = JSON.parse(data) as OllamaOpenAIStreamChunk;
+            const delta = event.choices[0]?.delta;
+
+            if (delta?.content) {
+              fullText += delta.content;
+              await callback({ delta: delta.content, text: fullText, done: false });
+            }
+            if (delta?.reasoning_content) {
+              fullReasoning += delta.reasoning_content;
+            }
+
+            if (!usageReported && event.usage) {
+              usageReported = true;
+            }
+          } catch {
+            // 忽略解析错误
+          }
+        }
+      }
+
+      this.recordUsage();
+
+      const result: ChatResponse = {
+        text: fullText,
+        hasToolCall: false,
+      };
+      if (fullReasoning) result.reasoning = fullReasoning;
+
+      logMethodReturn(logger, { method: "streamChat", module: "OllamaProvider", result: sanitize(result), duration: timer() });
+      return result;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    return model;
   }
 
-  private convertMessages(messages: Message[]): unknown[] {
+  private convertNativeMessages(messages: Message[]): unknown[] {
     return messages.map((msg) => {
       const result: Record<string, unknown> = {
         role: msg.role,
         content: msg.content,
       };
 
-      if (msg.role === "assistant" && msg.toolCalls) {
+      if (msg.role === "assistant" && msg.toolCalls?.length) {
         result.tool_calls = msg.toolCalls.map((tc) => ({
           id: tc.id,
           type: "function",
@@ -481,116 +568,137 @@ export class OllamaProvider extends BaseProvider implements IProviderExtended {
     });
   }
 
-  private async requestWithRetry(url: string, body: unknown): Promise<OllamaNativeResponse> {
+  private convertOpenAIMessages(messages: Message[]): unknown[] {
+    return this.convertNativeMessages(messages);
+  }
+
+  private async nativeRequest(url: string, body: Record<string, unknown>): Promise<OllamaNativeResponse> {
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
-        return await this.sendRequest(url, body);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+
+          if (!response.ok) {
+            const errBody = await response.json().catch(() => ({ error: response.statusText })) as OllamaError;
+            throw new Error(`Ollama API 错误: ${errBody.error || response.statusText}`);
+          }
+
+          return await response.json() as OllamaNativeResponse;
+        } finally {
+          clearTimeout(timeoutId);
+        }
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        if (!this.isRetryableError(error)) throw error;
-        if (attempt < this.maxRetries) {
-          await this.sleep(this.retryBaseDelay * Math.pow(2, attempt));
-        }
+        if (!this.isRetryableError(error) || attempt >= this.maxRetries) throw error;
+        await this.sleep(this.retryBaseDelay * Math.pow(2, attempt));
       }
     }
 
-    this.recordError();
     throw lastError ?? new Error("请求失败");
   }
 
-  private async sendRequest(url: string, body: unknown): Promise<OllamaNativeResponse> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+  private async openAIRequest(url: string, body: Record<string, unknown>): Promise<OllamaOpenAIResponse> {
+    let lastError: Error | null = null;
 
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-      const json: unknown = await response.json();
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${this.apiKey || "ollama"}`,
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
 
-      if (!response.ok) {
-        const errorMessage = this.extractErrorMessage(json);
-        throw new Error(`Ollama API 错误: ${errorMessage}`);
+          if (!response.ok) {
+            const errBody = await response.json().catch(() => ({ error: { message: response.statusText } })) as { error?: { message?: string } };
+            throw new Error(`Ollama API 错误: ${errBody?.error?.message || response.statusText}`);
+          }
+
+          return await response.json() as OllamaOpenAIResponse;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (!this.isRetryableError(error) || attempt >= this.maxRetries) throw error;
+        await this.sleep(this.retryBaseDelay * Math.pow(2, attempt));
       }
-
-      return this.validateResponse(json);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  /**
-   * 从响应中提取错误消息
-   */
-  private extractErrorMessage(json: unknown): string {
-    if (typeof json === "object" && json !== null) {
-      const obj = json as Record<string, unknown>;
-      if (typeof obj.error === "string") return obj.error;
-    }
-    return "未知错误";
-  }
-
-  /**
-   * 验证并转换 Ollama 响应
-   */
-  private validateResponse(json: unknown): OllamaNativeResponse {
-    if (typeof json !== "object" || json === null) {
-      throw new Error("Ollama API 返回无效响应格式");
     }
 
-    const obj = json as Record<string, unknown>;
-    if (!obj.message || typeof obj.message !== "object") {
-      throw new Error("Ollama API 返回非标准格式响应");
-    }
-
-    return json as OllamaNativeResponse;
+    throw lastError ?? new Error("请求失败");
   }
 
   private isRetryableError(error: unknown): boolean {
     if (error instanceof Error) {
-      const message = error.message.toLowerCase();
-      return (
-        message.includes("timeout") ||
-        message.includes("network") ||
-        message.includes("aborted") ||
-        message.includes("econnrefused") ||
-        message.includes("connection")
-      );
+      const msg = error.message.toLowerCase();
+      return msg.includes("timeout") || msg.includes("network") || msg.includes("connection") || msg.includes("429") || msg.includes("500");
     }
     return false;
   }
 
-  private parseResponse(response: OllamaNativeResponse): ChatResponse {
-    const message = response.message;
-    const toolCalls: ToolCall[] | undefined = message.tool_calls?.map((tc) => ({
+  private parseNativeResponse(response: OllamaNativeResponse): ChatResponse {
+    const toolCalls = response.message.tool_calls?.map((tc) => ({
       id: tc.id ?? `tc_${Date.now()}`,
       name: tc.function.name,
       arguments: this.parseToolArguments(tc.function.arguments),
-    }));
+    })) ?? [];
 
     const result: ChatResponse = {
-      text: message.content ?? "",
-      hasToolCall: !!toolCalls?.length,
+      text: response.message.content ?? "",
+      hasToolCall: toolCalls.length > 0,
     };
 
-    // 提取思考内容（thinking 模型：DeepSeek-R1、Qwen3 等）
-    if (message.thinking) {
-      result.reasoning = message.thinking;
-    }
+    if (toolCalls.length > 0) result.toolCalls = toolCalls;
+    if (response.message.thinking) result.reasoning = response.message.thinking;
 
-    if (toolCalls?.length) result.toolCalls = toolCalls;
-
-    // 转换 usage 统计
     if (response.prompt_eval_count !== undefined || response.eval_count !== undefined) {
       result.usage = {
         inputTokens: response.prompt_eval_count ?? 0,
         outputTokens: response.eval_count ?? 0,
+      };
+    }
+
+    result.raw = response;
+    return result;
+  }
+
+  private parseOpenAIResponse(response: OllamaOpenAIResponse): ChatResponse {
+    const message = response.choices[0]?.message;
+    const toolCalls = message?.tool_calls?.map((tc) => ({
+      id: tc.id,
+      name: tc.function.name,
+      arguments: JSON.parse(tc.function.arguments) as Record<string, unknown>,
+    })) ?? [];
+
+    const result: ChatResponse = {
+      text: message?.content ?? "",
+      hasToolCall: toolCalls.length > 0,
+    };
+
+    if (toolCalls.length > 0) result.toolCalls = toolCalls;
+    if (message?.reasoning_content) result.reasoning = message.reasoning_content;
+
+    if (response.usage) {
+      result.usage = {
+        inputTokens: response.usage.prompt_tokens ?? 0,
+        outputTokens: response.usage.completion_tokens ?? 0,
       };
     }
 
@@ -631,6 +739,100 @@ export class OllamaProvider extends BaseProvider implements IProviderExtended {
   }
 }
 
-export function createOllamaProvider(options: OllamaProviderOptions): OllamaProvider {
+interface OllamaModelsResponse {
+  models: Array<{ name: string; modified_at: string; size: number }>;
+}
+
+interface OllamaNativeResponse {
+  model: string;
+  created_at: string;
+  message: {
+    role: string;
+    content: string;
+    thinking?: string;
+    tool_calls?: Array<{
+      id?: string;
+      type?: "function";
+      function: { name: string; arguments: string };
+    }>;
+    images?: unknown;
+  };
+  done: boolean;
+  done_reason?: string;
+  total_duration?: number;
+  load_duration?: number;
+  prompt_eval_count?: number;
+  prompt_eval_duration?: number;
+  eval_count?: number;
+  eval_duration?: number;
+}
+
+interface OllamaStreamChunk {
+  model: string;
+  created_at: string;
+  message: {
+    role: string;
+    content: string;
+    thinking?: string;
+    tool_calls?: Array<{
+      id?: string;
+      type?: "function";
+      function: { name: string; arguments: string };
+    }>;
+  };
+  done: boolean;
+  done_reason?: string;
+  prompt_eval_count?: number;
+  eval_count?: number;
+}
+
+interface OllamaOpenAIResponse {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    finish_reason: string;
+    message: {
+      role: string;
+      content: string | null;
+      reasoning_content?: string;
+      tool_calls?: Array<{
+        id: string;
+        type: string;
+        function: { name: string; arguments: string };
+      }>;
+    };
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
+
+interface OllamaOpenAIStreamChunk {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    finish_reason: string | null;
+    delta: {
+      role?: string;
+      content?: string | null;
+      reasoning_content?: string;
+    };
+  }>;
+  usage?: OllamaOpenAIResponse["usage"];
+}
+
+interface OllamaError {
+  error: string;
+}
+
+export function createOllamaProvider(options: OllamaProviderOptions = {}): OllamaProvider {
   return new OllamaProvider(options);
 }

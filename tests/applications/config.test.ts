@@ -39,15 +39,11 @@ tools:
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "sk-test-key"
     models: ["gpt-4", "gpt-3.5-turbo"]
 
   anthropic:
-    type: anthropic
-    enabled: false
     baseUrl: "https://api.anthropic.com/v1"
     apiKey: "sk-ant-test"
     models: ["claude-3-opus"]
@@ -138,9 +134,9 @@ describe("配置模块集成测试", () => {
 
       // 验证 providers 配置
       expect(settings.providers).toBeDefined();
-      expect(settings.providers?.openai?.enabled).toBe(true);
+      expect(settings.providers?.openai?.baseUrl).toBe("https://api.openai.com/v1");
       expect(settings.providers?.openai?.apiKey).toBe("sk-test-key");
-      expect(settings.providers?.anthropic?.enabled).toBe(false);
+      expect(settings.providers?.anthropic?.baseUrl).toBe("https://api.anthropic.com/v1");
 
       // 验证 channels 配置
       expect(settings.channels).toBeDefined();
@@ -171,7 +167,7 @@ describe("配置模块集成测试", () => {
 
     test("应正确解析环境变量引用", async () => {
       process.env.TEST_API_KEY = "env-api-key-123";
-      process.env.TEST_MODEL = "env-model";
+      process.env.TEST_MODEL = "gpt-4";
       process.env.TEST_WORKSPACE = "/home/test/workspace";
 
       const envConfig = `
@@ -182,8 +178,6 @@ agents:
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "\${TEST_API_KEY}"
     models: ["gpt-4"]
@@ -194,7 +188,7 @@ providers:
       const settings = await loadSettings(testConfigPath);
 
       expect(settings.providers?.openai?.apiKey).toBe("env-api-key-123");
-      expect(settings.agents.defaults.model).toBe("env-model");
+      expect(settings.agents.defaults.model).toBe("gpt-4");
       expect(settings.agents.defaults.workspace).toBe("/home/test/workspace");
     });
 
@@ -203,11 +197,10 @@ providers:
 agents:
   defaults:
     workspace: "~/.micro-agent/workspace"
+    model: "openai/gpt-4"
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "\${MISSING_KEY:-default-api-key}"
     models: ["gpt-4"]
@@ -311,8 +304,6 @@ providers:
       const override: Partial<Settings> = {
         providers: {
           openai: {
-            type: "openai",
-            enabled: true,
             baseUrl: "https://api.openai.com/v1",
             apiKey: "test-key",
             models: ["gpt-4"],
@@ -322,7 +313,7 @@ providers:
 
       const merged = mergeSettings(base, override);
 
-      expect(merged.providers?.openai?.enabled).toBe(true);
+      expect(merged.providers?.openai?.baseUrl).toBe("https://api.openai.com/v1");
       expect(merged.providers?.openai?.apiKey).toBe("test-key");
     });
   });
@@ -361,6 +352,13 @@ providers:
 agents:
   defaults:
     workspace: "~/.micro-agent/workspace"
+    model: "openai/gpt-4"
+
+providers:
+  openai:
+    baseUrl: "https://api.openai.com/v1"
+    apiKey: "test-key"
+    models: []
 `;
 
       await createTestConfigFile(minimalConfig, testConfigPath);
@@ -394,6 +392,7 @@ tools:
 agents:
   defaults:
     workspace: "~/.micro-agent/workspace"
+    model: "openai/gpt-4"
 
 tools:
   enabled: ["filesystem", "shell", "web"]
@@ -401,8 +400,6 @@ tools:
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "test-key"
     models: ["gpt-4", "gpt-3.5-turbo", "gpt-4-turbo"]
@@ -418,34 +415,31 @@ providers:
       expect(settings.providers?.openai?.models).toHaveLength(3);
     });
 
-    test("应正确处理布尔值类型的配置", async () => {
-      const booleanConfig = `
+    test("应正确处理多个 provider 配置", async () => {
+      const multiProviderConfig = `
 agents:
   defaults:
     workspace: "~/.micro-agent/workspace"
+    model: "openai/gpt-4"
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "test-key"
     models: ["gpt-4"]
 
-  anthropic:
-    type: anthropic
-    enabled: false
-    baseUrl: "https://api.anthropic.com/v1"
+  deepseek:
+    baseUrl: "https://api.deepseek.com/v1"
     apiKey: "test-key"
-    models: ["claude-3"]
+    models: ["deepseek-chat"]
 `;
 
-      await createTestConfigFile(booleanConfig, testConfigPath);
+      await createTestConfigFile(multiProviderConfig, testConfigPath);
 
       const settings = await loadSettings(testConfigPath);
 
-      expect(settings.providers?.openai?.enabled).toBe(true);
-      expect(settings.providers?.anthropic?.enabled).toBe(false);
+      expect(settings.providers?.openai?.baseUrl).toBe("https://api.openai.com/v1");
+      expect(settings.providers?.deepseek?.baseUrl).toBe("https://api.deepseek.com/v1");
     });
   });
 
@@ -455,6 +449,7 @@ providers:
 agents:
   defaults:
     workspace: "~/.micro-agent/workspace-with_special.chars"
+    model: "openai/gpt-4"
 `;
 
       await createTestConfigFile(specialPathConfig, testConfigPath);
@@ -469,6 +464,7 @@ agents:
 agents:
   defaults:
     workspace: "~/.micro-agent/workspace"
+    model: "openai/gpt-4"
     maxTokens: 1
     temperature: 0
     maxToolIterations: 1
@@ -490,6 +486,7 @@ agents:
 agents:
   defaults:
     workspace: "~/.micro-agent/workspace"
+    model: "openai/gpt-4"
     maxTokens: 0
     temperature: 1.5
 `;
@@ -511,7 +508,8 @@ agents:
       expect(typeof settings.agents.defaults.maxTokens).toBe("number");
       expect(typeof settings.agents.defaults.temperature).toBe("number");
       expect(typeof settings.tools?.enabled).toBeDefined();
-      expect(typeof settings.providers?.openai?.enabled).toBe("boolean");
+      expect(typeof settings.providers?.openai?.baseUrl).toBe("string");
+      expect(typeof settings.providers?.openai?.apiKey).toBe("string");
     });
   });
 });

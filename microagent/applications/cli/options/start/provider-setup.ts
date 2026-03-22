@@ -2,16 +2,60 @@
  * Provider 创建和验证模块
  *
  * 负责根据配置创建 LLM Provider 实例
+ * 通过 URL 模式匹配自动识别 Provider 类型
  */
 
 import type { Settings } from "../../../config/loader.js";
 import type { SingleProviderConfig } from "../../../config/schema.js";
 import type { IProviderExtended } from "../../../../runtime/provider/contract.js";
-import { createOpenAIProvider, createAnthropicProvider } from "../../../providers/index.js";
+import {
+  createOpenAIProvider,
+  createAnthropicProvider,
+  createOllamaProvider,
+  createDeepSeekProvider,
+  createGLMProvider,
+  createMoonshotProvider,
+  createMiniMaxProvider,
+  createOpenRouterProvider,
+  createNvidiaProvider,
+  createModelScopeProvider,
+  createOpenAICompatibleProvider,
+} from "../../../providers/index.js";
 import { cliLogger, createTimer, logMethodCall, logMethodReturn, logMethodError } from "../../../shared/logger.js";
 
 const logger = cliLogger();
 const MODULE_NAME = "ProviderSetup";
+
+type ProviderCreator = (config: { name: string; baseUrl: string; apiKey: string; models: string[] }) => IProviderExtended;
+
+interface ProviderMatcher {
+  patterns: RegExp[];
+  creator: ProviderCreator;
+}
+
+const PROVIDER_MATCHERS: ProviderMatcher[] = [
+  { patterns: [/api\.anthropic\.com/i], creator: createAnthropicProvider },
+  { patterns: [/api\.deepseek\.com/i], creator: createDeepSeekProvider },
+  { patterns: [/api\.moonshot\.cn/i], creator: createMoonshotProvider },
+  { patterns: [/api\.minimax\.chat/i], creator: createMiniMaxProvider },
+  { patterns: [/openrouter\.ai/i], creator: createOpenRouterProvider },
+  { patterns: [/integrate\.api\.nvidia\.com/i], creator: createNvidiaProvider },
+  { patterns: [/api-inference\.modelscope\.cn/i], creator: createModelScopeProvider },
+  { patterns: [/open\.bigmodel\.cn/i, /api\.z\.ai/i], creator: createGLMProvider },
+  { patterns: [/localhost:11434/i, /ollama/i], creator: createOllamaProvider },
+  { patterns: [/api\.openai\.com/i], creator: createOpenAIProvider },
+];
+
+function matchProviderByUrl(baseUrl: string): ProviderCreator {
+  for (const matcher of PROVIDER_MATCHERS) {
+    for (const pattern of matcher.patterns) {
+      if (pattern.test(baseUrl)) {
+        return matcher.creator;
+      }
+    }
+  }
+  return createOpenAICompatibleProvider;
+}
 
 // ============================================================================
 // 导出函数
@@ -33,10 +77,6 @@ export function validateProviderConfig(
     errors.push("baseUrl 未配置");
   }
 
-  if (!config.models || config.models.length === 0) {
-    errors.push("models 未配置");
-  }
-
   const result = { valid: errors.length === 0, errors };
   logMethodReturn(logger, { method: "validateProviderConfig", module: MODULE_NAME, result: { valid: result.valid, errorCount: errors.length }, duration: timer() });
   return result;
@@ -52,7 +92,6 @@ export function createProvider(settings: Settings): IProviderExtended | null {
   const providers = settings.providers ?? {};
   const model = settings.agents?.defaults?.model ?? "";
 
-  // 解析模型名中的 provider 前缀
   const slashIndex = model.indexOf("/");
   let targetProviderName: string | null = null;
 
@@ -63,30 +102,22 @@ export function createProvider(settings: Settings): IProviderExtended | null {
   let selectedProvider: [string, SingleProviderConfig] | null = null;
 
   if (targetProviderName) {
-    // 模型名包含 provider 前缀，直接查找该 provider
     const config = providers[targetProviderName];
-    if (!config) {
-      logger.error("Provider 未找到", { targetProviderName, model });
-      logMethodReturn(logger, { method: "createProvider", module: MODULE_NAME, result: null, duration: timer() });
-      return null;
+    if (config) {
+      selectedProvider = [targetProviderName, config];
     }
-    if (!config.enabled) {
-      logger.error("Provider 未启用", { targetProviderName, model });
-      logMethodReturn(logger, { method: "createProvider", module: MODULE_NAME, result: null, duration: timer() });
-      return null;
-    }
-    selectedProvider = [targetProviderName, config];
-  } else {
-    // 模型名不含 provider 前缀，选择第一个启用的 provider
-    const enabledProvider = Object.entries(providers).find(
-      ([_, config]) => config?.enabled === true
-    );
-    if (!enabledProvider) {
-      logger.warn("未找到启用的 Provider");
-      logMethodReturn(logger, { method: "createProvider", module: MODULE_NAME, result: null, duration: timer() });
-      return null;
-    }
-    selectedProvider = enabledProvider;
+  }
+
+  if (!selectedProvider) {
+    selectedProvider = Object.entries(providers).find(
+      ([_, config]) => config?.apiKey || config?.baseUrl
+    ) ?? null;
+  }
+
+  if (!selectedProvider) {
+    logger.warn("未找到已配置的 Provider");
+    logMethodReturn(logger, { method: "createProvider", module: MODULE_NAME, result: null, duration: timer() });
+    return null;
   }
 
   const [providerName, providerConfig] = selectedProvider;
@@ -97,46 +128,23 @@ export function createProvider(settings: Settings): IProviderExtended | null {
     return null;
   }
 
-  const validation = validateProviderConfig(providerName, providerConfig);
-  if (!validation.valid) {
-    logger.warn("Provider 配置验证失败", { providerName, errors: validation.errors });
+  if (!providerConfig.baseUrl) {
+    logger.warn("Provider baseUrl 未配置", { providerName });
     logMethodReturn(logger, { method: "createProvider", module: MODULE_NAME, result: null, duration: timer() });
     return null;
   }
 
   try {
-    let provider: IProviderExtended;
-    switch (providerName) {
-      case "openai": {
-        provider = createOpenAIProvider({
-          name: providerName,
-          apiKey: providerConfig.apiKey!,
-          baseUrl: providerConfig.baseUrl!,
-          models: providerConfig.models!,
-        });
-        break;
-      }
+    const apiKey = providerConfig.apiKey ?? "";
+    const models = providerConfig.models ?? [];
 
-      case "anthropic": {
-        provider = createAnthropicProvider({
-          name: providerName,
-          apiKey: providerConfig.apiKey!,
-          baseUrl: providerConfig.baseUrl!,
-          models: providerConfig.models!,
-        });
-        break;
-      }
-
-      default: {
-        provider = createOpenAIProvider({
-          name: providerName,
-          apiKey: providerConfig.apiKey!,
-          baseUrl: providerConfig.baseUrl!,
-          models: providerConfig.models!,
-        });
-        break;
-      }
-    }
+    const creator = matchProviderByUrl(providerConfig.baseUrl);
+    const provider = creator({
+      name: providerName,
+      baseUrl: providerConfig.baseUrl,
+      apiKey,
+      models,
+    });
 
     logger.info("Provider 创建成功", { providerName, baseUrl: providerConfig.baseUrl });
     logMethodReturn(logger, { method: "createProvider", module: MODULE_NAME, result: { providerName }, duration: timer() });

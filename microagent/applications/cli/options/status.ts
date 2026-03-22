@@ -226,13 +226,13 @@ export async function statusCommand(
       settings = await loadSettings();
       result.config.initialized = true;
 
-      // 获取启用的 Provider 名称
+      // 获取已配置的 Provider 名称
       const providers = settings.providers ?? {};
-      const enabledProviderName = Object.entries(providers).find(
-        ([_, config]) => config?.enabled === true
+      const configuredProviderName = Object.entries(providers).find(
+        ([_, config]) => config?.baseUrl || config?.apiKey || (config?.models && config.models.length > 0)
       )?.[0];
-      if (enabledProviderName) {
-        result.config.provider = enabledProviderName;
+      if (configuredProviderName) {
+        result.config.provider = configuredProviderName;
       }
 
       if (settings.agents.defaults.model) {
@@ -275,11 +275,13 @@ export async function statusCommand(
     for (const [name, envVar] of Object.entries(providerEnvVars)) {
       const hasKey = hasApiKey(envVar);
       const isConfigured = configuredProviders.includes(name);
-      const isEnabled = settings?.providers?.[name as keyof typeof settings.providers]?.enabled === true;
+      const hasProviderConfig = settings?.providers?.[name as keyof typeof settings.providers];
+      const isActive = isConfigured && hasProviderConfig && 
+        (hasProviderConfig.baseUrl || hasProviderConfig.apiKey || (hasProviderConfig.models && hasProviderConfig.models.length > 0));
 
       result.providers.push({
         name,
-        available: hasKey && isConfigured && isEnabled,
+        available: Boolean(hasKey && isConfigured && isActive),
         hasApiKey: hasKey,
       });
     }

@@ -328,28 +328,14 @@ export class OpenAIProvider extends BaseProvider implements IProviderExtended {
   }
 
   /**
-   * 解析并验证模型名称
+   * 解析模型名称
    * 支持格式：
    * - "model-name" -> 直接使用
-   * - "provider/model-name" -> 验证 provider 匹配后提取 model
+   * - "provider/model-name" -> 直接使用完整名称（用于 OpenRouter 等多提供商聚合场景）
    *
-   * @throws 如果 provider 不匹配当前 Provider 实例
+   * 注意：不再验证 provider 前缀，因为模型名称中的 subprovider 是 API 端点的一部分
    */
   private parseModelName(model: string): string {
-    const slashIndex = model.indexOf("/");
-    if (slashIndex >= 0) {
-      const providerName = model.substring(0, slashIndex);
-      const modelName = model.substring(slashIndex + 1);
-
-      // 验证 provider 是否匹配当前实例
-      if (providerName !== this.name) {
-        throw new Error(
-          `模型 "${model}" 的 provider "${providerName}" 与当前 Provider "${this.name}" 不匹配`
-        );
-      }
-
-      return modelName;
-    }
     return model;
   }
 

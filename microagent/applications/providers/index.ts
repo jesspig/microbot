@@ -9,6 +9,14 @@ export { OpenAIProvider, createOpenAIProvider, type OpenAIProviderOptions } from
 export { OpenAIResponseProvider, createOpenAIResponseProvider, type OpenAIResponseProviderOptions } from "./openai-response.js";
 export { AnthropicProvider, createAnthropicProvider, type AnthropicProviderOptions } from "./anthropic.js";
 export { OllamaProvider, createOllamaProvider, type OllamaProviderOptions } from "./ollama.js";
+export { DeepSeekProvider, createDeepSeekProvider, type DeepSeekProviderOptions } from "./deepseek.js";
+export { GLMProvider, createGLMProvider, type GLMProviderOptions } from "./glm.js";
+export { MoonshotProvider, createMoonshotProvider, type MoonshotProviderOptions } from "./moonshot.js";
+export { MiniMaxProvider, createMiniMaxProvider, type MiniMaxProviderOptions } from "./minimax.js";
+export { OpenRouterProvider, createOpenRouterProvider, type OpenRouterProviderOptions } from "./openrouter.js";
+export { NvidiaProvider, createNvidiaProvider, type NvidiaProviderOptions } from "./nvidia.js";
+export { ModelScopeProvider, createModelScopeProvider, type ModelScopeProviderOptions } from "./modelscope.js";
+export { OpenAICompatibleProvider, createOpenAICompatibleProvider, type OpenAICompatibleProviderOptions } from "./openai-compatible.js";
 
 // 导出 OpenAI Provider 专职组件
 export { OpenAIRequestHandler } from "./openai-request-handler.js";

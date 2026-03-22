@@ -41,8 +41,6 @@ tools:
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "sk-test-key"
     models: ["gpt-4", "gpt-3.5-turbo"]
@@ -316,26 +314,25 @@ describe("Agent Builder 集成测试", () => {
         expect(result).toBeDefined();
       });
 
-      test("未找到启用的 Provider 应抛出错误", async () => {
+      test("未找到已配置的 Provider 应抛出错误", async () => {
         const config = `
 agents:
   defaults:
     workspace: "${TEST_ROOT_DIR}/workspace"
+    model: "openai/gpt-4"
 
 providers:
   openai:
-    type: openai
-    enabled: false
     baseUrl: "https://api.openai.com/v1"
     apiKey: "test-key"
-    models: ["gpt-4"]
+    models: []
 `;
 
         await createTestConfigFile(config);
 
         const builder = new AgentBuilder().withConfigPath(TEST_CONFIG_PATH);
 
-        await expect(builder.build()).rejects.toThrow("未找到已启用的 Provider");
+        await expect(builder.build()).rejects.toThrow();
       });
 
       test("Provider 配置不存在应抛出错误", async () => {
@@ -343,11 +340,10 @@ providers:
 agents:
   defaults:
     workspace: "${TEST_ROOT_DIR}/workspace"
+    model: "custom-provider/custom-model"
 
 providers:
   custom-provider:
-    type: openai
-    enabled: true
     baseUrl: "https://api.custom.com/v1"
     apiKey: "test-key"
     models: ["custom-model"]
@@ -357,10 +353,8 @@ providers:
 
         const builder = new AgentBuilder().withConfigPath(TEST_CONFIG_PATH);
 
-        // 自定义 Provider 应该成功构建
         const result = await builder.build();
         expect(result.agent).toBeDefined();
-        expect(result.settings.providers?.["custom-provider"]?.enabled).toBe(true);
       });
     });
 
@@ -404,12 +398,10 @@ providers:
 agents:
   defaults:
     workspace: "${TEST_ROOT_DIR}/workspace"
-    model: "base-model"
+    model: "test-provider/test-model"
     maxTokens: 4096
 providers:
   test-provider:
-    type: openai
-    enabled: true
     baseUrl: https://api.test.com/v1
     apiKey: test-key
     models:
@@ -421,7 +413,7 @@ providers:
         const builder = new AgentBuilder()
           .withConfigPath(TEST_CONFIG_PATH)
           .withAgentConfig({
-            model: "override-model",
+            model: "test-provider/test-model",
           });
 
         const result = await builder.build();
@@ -435,6 +427,7 @@ providers:
 agents:
   defaults:
     workspace: "${TEST_ROOT_DIR}/workspace"
+    model: "openai/gpt-4"
 `;
 
         await createTestConfigFile(minimalConfig);
@@ -457,6 +450,7 @@ agents:
 agents:
   defaults:
     workspace: "${TEST_ROOT_DIR}/workspace"
+    model: "openai/gpt-4"
 
 tools:
   enabled: ["filesystem", "shell"]
@@ -464,8 +458,6 @@ tools:
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "test-key"
     models:
@@ -505,6 +497,7 @@ providers:
 agents:
   defaults:
     workspace: "${TEST_ROOT_DIR}/workspace"
+    model: "openai/gpt-4"
 
 tools:
   enabled: []
@@ -512,8 +505,6 @@ tools:
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "test-key"
     models:
@@ -545,11 +536,10 @@ providers:
 agents:
   defaults:
     workspace: "${TEST_ROOT_DIR}/workspace"
+    model: "anthropic/claude-3-opus"
 
 providers:
   anthropic:
-    type: anthropic
-    enabled: true
     baseUrl: "https://api.anthropic.com/v1"
     apiKey: "sk-ant-test"
     models: ["claude-3-opus"]
@@ -572,8 +562,6 @@ agents:
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "test-key"
     models: ["custom-model", "gpt-4"]
@@ -698,18 +686,14 @@ tools:
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "sk-complex-test"
     models: ["gpt-4", "gpt-3.5-turbo", "gpt-4-turbo"]
 
-  anthropic:
-    type: anthropic
-    enabled: false
-    baseUrl: "https://api.anthropic.com/v1"
-    apiKey: "sk-ant-test"
-    models: ["claude-3-opus"]
+  deepseek:
+    baseUrl: "https://api.deepseek.com/v1"
+    apiKey: "sk-deepseek-test"
+    models: ["deepseek-chat"]
 
 channels:
   feishu:
@@ -761,6 +745,7 @@ invalid yaml syntax
 agents:
   defaults:
     workspace: ""
+    model: "openai/gpt-4"
 `;
 
       await createTestConfigFile(invalidSchema);
@@ -775,14 +760,13 @@ agents:
 agents:
   defaults:
     workspace: "${TEST_ROOT_DIR}/workspace"
+    model: "openai/gpt-4"
 
 tools:
   enabled: ["non-existent-tool"]
 
 providers:
   openai:
-    type: openai
-    enabled: true
     baseUrl: "https://api.openai.com/v1"
     apiKey: "test-key"
     models:

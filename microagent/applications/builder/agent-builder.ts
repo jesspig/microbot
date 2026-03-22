@@ -62,6 +62,7 @@ export interface AgentBuildResult {
     logs: string;
     history: string;
     skills: string;
+    agent?: string;
   };
 }
 
@@ -253,6 +254,7 @@ export class AgentBuilder {
           logs: LOGS_DIR,
           history: HISTORY_DIR,
           skills: SKILLS_DIR,
+          agent: MICRO_AGENT_DIR,
         },
       };
 
@@ -292,16 +294,12 @@ export class AgentBuilder {
 
     const agentDefaults = (settings as { agents?: { defaults?: { model?: string; maxToolIterations?: number } } }).agents?.defaults;
 
-    // 处理模型名：剥离 provider 前缀
-    let model = this.agentConfig.model ?? agentDefaults?.model ?? "default";
-    const slashIndex = model.indexOf("/");
-    if (slashIndex >= 0) {
-      model = model.substring(slashIndex + 1);
-      logger.debug("剥离模型 provider 前缀", {
-        originalModel: this.agentConfig.model ?? agentDefaults?.model,
-        strippedModel: model,
-      });
-    }
+    // 保留完整模型名（包括 subprovider）
+    // 例如：z-ai/glm4.7, openrouter/stepfun/step-3.5-flash:free
+    // Provider 由配置决定，不从模型名推断
+    const model = this.agentConfig.model ?? agentDefaults?.model ?? "default";
+
+    logger.debug("Agent 模型配置", { model });
 
     const config: AgentConfig = {
       model,

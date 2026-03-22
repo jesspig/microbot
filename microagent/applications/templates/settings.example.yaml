@@ -9,255 +9,202 @@ agents:
     # Agent 工作目录（所有文件操作都在此目录下进行）
     workspace: "~/.micro-agent/workspace"
 
-    # 默认使用的模型，格式为 <provider>/<model>
-    # 例如：openai/gpt-4o、anthropic/claude-3-5-sonnet、ollama/qwen2.5
+    # 默认模型，格式为 <provider>/<model> 或 <provider>/<subprovider>/<model>
+    # 示例：
+    #   openai/gpt-4o
+    #   anthropic/claude-3-5-sonnet
+    #   glm/glm-4-plus
+    #   openrouter/stepfun/step-3.5-flash:free   # 三段式：provider/subprovider/model
     model: ""
 
-    # 模型单次回复的最大 token 数
-    maxTokens: 8192
-
-    # 模型温度参数，控制输出随机性 (0-1)
-    temperature: 0.7
-
-    # 工具调用最大迭代次数，防止无限循环
-    maxToolIterations: 40
-
-    # 心跳间隔时间（分钟），用于定时任务检查
-    heartbeatInterval: 30
+    maxTokens: 8192          # 模型单次回复的最大 token 数
+    temperature: 0.7           # 温度参数，控制输出随机性 (0-1)
+    maxToolIterations: 40      # 工具调用最大迭代次数，防止无限循环
+    heartbeatInterval: 30      # 心跳间隔（分钟），用于定时任务检查
 
 # ============================================================================
 # 模型提供商配置
 # ============================================================================
 #
 # 配置说明：
-# - enabled: 是否启用此 Provider（必须且仅能启用一个）
-# - type: Provider 类型（openai | anthropic | ollama）
-# - displayName: 显示名称（可选）
 # - baseUrl: API 基础 URL
-# - apiKey: API 密钥，支持环境变量引用，如 ${OPENAI_API_KEY}
-# - models: 支持的模型列表（启用时必须填写）
+# - apiKey: API 密钥，支持 ${ENV_VAR} 语法引用环境变量
+# - models: 支持的模型列表（可为空，仅使用 agents.defaults.model 时）
+#
+# Provider 通过 URL 自动识别类型，未匹配的 URL 使用 OpenAI 兼容格式
+#
+# 模型命名格式：
+# - 标准: <provider>/<model>        # 如 glm/glm-4-plus
+# - 多段: <provider>/<subprovider>/<model>  # 如 openrouter/stepfun/step-3.5-flash:free
 #
 # ----------------------------------------------------------------------------
 
 providers:
   # --------------------------------------------------------------------------
-  # OpenAI
-  # --------------------------------------------------------------------------
-  # 官网：https://platform.openai.com/
-  # 获取 API Key：https://platform.openai.com/api-keys
-  # 可用模型：gpt-4o、gpt-4o-mini、gpt-4-turbo、o1、o1-mini 等
+  # OpenAI - 官网：https://platform.openai.com/
+  # API Key: https://platform.openai.com/api-keys
+  # 模型: gpt-4o、gpt-4o-mini、gpt-4-turbo、o1、o1-mini 等
   # --------------------------------------------------------------------------
   openai:
-    type: openai
-    enabled: false
-    displayName: ""
     baseUrl: "https://api.openai.com/v1"
     apiKey: "${OPENAI_API_KEY}"
     models: []
 
   # --------------------------------------------------------------------------
-  # Anthropic Claude
-  # --------------------------------------------------------------------------
-  # 官网：https://www.anthropic.com/
-  # 获取 API Key：https://console.anthropic.com/
-  # 可用模型：claude-3-5-sonnet-latest、claude-3-5-haiku-latest 等
+  # Anthropic Claude - 官网：https://www.anthropic.com/
+  # API Key: https://console.anthropic.com/
+  # 模型: claude-3-5-sonnet-latest、claude-3-5-haiku-latest 等
+  # 特点: 原生 Messages API，支持 extended thinking、prompt caching
   # --------------------------------------------------------------------------
   anthropic:
-    type: anthropic
-    enabled: false
-    displayName: ""
     baseUrl: "https://api.anthropic.com/v1"
     apiKey: "${ANTHROPIC_API_KEY}"
     models: []
 
   # --------------------------------------------------------------------------
-  # Ollama 本地模型
-  # --------------------------------------------------------------------------
-  # 官网：https://ollama.com/
-  # 安装后运行：ollama serve
-  # 拉取模型：ollama pull qwen2.5
-  # 查看模型：ollama list
+  # Ollama 本地模型 - 官网：https://ollama.com/
+  # 启动: ollama serve
+  # 拉取: ollama pull qwen2.5
+  # 模型: ollama list 查看本地模型
   # --------------------------------------------------------------------------
   ollama:
-    type: ollama
-    enabled: false
-    displayName: ""
     baseUrl: "http://localhost:11434"
     apiKey: ""
     models: []
 
   # --------------------------------------------------------------------------
-  # DeepSeek（使用 OpenAI 兼容模式）
-  # --------------------------------------------------------------------------
-  # 官网：https://www.deepseek.com/
-  # 获取 API Key：https://platform.deepseek.com/
-  # 可用模型：deepseek-chat、deepseek-reasoner 等
+  # DeepSeek - 官网：https://www.deepseek.com/
+  # API Key: https://platform.deepseek.com/
+  # 模型: deepseek-chat、deepseek-reasoner 等
+  # 特点: 支持 thinking 模式（reasoning_content）
   # --------------------------------------------------------------------------
   deepseek:
-    type: openai
-    enabled: false
-    displayName: ""
     baseUrl: "https://api.deepseek.com/v1"
     apiKey: "${DEEPSEEK_API_KEY}"
     models: []
 
   # --------------------------------------------------------------------------
-  # 智谱 AI GLM（使用 OpenAI 兼容模式）
+  # GLM (智谱 BigModel / Z.AI)
+  # BigModel: https://www.bigmodel.cn/ | API Key: https://open.bigmodel.cn/
+  # Z.AI: https://z.ai/ | API Key: https://z.ai/dashboard/apikeys
+  # 模型: glm-4-plus、glm-4-flash、glm-4.7、glm-5 等
+  # 特点: 支持 thinking、web_search、结构化输出
+  # Coding Plan 端点:
+  #   BigModel: https://open.bigmodel.cn/api/coding/paas/v4
+  #   Z.AI: https://api.z.ai/api/coding/paas/v4
   # --------------------------------------------------------------------------
-  # 官网：https://www.bigmodel.cn/
-  # 获取 API Key：https://open.bigmodel.cn/
-  # 可用模型：glm-4-plus、glm-4-flash 等
-  # --------------------------------------------------------------------------
-  zhipu:
-    type: openai
-    enabled: false
-    displayName: ""
+  glm:
     baseUrl: "https://open.bigmodel.cn/api/paas/v4"
-    apiKey: "${ZHIPU_API_KEY}"
+    apiKey: "${BIGMODEL_API_KEY}"
     models: []
 
   # --------------------------------------------------------------------------
-  # 阿里云百炼 DashScope（使用 OpenAI 兼容模式）
-  # --------------------------------------------------------------------------
-  # 官网：https://dashscope.aliyun.com/
-  # 获取 API Key：https://dashscope.console.aliyun.com/
-  # 可用模型：qwen-max、qwen-plus、qwen-turbo 等
-  # --------------------------------------------------------------------------
-  dashscope:
-    type: openai
-    enabled: false
-    displayName: ""
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    apiKey: "${DASHSCOPE_API_KEY}"
-    models: []
-
-  # --------------------------------------------------------------------------
-  # 月之暗面 Kimi（使用 OpenAI 兼容模式）
-  # --------------------------------------------------------------------------
-  # 官网：https://www.moonshot.cn/
-  # 获取 API Key：https://platform.moonshot.cn/
-  # 可用模型：moonshot-v1-8k、moonshot-v1-32k、moonshot-v1-128k
+  # Moonshot Kimi - 官网：https://www.moonshot.cn/
+  # API Key: https://platform.moonshot.cn/
+  # 模型: moonshot-v1-8k、moonshot-v1-32k、moonshot-v1-128k
   # --------------------------------------------------------------------------
   moonshot:
-    type: openai
-    enabled: false
-    displayName: ""
     baseUrl: "https://api.moonshot.cn/v1"
     apiKey: "${MOONSHOT_API_KEY}"
     models: []
 
   # --------------------------------------------------------------------------
-  # MiniMax 海螺 AI（使用 OpenAI 兼容模式）
-  # --------------------------------------------------------------------------
-  # 官网：https://www.minimaxi.com/
-  # 获取 API Key：https://platform.minimaxi.com/
-  # 可用模型：abab6.5s-chat、abab6.5g-chat 等
+  # MiniMax 海螺 AI - 官网：https://www.minimaxi.com/
+  # API Key: https://platform.minimaxi.com/
+  # 模型: MiniMax-M2、MiniMax-M1 等
+  # 特点: 支持 reasoning_split 模式
   # --------------------------------------------------------------------------
   minimax:
-    type: openai
-    enabled: false
-    displayName: ""
     baseUrl: "https://api.minimax.chat/v1"
     apiKey: "${MINIMAX_API_KEY}"
     models: []
 
   # --------------------------------------------------------------------------
-  # OpenRouter 多模型聚合（使用 OpenAI 兼容模式）
-  # --------------------------------------------------------------------------
-  # 官网：https://openrouter.ai/
-  # 获取 API Key：https://openrouter.ai/keys
-  # 可用模型：查看 https://openrouter.ai/models
+  # OpenRouter 多模型聚合 - 官网：https://openrouter.ai/
+  # API Key: https://openrouter.ai/keys
+  # 模型: https://openrouter.ai/models
+  # 特点: 支持 100+ 模型，自动路由，支持 plugins、reasoning effort 等
   # --------------------------------------------------------------------------
   openrouter:
-    type: openai
-    enabled: false
-    displayName: ""
     baseUrl: "https://openrouter.ai/api/v1"
     apiKey: "${OPENROUTER_API_KEY}"
     models: []
 
   # --------------------------------------------------------------------------
-  # LM Studio 本地模型（使用 OpenAI 兼容模式）
+  # NVIDIA NIM - API: https://docs.api.nvidia.com/
+  # API Key: https://build.nvidia.com/
+  # 模型: meta/llama-3.1-70b-instruct、deepseek-ai/deepseek-r1 等
+  # 特点: 支持 guided_json/guided_regex 结构化输出
+  # 注意: temperature 默认 0.5，部分模型必须传 max_tokens
   # --------------------------------------------------------------------------
-  # 官网：https://lmstudio.ai/
-  # 使用：启动 LM Studio 并开启本地服务器（默认端口 1234）
+  nvidia:
+    baseUrl: "https://integrate.api.nvidia.com/v1"
+    apiKey: "${NVIDIA_API_KEY}"
+    models: []
+
   # --------------------------------------------------------------------------
-  lmstudio:
-    type: openai
-    enabled: false
-    displayName: ""
-    baseUrl: "http://localhost:1234/v1"
-    apiKey: ""
+  # ModelScope 魔搭 - 官网：https://www.modelscope.cn/
+  # Token: https://www.modelscope.cn/my/acount
+  # 模型: 使用 ModelScope Model ID，如 Qwen/Qwen3.5-35B-A3B
+  # --------------------------------------------------------------------------
+  modelscope:
+    baseUrl: "https://api-inference.modelscope.cn/v1"
+    apiKey: "${MODELSCOPE_ACCESS_TOKEN}"
     models: []
 
 # ============================================================================
 # 工具配置
 # ============================================================================
 tools:
-  # 启用的工具列表（留空表示全部启用）
-  enabled: []
-
-  # 禁用的工具列表
-  disabled: []
-
-  # 工具特定配置
+  enabled: []                   # 启用的工具列表（留空表示全部启用）
+  disabled: []                  # 禁用的工具列表
   config:
     shell:
-      # 允许执行的命令白名单（留空表示全部禁止）
-      allowedCommands: []
-      # 禁止执行的命令黑名单
-      blockedCommands: []
+      allowedCommands: []       # 允许的命令白名单（留空表示全部禁止）
+      blockedCommands: []      # 禁止的命令黑名单
 
 # ============================================================================
 # 消息通道配置
 # ============================================================================
 #
-# 所有 Channel 都使用官方 SDK 的 WebSocket/Stream 模式
+# 所有 Channel 使用官方 SDK 的 WebSocket/Stream 模式
 # 无需公网服务器，无需配置回调地址
+# 凭证为空时该 Channel 不会启动
 #
 # 权限控制：
-#   allowFrom: ["*"]        # 允许所有用户
-#   allowFrom: ["user1"]    # 仅允许 user1
-#   allowFrom: []           # 禁止所有用户（未配置时默认允许所有）
+#   allowFrom: ["*"]       # 允许所有用户
+#   allowFrom: ["user1"]   # 仅允许 user1
+#   allowFrom: []          # 禁止所有用户
 #
 # ----------------------------------------------------------------------------
 
 channels:
   # --------------------------------------------------------------------------
-  # QQ 频道机器人
-  # --------------------------------------------------------------------------
-  # 使用 qq-guild-bot SDK
+  # QQ 频道机器人 - https://bot.q.qq.com/
+  # 开通: 创建应用 → 获取 AppID/ClientSecret → 沙箱配置 → 开通 Intents
   #
-  # 开通步骤：
-  # 1. 访问 https://bot.q.qq.com/ 创建机器人应用
-  # 2. 在「开发设置」获取 AppID 和 ClientSecret（注意：Token 已弃用）
-  # 3. 在「沙箱配置」添加测试频道/群/用户
-  # 4. 在「开发设置」→「Intents 事件订阅」开通「频道消息」事件
-  #
-  # 注意：个人助理场景强制使用沙箱环境，不暴露在公共域
+  # Required Intents:
+  #   - GUILDS (接收频道消息)
+  #   - PUBLIC_GUILD_MESSAGES (接收公开频道消息)
+  # 其他事件根据需求开通
   # --------------------------------------------------------------------------
   qq:
     enabled: false
     appId: ""
-    clientSecret: "" # 从 QQ 开放平台「开发设置」获取
+    clientSecret: ""
     sandbox: true
-    allowChannels: [] # 允许的频道列表，["*"] 表示全部
-    allowFrom: [] # 允许的用户列表，["*"] 表示全部
+    allowChannels: []
+    allowFrom: []
 
   # --------------------------------------------------------------------------
-  # 飞书机器人
-  # --------------------------------------------------------------------------
-  # 开通步骤：
-  # 1. 访问 https://open.feishu.cn/app 创建企业自建应用
-  # 2. 在「凭证与基础信息」获取 App ID 和 App Secret
-  # 3. 在「事件订阅」开启以下事件：
-  #    - 接收消息 (im.message.receive_v1)
-  # 4. 在「权限管理」开通以下权限：
-  #    - 获取与发送单聊、群组消息
-  #    - 获取用户基本信息
-  # 5. 发布应用并添加到群聊
+  # 飞书机器人 - https://open.feishu.cn/
+  # 开通: 创建应用 → 获取 AppID/AppSecret → 开通权限 → 发布
+  # 安装: bun add @larksuiteoapi/node-sdk
   #
-  # 安装依赖：bun add @larksuiteoapi/node-sdk
+  # Required Permissions:
+  #   - im:message (接收消息)
+  #   - im:message.receive_v1 (事件订阅)
+  #   - 开启 Stream 模式 (WebSocket 长连接，无需公网 IP)
   # --------------------------------------------------------------------------
   feishu:
     enabled: false
@@ -266,15 +213,13 @@ channels:
     allowFrom: []
 
   # --------------------------------------------------------------------------
-  # 企业微信机器人
-  # --------------------------------------------------------------------------
-  # 智能机器人模式（推荐，支持收发消息）
-  # 开通步骤：
-  # 1. 访问 https://developer.work.weixin.qq.com/ 创建智能机器人应用
-  # 2. 在应用详情获取 Bot ID 和 Secret
-  # 3. 发布机器人并添加到群聊
+  # 企业微信机器人 - https://developer.work.weixin.qq.com/
+  # 开通: 创建应用 → 获取 BotID/Secret → 发布
+  # 安装: bun add @wecom/aibot-node-sdk
   #
-  # 安装依赖：bun add @wecom/aibot-node-sdk
+  # Mode: API 模式机器人 (WebSocket 长连接)
+  #   - 获取 AgentId 和 Secret
+  #   - 使用企业级应用授权登录
   # --------------------------------------------------------------------------
   wechatWork:
     enabled: false
@@ -283,18 +228,15 @@ channels:
     allowFrom: []
 
   # --------------------------------------------------------------------------
-  # 钉钉机器人
-  # --------------------------------------------------------------------------
-  # 开通步骤：
-  # 1. 访问 https://open-dev.dingtalk.com/ 创建企业内部应用
-  # 2. 在「应用信息」获取 AppKey（clientId）和 AppSecret（clientSecret）
-  # 3. 在「权限管理」开通以下权限：
-  #    - 企业内机器人接收消息
-  #    - 机器人消息发送
-  # 4. 在「机器人配置」开启消息接收模式为 Stream 模式
-  # 5. 发布应用并添加到群聊
+  # 钉钉机器人 - https://open-dev.dingtalk.com/
+  # 开通: 创建应用 → 获取 AppKey/AppSecret → 开通权限 → 配置 Stream 模式
+  # 安装: bun add dingtalk-stream-sdk-nodejs
   #
-  # 安装依赖：bun add dingtalk-stream-sdk-nodejs
+  # Mode: Stream 模式 (推荐，无需公网 IP，WebSocket 长连接)
+  # Required Permissions:
+  #   - Card.Streaming.Write (流式卡片)
+  #   - Card.Instance.Write (卡片实例)
+  #   - qyapi_robot_sendmsg (发送消息)
   # --------------------------------------------------------------------------
   dingtalk:
     enabled: false
@@ -306,75 +248,22 @@ channels:
 # 会话配置
 # ============================================================================
 sessions:
-  # 上下文窗口大小（tokens）
-  # 当对话历史超过此 token 数量时，触发智能压缩
-  # 默认 65535 tokens，根据模型上下文长度调整
-  contextWindowTokens: 65535
+  contextWindowTokens: 65535    # 上下文窗口大小（tokens）
+  compressionTokenThreshold: 0.7  # 压缩阈值（0-1），达到此比例触发压缩
 
-  # 压缩阈值（0-1）
-  # 当上下文达到窗口的此比例时触发压缩（默认 0.7，即 70%）
-  # 例如：65535 * 0.7 = 45874 tokens 时开始压缩
-  # 较小的值会更早触发压缩，保持更短的上下文
-  # 较大的值会保留更多上下文，但可能增加 token 消耗
-  compressionTokenThreshold: 0.7
-
-  # 压缩策略配置
-  # 当上下文超过阈值时，根据策略压缩对话历史
   compression:
-    # 压缩策略：sliding-window（滑动窗口）| summarization（摘要）| hybrid（混合）
-    # - sliding-window: 丢弃旧消息，保留最近的消息
-    # - summarization: 使用 LLM 压缩所有历史为摘要
-    # - hybrid: 摘要旧消息 + 保留最近消息（推荐）
-    strategy: hybrid
+    strategy: hybrid            # 压缩策略: sliding-window | summarization | hybrid
+    keepRecentMessages: 10      # hybrid 策略保留的最近消息数
+    # summaryMaxTokens: 1000     # 摘要最大 token 数（绝对值或百分比如 "10%"）
+    enabled: true               # 是否启用压缩
 
-    # 保留最近消息数（hybrid 策略）
-    # 这些消息不会被压缩，保持完整上下文
-    # 默认 10，范围 1-50
-    keepRecentMessages: 10
-
-    # 摘要最大 token 数（hybrid/summarization 策略）
-    # 支持两种格式：
-    #   - 纯数字：绝对 token 数，如 1000
-    #   - 百分比：占 contextWindowTokens 的比例，如 "10%"
-    # 不设置默认 "5%"，建议范围 1% ~ 10%
-    # summaryMaxTokens: 1000      # 绝对值：1000 tokens
-    # summaryMaxTokens: "10%"     # 比例：contextWindowTokens 的 10%
-
-    # 是否启用压缩，默认 true
-    enabled: true
-
-  # 是否启用会话持久化
-  # 开启后重启可恢复上下文，关闭则每次启动都是新会话
-  persist: true
+  persist: true                  # 会话持久化，重启后可恢复上下文
 
 # ============================================================================
 # 日志配置
 # ============================================================================
 logs:
-  # 是否开启敏感信息脱敏
-  # 开启后日志中的 apiKey、token、secret 等敏感字段会被替换为 ***
-  # 默认 true
-  sanitize: true
-
-  # 单个日志文件最大大小（MB）
-  # 当日志文件超过此大小时，自动创建新文件
-  # 默认 10，范围 1-200
-  maxFileSize: 10
-
-  # 控制台日志级别
-  # 控制台只输出此级别及更高级别的日志
-  # 文件日志始终记录所有级别（debug 及以上）
-  # 可选值：debug, info, warning, error
-  # 默认 info
-  level: info
-
-  # 日志文件颗粒度
-  # 格式：数值 + 单位（D=天, H=小时, M=分钟）
-  # 单位决定文件名精度，数值决定时间间隔
-  # 时间范围：最小 30 分钟（30M），最大 7 天（7D）
-  # 示例：
-  #   7D     - 每 7 天一个文件，文件名 2024-01-15.jsonl
-  #   168H   - 每 168 小时（7天）一个文件，文件名 2024-01-15-10.jsonl（精确到小时）
-  #   10080M - 每 10080 分钟（7天）一个文件，文件名 2024-01-15-10-30.jsonl（精确到分钟）
-  # 默认 1H（每小时一个文件）
-  granularity: 1H
+  sanitize: true                 # 敏感信息脱敏（apiKey、token 等替换为 ***）
+  maxFileSize: 10               # 单个日志文件最大大小（MB）
+  level: info                   # 控制台日志级别: debug | info | warning | error
+  granularity: 1H              # 日志文件时间粒度: 30M ~ 7D（数值+单位）
