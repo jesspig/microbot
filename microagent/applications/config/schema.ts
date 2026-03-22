@@ -27,8 +27,8 @@ export const AgentDefaultsConfigSchema = z.strictObject({
   /** Agent 工作目录，所有文件操作都在此目录下进行 */
   workspace: z.string().min(1, "工作目录不能为空"),
 
-  /** 默认使用的模型，格式为 <provider>/<model> */
-  model: z.string().optional(),
+  /** 默认使用的模型，格式为 <provider>/<model>，必填 */
+  model: z.string().min(1, "必须指定默认模型，格式为 <provider>/<model>"),
 
   /** 模型单次回复的最大 token 数 */
   maxTokens: z.number().int().positive().default(8192),
@@ -65,46 +65,15 @@ export type AgentDefaultsConfig = z.infer<typeof AgentDefaultsConfigSchema>;
 // ============================================================================
 
 /**
- * Provider 类型枚举
- */
-export const ProviderTypeSchema = z.enum(["openai", "openai-response", "anthropic", "ollama"]);
-
-/**
- * 验证启用的 Provider 配置
- */
-function validateEnabledProvider(data: { baseUrl?: string; models?: string[] }, ctx: z.RefinementCtx): void {
-  if (!data.baseUrl) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "baseUrl 是必填项", path: ["baseUrl"] });
-    return;
-  }
-
-  try {
-    new URL(data.baseUrl);
-  } catch {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "baseUrl 必须是有效的 URL", path: ["baseUrl"] });
-  }
-
-  if (!data.models || data.models.length === 0) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "models 不能为空", path: ["models"] });
-  }
-}
-
-/**
  * 单个 Provider 配置 Schema
  *
  * 定义单个 LLM Provider 的配置参数
- * 注意：disabled 的 provider 不校验必填字段
+ * 注意：
+ * - 有 baseUrl 时必须验证 URL 格式
+ * - 有 models 时验证是否非空
+ * - 宽松模式：允许仅有 baseUrl 的 provider（用于占位）
  */
 export const SingleProviderConfigSchema = z.object({
-  /** Provider 类型 */
-  type: ProviderTypeSchema,
-
-  /** 是否启用此 Provider */
-  enabled: z.boolean().default(false),
-
-  /** Provider 显示名称（可选） */
-  displayName: z.string().optional(),
-
   /** API 基础 URL */
   baseUrl: z.string().optional(),
 
@@ -114,8 +83,15 @@ export const SingleProviderConfigSchema = z.object({
   /** 支持的模型列表 */
   models: z.array(z.string()).optional(),
 }).superRefine((data, ctx) => {
-  if (data.enabled) {
-    validateEnabledProvider(data, ctx);
+  const hasContent = data.baseUrl || data.apiKey || (data.models && data.models.length > 0);
+  if (!hasContent) return;
+
+  if (data.baseUrl) {
+    try {
+      new URL(data.baseUrl);
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "baseUrl 必须是有效的 URL", path: ["baseUrl"] });
+    }
   }
 });
 

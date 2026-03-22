@@ -45,16 +45,22 @@ export class MicroAgentError extends Error {
    * 转换为可序列化的对象
    */
   toJSON(): Record<string, unknown> {
-    return {
+    const result: Record<string, unknown> = {
       name: this.name,
       message: this.message,
       code: this.code,
       module: this.module,
-      cause: this.cause ? {
+    };
+    if ((this as MicroAgentError & { field?: string }).field) {
+      result.field = (this as MicroAgentError & { field?: string }).field;
+    }
+    if (this.cause) {
+      result.cause = {
         name: this.cause.name,
         message: this.cause.message,
-      } : undefined,
-    };
+      };
+    }
+    return result;
   }
 }
 

@@ -1,22 +1,27 @@
 /**
  * Provider 工厂
  *
- * 负责创建 Provider 实例
+ * 负责根据配置创建 Provider 实例
+ * 通过 URL 模式匹配自动识别 Provider 类型
  */
 
 import type { IProviderExtended } from "../../runtime/index.js";
 import type { Settings } from "../config/index.js";
 import { createOpenAIProvider } from "../providers/openai.js";
-import { createOpenAIResponseProvider } from "../providers/openai-response.js";
 import { createAnthropicProvider } from "../providers/anthropic.js";
 import { createOllamaProvider } from "../providers/ollama.js";
+import { createDeepSeekProvider } from "../providers/deepseek.js";
+import { createGLMProvider } from "../providers/glm.js";
+import { createMoonshotProvider } from "../providers/moonshot.js";
+import { createMiniMaxProvider } from "../providers/minimax.js";
+import { createOpenRouterProvider } from "../providers/openrouter.js";
+import { createNvidiaProvider } from "../providers/nvidia.js";
+import { createModelScopeProvider } from "../providers/modelscope.js";
+import { createOpenAICompatibleProvider } from "../providers/openai-compatible.js";
 import { builderLogger, logMethodCall, logMethodReturn, logMethodError, createTimer } from "../shared/logger.js";
 
 const MODULE_NAME = "ProviderFactory";
 
-/**
- * Provider 配置验证错误
- */
 export class ProviderConfigError extends Error {
   constructor(
     public readonly providerName: string,
@@ -27,36 +32,81 @@ export class ProviderConfigError extends Error {
   }
 }
 
-/**
- * Provider 工厂
- * 负责创建 Provider 实例
- */
+type ProviderCreator = (config: { name: string; baseUrl: string; apiKey: string; models: string[] }) => IProviderExtended;
+
+interface ProviderMatcher {
+  patterns: RegExp[];
+  creator: ProviderCreator;
+}
+
+const PROVIDER_MATCHERS: ProviderMatcher[] = [
+  {
+    patterns: [/api\.anthropic\.com/i],
+    creator: ({ name, baseUrl, apiKey, models }) => createAnthropicProvider({ name, baseUrl, apiKey, models }),
+  },
+  {
+    patterns: [/api\.deepseek\.com/i],
+    creator: ({ name, baseUrl, apiKey, models }) => createDeepSeekProvider({ name, baseUrl, apiKey, models }),
+  },
+  {
+    patterns: [/api\.moonshot\.cn/i],
+    creator: ({ name, baseUrl, apiKey, models }) => createMoonshotProvider({ name, baseUrl, apiKey, models }),
+  },
+  {
+    patterns: [/api\.minimax\.chat/i],
+    creator: ({ name, baseUrl, apiKey, models }) => createMiniMaxProvider({ name, baseUrl, apiKey, models }),
+  },
+  {
+    patterns: [/openrouter\.ai/i],
+    creator: ({ name, baseUrl, apiKey, models }) => createOpenRouterProvider({ name, baseUrl, apiKey, models }),
+  },
+  {
+    patterns: [/integrate\.api\.nvidia\.com/i],
+    creator: ({ name, baseUrl, apiKey, models }) => createNvidiaProvider({ name, baseUrl, apiKey, models }),
+  },
+  {
+    patterns: [/api-inference\.modelscope\.cn/i],
+    creator: ({ name, baseUrl, apiKey, models }) => createModelScopeProvider({ name, baseUrl, apiKey, models }),
+  },
+  {
+    patterns: [/open\.bigmodel\.cn/i, /api\.z\.ai/i],
+    creator: ({ name, baseUrl, apiKey, models }) => createGLMProvider({ name, baseUrl, apiKey, models }),
+  },
+  {
+    patterns: [/localhost:11434/i, /ollama/i],
+    creator: ({ name, baseUrl, apiKey, models }) => createOllamaProvider({ name, baseUrl, apiKey, models }),
+  },
+  {
+    patterns: [/api\.openai\.com/i],
+    creator: ({ name, baseUrl, apiKey, models }) => createOpenAIProvider({ name, baseUrl, apiKey, models }),
+  },
+];
+
+function matchProviderByUrl(baseUrl: string): ProviderCreator | null {
+  for (const matcher of PROVIDER_MATCHERS) {
+    for (const pattern of matcher.patterns) {
+      if (pattern.test(baseUrl)) {
+        return matcher.creator;
+      }
+    }
+  }
+  return null;
+}
+
 export class ProviderFactory {
-  /** 自定义 Provider */
   private customProvider: IProviderExtended | null = null;
 
-  /**
-   * 设置自定义 Provider
-   * @param provider - Provider 实例
-   */
   withCustomProvider(provider: IProviderExtended): this {
     this.customProvider = provider;
     return this;
   }
 
-  /**
-   * 创建 Provider 实例
-   * @param settings - 配置对象
-   * @param model - 模型名称（可选）
-   * @returns Provider 实例
-   */
   async create(settings: Settings, model?: string): Promise<IProviderExtended> {
     const timer = createTimer();
     const logger = builderLogger();
     logMethodCall(logger, { method: "create", module: MODULE_NAME });
 
     try {
-      // 使用自定义 Provider
       if (this.customProvider) {
         logger.debug("使用自定义 Provider", { hasCustomProvider: true });
         logMethodReturn(logger, { method: "create", module: MODULE_NAME, result: { type: "custom" }, duration: timer() });
@@ -66,56 +116,77 @@ export class ProviderFactory {
       const providers = settings.providers ?? {};
       const targetModel = model ?? settings.agents?.defaults?.model ?? "";
 
-      // 解析模型名中的 provider 前缀
-      const slashIndex = targetModel.indexOf("/");
+      // 从模型名解析 provider 名称
+      // 格式：<provider>/<model> 或 <provider>/<subprovider>/<model>
       let targetProviderName: string | null = null;
-
-      if (slashIndex >= 0) {
-        targetProviderName = targetModel.substring(0, slashIndex);
+      const firstSlash = targetModel.indexOf("/");
+      if (firstSlash > 0) {
+        targetProviderName = targetModel.substring(0, firstSlash);
       }
 
-      // 根据 provider 前缀或默认选择 Provider
+      // 查找 provider 配置
       let selectedProvider: [string, typeof providers[string]] | null = null;
 
       if (targetProviderName) {
-        // 模型名包含 provider 前缀，直接查找该 provider
+        // 优先使用模型名中指定的 provider
         const config = providers[targetProviderName];
-        if (!config) {
-          throw new ProviderConfigError(targetProviderName, `不存在于 providers 配置中（模型: ${targetModel}）`);
+        if (config?.baseUrl || config?.apiKey || (config?.models && config.models.length > 0)) {
+          selectedProvider = [targetProviderName, config];
         }
-        if (!config.enabled) {
-          throw new ProviderConfigError(targetProviderName, `未启用，请设置 providers.${targetProviderName}.enabled: true`);
-        }
-        selectedProvider = [targetProviderName, config];
-      } else {
-        // 模型名不含 provider 前缀，选择第一个启用的 provider
-        const enabledProvider = Object.entries(providers).find(
-          ([_, config]) => config?.enabled === true
-        );
-        if (!enabledProvider) {
-          throw new Error("未找到已启用的 Provider 配置");
-        }
-        selectedProvider = enabledProvider;
+      }
+
+      // 如果模型中没有指定 provider 或配置不存在，选择第一个有 apiKey 的
+      if (!selectedProvider) {
+        selectedProvider = Object.entries(providers).find(
+          ([_, config]) => config?.apiKey
+        ) ?? null;
+      }
+
+      // 最后兜底：选择第一个有配置的
+      if (!selectedProvider) {
+        selectedProvider = Object.entries(providers).find(
+          ([_, config]) => config?.baseUrl || (config?.models && config.models.length > 0)
+        ) ?? null;
+      }
+
+      if (!selectedProvider) {
+        throw new Error("未找到已配置的 Provider");
       }
 
       const [providerName, providerConfig] = selectedProvider;
+
+      logger.debug("选择的 Provider", {
+        providerName,
+        model: targetModel,
+      });
 
       if (!providerConfig) {
         throw new ProviderConfigError(providerName, "配置不存在");
       }
 
-      // 验证必填字段
-      this.validateProviderConfig(providerName, providerConfig);
+      const baseUrl = providerConfig.baseUrl!;
+      const apiKey = providerConfig.apiKey ?? "";
+      const models = providerConfig.models ?? [];
 
-      logger.debug("创建 Provider", { providerName, type: providerConfig.type });
+      if (!baseUrl) {
+        throw new ProviderConfigError(providerName, "缺少 baseUrl 配置");
+      }
 
-      // 根据 type 字段创建对应的 Provider
-      const provider = this.createProviderByName(providerName, providerConfig);
+      const creator = matchProviderByUrl(baseUrl);
+      const provider = creator
+        ? creator({ name: providerName, baseUrl, apiKey, models })
+        : createOpenAICompatibleProvider({ name: providerName, baseUrl, apiKey, models });
+
+      logger.debug("创建 Provider", {
+        providerName,
+        baseUrl,
+        matchedBy: creator ? "url-pattern" : "fallback-openai-compatible",
+      });
 
       logMethodReturn(logger, {
         method: "create",
         module: MODULE_NAME,
-        result: { providerName, type: providerConfig.type, modelsCount: providerConfig.models.length },
+        result: { providerName, modelsCount: models.length },
         duration: timer(),
       });
 
@@ -129,73 +200,6 @@ export class ProviderFactory {
         duration: timer(),
       });
       throw error;
-    }
-  }
-
-  /**
-   * 验证 Provider 配置
-   * @param providerName - Provider 名称
-   * @param config - Provider 配置
-   * @throws ProviderConfigError 配置无效时
-   */
-  private validateProviderConfig(providerName: string, config: {
-    baseUrl?: string;
-    models?: string[];
-  }): void {
-    if (!config.baseUrl) {
-      throw new ProviderConfigError(providerName, "缺少 baseUrl 配置");
-    }
-    if (!config.models || config.models.length === 0) {
-      throw new ProviderConfigError(providerName, "缺少 models 配置");
-    }
-  }
-
-  /**
-   * 根据 Provider 类型创建实例
-   * @param providerName - Provider 名称
-   * @param providerConfig - Provider 配置
-   * @returns Provider 实例
-   */
-  private createProviderByName(
-    providerName: string,
-    providerConfig: { type: string; baseUrl: string; apiKey?: string; models: string[] }
-  ): IProviderExtended {
-    switch (providerConfig.type) {
-      case "openai":
-        return createOpenAIProvider({
-          name: providerName,
-          displayName: providerName,
-          baseUrl: providerConfig.baseUrl,
-          ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
-          models: providerConfig.models,
-        });
-
-      case "openai-response":
-        return createOpenAIResponseProvider({
-          name: providerName,
-          displayName: providerName,
-          baseUrl: providerConfig.baseUrl,
-          ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
-          models: providerConfig.models,
-        });
-
-      case "anthropic":
-        return createAnthropicProvider({
-          name: providerName,
-          displayName: providerName,
-          baseUrl: providerConfig.baseUrl,
-          ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
-          models: providerConfig.models,
-        });
-
-      case "ollama":
-        return createOllamaProvider({
-          baseUrl: providerConfig.baseUrl,
-          models: providerConfig.models,
-        });
-
-      default:
-        throw new ProviderConfigError(providerName, `未知的 Provider 类型: ${providerConfig.type}`);
     }
   }
 }

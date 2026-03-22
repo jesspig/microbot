@@ -43,14 +43,9 @@ export async function runAgentService(
   logMethodCall(logger, { method: "runAgentService", module: MODULE_NAME, params: { channelCount: channels.length } });
 
   // 创建 AgentLoop
-  // 处理模型名：剥离 provider 前缀
-  let model = settings.agents?.defaults?.model ?? "default";
-  const slashIndex = model.indexOf("/");
-  if (slashIndex >= 0) {
-    const originalModel = model;
-    model = model.substring(slashIndex + 1);
-    logger.debug("剥离模型 provider 前缀", { originalModel, strippedModel: model });
-  }
+  // 保留完整模型名（包括 subprovider）
+  // 例如：nvidia/z-ai/glm4.7, openrouter/stepfun/step-3.5-flash:free
+  const model = settings.agents?.defaults?.model ?? "default";
 
   const agentConfig: AgentConfig = {
     model,
